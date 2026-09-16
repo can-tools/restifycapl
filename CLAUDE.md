@@ -51,7 +51,7 @@ docs/      project documentation
 
 ## Agents
 
-See `.claude/agents/`: `planner`, `cpp-implementer`,
+See `.claude/agents/`: `planner`, `plan-writer`, `cpp-implementer`,
 `build-pipeline-engineer`, `test-engineer`, `code-reviewer`. Start new
 features or non-trivial changes with `planner` before implementation.
 Delegate build/CI work, testing, and export-contract-sensitive review to
@@ -64,3 +64,21 @@ kept in `docs/planning/` and intended primarily for the `planner` agent.
 This is a convention, not an enforced access boundary — Claude Code's
 permission rules are global, not per-subagent. Do not put anything there
 that must never be visible to other agents in the same session.
+
+## Saving plans
+
+`planner` never writes files itself. Once a plan is finished and you
+approve it, `planner` delegates persisting it to `plan-writer` (which has
+`Write` and the `save-plan` skill) via the `Agent` tool. `plan-writer`
+saves the plan verbatim to `docs/work/<slug>/plans/plan.md`. This works in
+a single window/session, including when `planner` is run standalone via
+`claude --agent planner` — `planner` still never touches disk itself, it
+only asks `plan-writer` to.
+
+## Relaying subagent output
+
+When relaying the output of any subagent (especially `planner` and
+`code-reviewer`) to the user, always show the full text verbatim. Never
+summarize, shorten, or paraphrase a subagent's response on your own — the
+user needs the complete plan or review, not your interpretation of it. If
+the output is long, show it in full anyway rather than trimming it.
