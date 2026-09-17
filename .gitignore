@@ -69,4 +69,4 @@ Testing/
 .cache/
 
 #local documentation
-docs/.locals
+docs/.locals/

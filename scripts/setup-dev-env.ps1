@@ -86,19 +86,9 @@ $SdkDir     = Join-Path $VendorDir 'capl-dll-sdk'
 $JsonHppDst = Join-Path $VendorDir 'json.hpp'
 
 # nlohmann/json v3.11.3 amalgamated single header, pinned per
-# msvc-build-conventions. SHA-256 below was NOT taken on trust from any
-# third-party listing -- it was independently computed on 2026-09-17 from
-# two sources that must agree for the pin to be trustworthy:
-#   (a) the official GitHub Release asset:
-#       https://github.com/nlohmann/json/releases/download/v3.11.3/json.hpp
-#   (b) the raw v3.11.3 tag content:
-#       https://raw.githubusercontent.com/nlohmann/json/v3.11.3/single_include/nlohmann/json.hpp
-# Both downloads were byte-identical (919975 bytes) and hashed to the same
-# value, and the file's own NLOHMANN_JSON_VERSION_{MAJOR,MINOR,PATCH}
-# macros read 3.11.3. A commonly-quoted checksum for this file
-# (a22461d13119ac5c78f205d3df1db13403e58ce1bb1794469ccb779b737395bc) does
-# NOT match either official download and must not be used -- re-verify
-# against the two sources above before ever changing this constant.
+# msvc-build-conventions. Hash independently re-verified from two official
+# sources, not taken from a third-party listing.
+# Rationale: see docs/development-environment.md#jsonhpp-sha-256-verification
 $JsonHppVersion = '3.11.3'
 $JsonHppUrl     = 'https://github.com/nlohmann/json/releases/download/v3.11.3/json.hpp'
 $JsonHppSha256  = '9BEA4C8066EF4A1C206B2BE5A36302F8926F7FDC6087AF5D20B417D0CF103EA6'
@@ -276,30 +266,16 @@ function Test-NativeToolsArch {
         [Parameter(Mandatory)][ValidateSet('x86', 'x64')][string]$Arch
     )
 
-    # Run in a throwaway cmd.exe subshell so this doesn't pollute the
-    # current PowerShell session's environment, and so each architecture
-    # gets a clean environment rather than a stacked one.
+    # Throwaway cmd.exe subshell per architecture: keeps this out of the
+    # current PowerShell session's environment and avoids a stacked env.
     #
-    # Two separate invocations, deliberately not chained with `&&` into one
-    # exit-code-gated command:
-    #   1. Below, `where cl & where rc & where link & where dumpbin` are
-    #      joined with bare `&`, not `&&`, so all four always run regardless
-    #      of whether an earlier one failed to resolve -- this is
-    #      deliberate: it means $LASTEXITCODE here only reflects the *last*
-    #      command in the chain (`where dumpbin`), NOT a logical AND of all
-    #      four, so it is NOT on its own a meaningful "all four resolved"
-    #      signal. That's fine because it is never used alone -- the
-    #      foreach loop right below independently and authoritatively
-    #      re-checks that all four tool names appear in the captured output
-    #      text, regardless of exit code. Running every `where` unconditionally
-    #      (rather than short-circuiting on the first failure) is what makes
-    #      that per-tool re-check possible: if an early tool fails to
-    #      resolve, the later ones still run and still get checked, so a
-    #      single pass reports every missing tool instead of only the first.
-    #   2. Echoing %VSCMD_ARG_TGT_ARCH% (see below) is a separate invocation
-    #      so a `where`-probe failure and an architecture mismatch are
-    #      reported as distinct, unambiguous reasons rather than conflated
-    #      into one command's exit code.
+    # `where` probes below are chained with bare `&`, not `&&`, so all four
+    # always run even if an earlier one fails to resolve; the per-tool
+    # re-check after this call is what actually verifies success, not
+    # $LASTEXITCODE. The architecture check further below is a deliberately
+    # separate invocation, so a missing-tool failure and an architecture
+    # mismatch are reported as distinct reasons.
+    # Rationale: see docs/development-environment.md#where-probes-chained-with-bare--not-
     $whereCmdLine = "call `"$VcvarsallPath`" $Arch >nul 2>&1 && where cl & where rc & where link & where dumpbin"
     $whereOutput = & cmd.exe /c $whereCmdLine 2>&1
     $whereExitCode = $LASTEXITCODE
@@ -315,45 +291,22 @@ function Test-NativeToolsArch {
         }
     }
 
-    # Architecture confirmation deliberately does NOT parse cl.exe's version
-    # banner text. That banner is localized to the MSVC install's UI
-    # language (e.g. on a Polish-language Build Tools install, cl prints
-    # "...dla architektury x86" / "...dla x64" -- neither of which contains
-    # the literal English substring "for x86"/"for x64"), so matching
-    # English text against it is inherently locale-fragile and was
-    # confirmed to false-FAIL on a real, correctly-configured install.
-    #
-    # Instead, use VSCMD_ARG_TGT_ARCH: vcvarsall.bat sets this itself (it
-    # drives the rest of vcvarsall's own logic), it is not translated, and
-    # its value is exactly "x86" or "x64" -- an authoritative,
-    # locale-independent signal for which architecture the environment was
-    # actually initialized for.
-    #
-    # This must use delayed expansion (`!VAR!`), NOT `%VAR%`, and the
-    # `cmd.exe` invocation itself must be started with `/v:on`. cmd.exe
-    # expands every `%VAR%` in a compound command line (things chained with
-    # `&&`) once, at parse time, before ANY command in that line has
-    # actually run -- so with plain `%VSCMD_ARG_TGT_ARCH%` here, the
-    # variable is (correctly, per cmd.exe's own rules) substituted before
-    # `call vcvarsall.bat` has had a chance to set it, since it is undefined
-    # at parse time it is left as the literal text `%VSCMD_ARG_TGT_ARCH%`
-    # rather than empty string -- this was confirmed empirically (both on a
-    # real install and by design) and is exactly the FAIL text this
-    # function used to produce. `/v:on` turns on delayed expansion for the
-    # whole invocation *before* parsing begins, so `!VSCMD_ARG_TGT_ARCH!` is
-    # resolved lazily, at execution time, after vcvarsall.bat has run.
-    # Adding `setlocal enabledelayedexpansion` mid-line instead does NOT
-    # work: the compound line is still parsed as a whole before any command
-    # in it executes, so turning on delayed expansion partway through does
-    # not retroactively change how the rest of that already-parsed line
-    # resolves `!VAR!` references -- confirmed empirically to still return
-    # the literal `!VSCMD_ARG_TGT_ARCH!` text. `/v:on` is the only fix that
-    # works for this single-line chained shape.
+    # Confirms the target architecture via %VSCMD_ARG_TGT_ARCH% (set by
+    # vcvarsall.bat itself, locale-independent) rather than parsing cl.exe's
+    # localized banner text. Requires delayed expansion (`!VAR!` + cmd.exe
+    # `/v:on`), not `%VAR%` -- plain `%VAR%` expands at parse time, before
+    # vcvarsall.bat has run, and would resolve to the literal token instead
+    # of the value.
+    # Rationale: see docs/development-environment.md#native-tools-architecture-detection-test-nativetoolsarch
     $archCmdLine = "call `"$VcvarsallPath`" $Arch >nul 2>&1 && echo !VSCMD_ARG_TGT_ARCH!"
     $archOutputText = ((& cmd.exe /v:on /c $archCmdLine 2>&1) -join "`n").Trim()
 
     if ($archOutputText -ne $Arch) {
-        return [PSCustomObject]@{ Ok = $false; Reason = "VSCMD_ARG_TGT_ARCH after vcvarsall.bat $Arch was '$archOutputText', expected '$Arch' -- wrong-architecture Native Tools environment." }
+        # Display '(unset)' instead of the raw output when the variable never
+        # resolved (empty, or the literal undelayed token) -- clearer than
+        # printing '!VSCMD_ARG_TGT_ARCH!' verbatim in the FAIL message.
+        $archDisplay = if ([string]::IsNullOrWhiteSpace($archOutputText) -or $archOutputText -eq '!VSCMD_ARG_TGT_ARCH!') { '(unset)' } else { $archOutputText }
+        return [PSCustomObject]@{ Ok = $false; Reason = "VSCMD_ARG_TGT_ARCH after vcvarsall.bat $Arch was '$archDisplay', expected '$Arch' -- wrong-architecture Native Tools environment." }
     }
 
     return [PSCustomObject]@{ Ok = $true; Reason = 'OK' }
@@ -400,14 +353,9 @@ Invoke-Step -Name 'make' -Body {
         return
     }
 
-    # Preference order and rationale (judgment call -- flagged in the
-    # hand-off report, not mandated by the plan):
-    #   1. Scoop  -- per-user installs, never needs elevation.
-    #   2. an existing MSYS2 install (pacman) -- common on dev machines,
-    #      no extra package manager to bootstrap.
-    #   3. Chocolatey -- ubiquitous but installs to a machine-wide location
-    #      and needs elevation.
-    #   4. Fall back to reporting exact manual commands for all three.
+    # Preference order: Scoop, then existing MSYS2, then Chocolatey, then
+    # manual instructions (judgment call, not mandated by the plan).
+    # Rationale: see docs/development-environment.md#make-installer-preference-order
     if (Get-Command scoop -ErrorAction SilentlyContinue) {
         Add-Result -Step 'make' -Status 'WARN' -Message 'Not found; installing via Scoop.'
         & scoop install make 2>&1 | Out-Null
@@ -517,17 +465,10 @@ function Install-CurlTriplet {
         [Parameter(Mandatory)][ValidateSet('x86-windows-static', 'x64-windows-static')][string]$Triplet
     )
 
-    # NOTE: no explicit "schannel" feature here. The current vcpkg curl port
-    # (checked against port version curl 8.22.0-1) has no feature named
-    # "schannel" -- `vcpkg install curl[schannel]:...` fails outright with
-    # "curl has no feature named schannel." SChannel is instead wired in
-    # automatically: curl's default-features include "ssl", and on
-    # Windows (non-UWP), portfile.cmake adds -DCURL_USE_SCHANNEL=ON
-    # whenever "ssl" is enabled and "http3" is not. So plain `curl:$Triplet`
-    # already builds against SChannel with no OpenSSL dependency, matching
-    # msvc-build-conventions' intent. If a future vcpkg port revision
-    # reintroduces an explicit opt-in feature for this, re-add it here and
-    # update msvc-build-conventions accordingly.
+    # No explicit "schannel" feature: the current vcpkg curl port has no
+    # such feature, and SChannel is already wired in automatically via
+    # curl's default "ssl" feature on Windows.
+    # Rationale: see docs/development-environment.md#curl-no-schannel-vcpkg-feature
     $package = "curl:$Triplet"
 
     # Capture vcpkg's own stdout+stderr instead of discarding it, so a FAIL

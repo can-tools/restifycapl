@@ -34,8 +34,14 @@ one of them should link to the other instead.
 - Keep it short. Link to `CLAUDE.md` for anything a contributor or agent
   needs; don't duplicate the Directory layout or Build sections there.
 - Update it at these points, not continuously:
+  - Development-environment-setup guidance (what `scripts/setup-dev-env.ps1`
+    provisions and how to run it, linking to
+    `docs/development-environment.md` for the detailed rationale) can land
+    as soon as the script itself is real and proven — this is independent
+    of, and not gated by, the build/usage-from-CAPL content below.
   - After Stage 5 (Hello DLL proven in CANoe): add a real, verified
-    build/usage snippet — not before, since there's nothing real to show.
+    build/usage-from-CAPL snippet — not before, since there's nothing real
+    to show.
   - After each export-contract-append stage (Stages 9–12): update the
     operations summary to reflect what's actually exported.
   - After Stage 13 (release pipeline live): add install/download
