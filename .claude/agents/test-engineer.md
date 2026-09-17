@@ -1,6 +1,6 @@
 ---
 name: test-engineer
-description: Designs and implements GoogleTest unit tests for CAPL REST DLL logic (JSON parsing, struct mapping, type conversion, request building) in isolation from CANoe. Use after implementing or changing logic in src/.
+description: Designs and implements GoogleTest unit tests for CAPL REST DLL logic (type conversion, JSON path resolution, HTTP client, sync/async operations, JSON flattening, JSON accessors) in isolation from CANoe. Use after implementing or changing logic in src/.
 tools: Read, Glob, Grep, Edit, Write, Bash
 model: sonnet
 skills:

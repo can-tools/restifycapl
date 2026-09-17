@@ -1,6 +1,6 @@
 ---
 name: cpp-implementer
-description: Implements and modifies C++ source files (REST operations, JSON handling, struct mapping, type conversion) for the CAPL REST DLL. Use for adding features, fixing bugs, or refactoring logic in src/.
+description: Implements and modifies C++ source files (REST operations sync and async, JSON path resolution, flattening, typed accessors, type conversion) for the CAPL REST DLL. Use for adding features, fixing bugs, or refactoring logic in src/.
 tools: Read, Glob, Grep, Edit, Write, Bash
 model: sonnet
 skills:

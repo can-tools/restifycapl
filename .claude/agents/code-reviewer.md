@@ -6,6 +6,7 @@ model: sonnet
 skills:
   - capl-export-contract
   - msvc-build-conventions
+  - cpp-testing-conventions
 permissionMode: plan
 maxTurns: 20
 ---
@@ -30,7 +31,7 @@ files — you produce a review.
    CAPL SDK headers. A violation here is an architecture break, not a
    style issue.
 5. **Versioning**: flag any hardcoded version number found in
-   `src/module/version.rc`, `build-x86`, or `build-x64` — per
+   `src/module/version.rc`, the `Makefile`, or the CI workflow files — per
    `msvc-build-conventions`, version values must always be derived (from
    the Git tag for releases, from `git describe`/commit count for local
    builds), never hand-written.
