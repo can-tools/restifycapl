@@ -14,12 +14,13 @@ You are a test engineer for the CAPL REST DLL project, using GoogleTest.
 
 ## Responsibilities
 
-- Write and maintain unit tests in `tests/`, mirroring `src/` module names
-  (e.g. tests for `json-path-resolver.cpp` live in a matching test file).
-- Prioritize testing: `json-path-resolver`, `type-converters`,
-  `struct-mapping`, `json-flatten`, `json-helpers`, `request-builder`, and
-  any pure logic extracted from `sync-rest-operations` /
-  `async-rest-operations`.
+- Write and maintain unit tests in `tests/`, mirroring the layered `src/`
+  layout: `tests/core/`, `tests/http/`, `tests/mapping/` (and `tests/registry/`
+  only if that module is ever built).
+- Test targets, in build order: `type-conversion`, `json-path` (core);
+  `http-client`, `sync-operations`, `async-operations` (http); `json-flatten`,
+  `json-accessors` (mapping). `struct-registry` and `struct-mapping` are
+  deferred and out of scope unless explicitly reactivated.
 - Mock or fake external boundaries — HTTP calls (libcurl), the filesystem,
   timers — rather than hitting real network endpoints in unit tests.
 

@@ -1,528 +1,412 @@
-<!-- Produced by: planner agent, 2026-09-17 -->
+# Plan (v5): Build the CAPL REST DLL (restifycapl) from zero
 
-# Plan (FINAL, v4): Build the CAPL REST DLL (restifycapl) from zero
-
-Supersedes v1–v3. All questions resolved; nothing is blocking.
-
----
-
-## 0. Current state, verified
-
-**No code yet.** `src/`, `lib/`, `tests/`, `scripts/`, `examples/`, `Makefile` do not exist. Tracked: `CLAUDE.md`, `README.md`, `.gitignore`, `.claude/`, `docs/`, `include/vendor/`.
-
-**`.gitignore`: fixed by the user.** Line 35 is `#*.lib`, line 51 is `# Makefile`. Commenting rather than deleting is the better choice — it leaves a visible trace of why a standard-looking line was disabled. Remaining work is cosmetic: drop the dead `build-*/` (line 45, a leftover from the abandoned `build-32b/` naming) and annotate lines 35 and 51 with *why* they're off, or a future tidy-up of the "CMake generated files" block will silently re-break `Makefile` tracking.
-
-**SDK headers: present and tracked, but flat.** At `include/vendor/cdll.h`, `VIA.h`, `VIA_CDLL.h`; they belong in `include/vendor/capl-dll-sdk/`. `json.hpp` is about to land in `include/vendor/` too, and mixing Vector's three licensed headers flat beside nlohmann's one destroys the "what's foreign, and whose" separation that is the entire justification for `vendor/` in 04-FLOW section 3.3. It also keeps the licensing boundary confined to one directory.
-
-**Struct mapping and request building remain conditional** per 04-FLOW section 4 (Step 6 "only if actually needed", Step 7 "(optional)").
+Revision of v4. Changes in this revision: consistent phase/stage numbering, per-agent task breakdowns, corrected configuration scope, and CI moved earlier.
 
 ---
 
 ## 1. Goal
 
-Build the CAPL REST DLL (`restifycapl`) from the cloned repository to a working, dual-architecture (x86 + x64) native CANoe plugin: synchronous and asynchronous REST/HTTP for CAPL scripts plus JSON flattening and typed path accessors, with struct mapping and CAPL-side request building deferred until a real need appears. Local environment setup is scripted wherever possible. The CANoe ABI is proven on one trivial operation before any REST logic exists. All business logic is unit-tested outside CANoe. The export table stays a thin, append-only glue layer. Every version number derives from the Git tag.
+Build the CAPL REST DLL (`restifycapl`) from the cloned repository to a working, dual-architecture (x86 + x64) native CANoe plugin: synchronous and asynchronous REST/HTTP for CAPL scripts plus JSON flattening and typed path accessors. Struct mapping and CAPL-side request building stay deferred until a demonstrated need. Environment setup is scripted wherever possible. The CANoe ABI is proven on one trivial operation before any REST logic exists. All business logic is unit-tested outside CANoe. The export table stays a thin, append-only glue layer. Every version number derives from the Git tag.
 
 ---
 
-## 2. Decisions — all resolved
+## 2. Current state, verified
 
-| # | Decision |
-|---|---|
-| **Layout** | 04-FLOW section 3.3 authoritative: `src/core/`, `src/http/`, `src/registry/`, `src/mapping/`, `src/module/`; `lib/x86/`, `lib/x64/`; `build/x86/`, `build/x64/`; `include/vendor/`; `tests/`; `examples/`; plus `scripts/`. Export table at `src/module/exports.cpp` with `exports.def` and `version.rc` beside it. Headers sit next to their `.cpp`, so `include/` holds only `vendor/`. |
-| **CANoe verification** | Manual CANoe verification after a green build + `tests/` suite, before release. |
-| **SDK headers** | Committed to the repository. **The repo is public and the user has decided to keep them there anyway — an explicit, conscious call.** Consequence: CI compiles `src/module/` and links both DLLs; no split-responsibility CI design. |
-| **Scope** | 04-FLOW section 4 exactly. Steps 0–5 and 8 in scope; Steps 6 and 7 conditional. |
-| **libcurl** | vcpkg, `curl[schannel]:x86-windows-static` + `:x64-windows-static`. `/MT` by default. zlib transitive. Manual source build is fallback only. |
-| **JSON** | nlohmann/json `json.hpp` pinned to **v3.11.3**, from the Releases page (amalgamated single file), SHA-256 verified. Not `git clone`. |
-| **Release policy** | Build + test on every push → explicit manual approval gate → publish to GitHub Releases. |
-| **Versioning** | Git tag `vX.Y.Z` is the single source of truth. Release: CI strips `v`, feeds `X.Y` to `/VERSION:` and `major,minor,build,revision` to `FILEVERSION`/`PRODUCTVERSION` via `rc.exe /D`. Local: placeholder `0.0` with build/revision from `git rev-list --count <tag>..HEAD`; `StringFileInfo` from `git describe --tags --always --dirty`. `version.rc` carries `#ifndef` fallbacks. Owned exclusively by `build-pipeline-engineer`. |
-| **DLL names** | `build/x86/restifycapl-x86.dll` and `build/x64/restifycapl-x64.dll`. |
-| **Make targets** | **Renamed for consistency: `build-x86` / `build-x64`** (plus `all`, `test`, `clean`). Every file referencing `build32`/`build64` is updated in Stage 0A. |
-| **Toolchain** | **Visual Studio Build Tools, not the full VS IDE.** Development happens in VS Code. |
-| **Environment setup** | Scripted via `scripts/setup-dev-env.ps1`; only the CANoe install and the in-CANoe smoke test stay manual. 04-FLOW section 6.2 is updated to match. |
+**Completed** — six configuration files already reflect the target state: `CLAUDE.md`, `.claude/skills/msvc-build-conventions/SKILL.md`, `.claude/skills/capl-export-contract/SKILL.md`, `.claude/agents/code-reviewer.md`, `.claude/agents/cpp-implementer.md`, `.claude/settings.json`.
+
+**Still stale — four items v4 missed or under-specified:**
+
+- `.claude/agents/build-pipeline-engineer.md` — still says `build32`/`build64` in three places (frontmatter description, responsibilities bullet 1, hard rule 4) and references `version.rc` without its path. v4 listed this file under "source files" but never wrote an edit spec for it.
+- `.claude/agents/test-engineer.md` — still names previous-iteration modules (`json-path-resolver`, `type-converters`, `json-helpers`, `request-builder`, `sync-rest-operations`, `async-rest-operations`). Never mentioned in v4.
+- `.claude/skills/cpp-testing-conventions/SKILL.md` — same stale module names. Never mentioned in v4.
+- `docs/.locals/04-FLOW-AND-DEPENDENCIES.md` — §6.2 still concludes "a dedicated script to bootstrap the whole project isn't needed here"; §6.1 and §6.3 still say install full Visual Studio. Both contradict decisions already made.
+
+**Also outstanding:** the three Vector SDK headers are still flat at `include/vendor/cdll.h`, `VIA.h`, `VIA_CDLL.h` and need to move into `include/vendor/capl-dll-sdk/`.
+
+**Not started:** no `src/`, `lib/`, `tests/`, `scripts/`, `examples/`, `Makefile`, or `.github/` exist.
 
 ---
 
-## 3. Two explanations the user asked for
+## 3. Numbering scheme
 
-### 3.1 Why the `.def` file must not contain a `LIBRARY` line
+v4 used `P → 0A → 0B → 1…11` with conditional `9`/`10` — inconsistent, and requiring the reader to remember why a stage was `0A` rather than `1`. Replaced by **six phases containing sixteen sequentially numbered stages**, no letter suffixes, no gaps:
 
-A module-definition (`.def`) file is a small text file telling the linker which symbols a DLL exposes. Ours, `src/module/exports.def`, should contain only:
+| Phase | Stages | Theme |
+|---|---|---|
+| **Phase 1 — Foundation & Environment** | 1–4 | Config correctness, scripted bootstrap, manual CANoe setup, repo skeleton |
+| **Phase 2 — ABI Proof & Continuous Verification** | 5–6 | Hello DLL in CANoe, then CI running on every push |
+| **Phase 3 — Business Logic & CAPL Surface** | 7–12 | Core logic, HTTP, async, flattening, accessors |
+| **Phase 4 — Release Pipeline** | 13 | Tag-driven versioning, approval gate, publish |
+| **Phase 5 — Hardening** | 14 | Cleanup and consistency |
+| **Phase 6 — Conditional Extensions** | 15–16 | Only on demonstrated need |
 
-```
-EXPORTS
-    CAPLDLLEntryPoint
-```
+Mapping from v4: `P1→2`, `P2→3`, `0A→1`, `0B→4`, `1→5`, `2→7`, `3→8`, `4→9`, `5→10`, `6→11`, `7→12`, `8→6 and 13` (split), `11→14`, `9→15`, `10→16`.
 
-Some `.def` files also open with a `LIBRARY` line:
-
-```
-LIBRARY restifycapl-x86
-EXPORTS
-    CAPLDLLEntryPoint
-```
-
-That line names the module. It's a leftover from 16-bit Windows, where the name written in the `.def` genuinely determined the module's identity. On modern MSVC it is optional, and the linker's `/OUT:` flag decides the real filename — but the name still gets recorded inside the DLL, and when it disagrees with `/OUT:` some toolchains warn and older ones enforce it.
-
-Why it matters *here* specifically: we build **two** DLLs with **two different filenames** (`restifycapl-x86.dll`, `restifycapl-x64.dll`) from **one shared** `exports.def`. A single `LIBRARY` line can only ever be correct for one of them. That would force one of two bad options:
-
-- maintain **two nearly identical `.def` files** differing in one line — which reintroduces the exact "keep two files manually in sync" drift risk this whole plan is designed to remove, and does so on the most contract-critical file in the project; or
-- **generate** the `.def` at build time — extra machinery for no benefit.
-
-Omitting `LIBRARY` avoids the problem entirely: `/OUT:build/x86/restifycapl-x86.dll` and `/OUT:build/x64/restifycapl-x64.dll` each set their own name, and one `.def` serves both architectures. This is also normal modern practice regardless of our two-name situation.
-
-**Concrete rule:** `exports.def` contains an `EXPORTS` section and nothing else. `code-reviewer` flags any added `LIBRARY` line as a defect.
-
-### 3.2 Why Build Tools instead of the full Visual Studio — the user is right
-
-The full VS IDE is not needed. What the build actually needs is `cl.exe`, `rc.exe`, `link.exe`, `dumpbin.exe`, the MSVC v143 toolset for **both** x86 and x64, the Windows SDK, and `vcvarsall.bat`. **Visual Studio Build Tools** (`vs_BuildTools.exe`) ships exactly that set without the IDE — smaller download, no IDE licensing considerations, and a better fit for a VS Code workflow.
-
-It is also **more scriptable than the full IDE**, which changes the plan: silent unattended installation is a documented, supported flow, so this item **moves out of the manual P2 and into the automated P1 script**:
-
-```
-vs_BuildTools.exe --quiet --wait --norestart --nocache ^
-  --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended
-```
-
-Caveats the script must handle: it requires elevation (detect and report rather than fail obscurely); the download is multi-GB; exit code `3010` means "success, reboot required" and must not be treated as failure; and it should first check for an existing installation via `vswhere.exe` at its fixed path (`%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe`) rather than reinstalling. `vswhere` is also the supported way to locate `vcvarsall.bat` afterwards.
-
-Two consequences worth noting: Build Tools includes MSBuild, so the Vector sample project can still be compiled without the IDE (though *loading* it into CANoe stays manual); and CI is unaffected, since `windows-latest` already ships the MSVC toolchain and Stage 8 just activates it.
+**One deliberate change beyond renumbering: CI is split and moved earlier.** v4 had a single CI stage after all logic was written. v5 splits it — a **CI baseline** (build both architectures, run tests, on every push) lands at Stage 6, right after the ABI is proven, so every subsequent stage is continuously verified on a clean machine rather than only on the developer's box. The **release pipeline** (tag extraction, approval gate, publish) stays late at Stage 13, because it only matters once there is something worth releasing. This directly serves the project's stated aim of catching problems at the cheapest possible point.
 
 ---
 
-## 4. Stages
+## 4. Standing constraints
 
-Constraints restated so executing agents need no access to `docs/.locals/`: **`/MT` static CRT for the DLL and every static dependency — never mix `/MT` and `/MD` in one link. x86 and x64 must both build and behave identically. The `CAPL_DLL_INFO4`/`CAPL_DLL_INFO_LIST` table is the real API contract — append-only, never rename/reorder/remove. Business logic must be unit-testable without CANoe. No version number is ever typed by hand.**
+Repeated here so executing agents need no access to `docs/.locals/`:
 
-### Stage P — Bootstrap: scripted where possible, manual only where it must be
-
-**P1 — `scripts/setup-dev-env.ps1` (automated).** Idempotent, re-runnable, safe to run twice, printing a pass/fail summary modelled on 04-FLOW section 6.9 rather than aborting at the first problem:
-
-- Detect an existing MSVC toolchain via `vswhere`. If absent, download and silently install **VS Build Tools** with the `VCTools` workload per section 3.2. Detect non-elevated sessions and report the required command instead of failing obscurely; treat exit code `3010` as success-pending-reboot.
-- Resolve and report the path to `vcvarsall.bat`; confirm `cl`, `rc`, `link`, `dumpbin` resolve for **both** architectures. Refuse to proceed silently in the wrong Native Tools environment — mixing the two is 04-FLOW section 6.3's named cause of hard-to-diagnose linker errors.
-- Detect `make`; install via MSYS2/Chocolatey/Scoop if absent, or report the exact command when elevation is needed.
-- Detect or bootstrap vcpkg; run `vcpkg install curl[schannel]:x86-windows-static` and `curl[schannel]:x64-windows-static`.
-- Copy the resulting `.lib` files into `lib/x86/` and `lib/x64/`. Per 04-FLOW section 6.6 step 3, **copy into separate per-architecture folders** — do not point the Makefile at a shared vcpkg tree; the entire point is making a wrong-architecture link impossible.
-- Download `json.hpp` from the pinned v3.11.3 Releases URL and **verify its SHA-256** before placing it in `include/vendor/`. A pin without a checksum is a pin in name only.
-- Create the directory skeleton; write `lib/README` recording exact libcurl and json.hpp versions.
-- **Verify** (never fetch) that `include/vendor/capl-dll-sdk/` holds the three SDK headers.
-
-**P2 — manual, no automation path exists.**
-- **Install Vector CANoe/CANalyzer.** Licensed, GUI-installed, machine-bound — blocked by licensing, not technology.
-- **Build and load the official "Example of a Windows DLL for CAPL" sample unchanged in CANoe.** The step people skip and shouldn't: it proves the toolchain + CANoe pairing works before any project code can be blamed.
-
-**Touches:** `scripts/setup-dev-env.ps1`, `lib/`, `include/vendor/`, `lib/README`.
-**Agent:** `build-pipeline-engineer` (P1). **Human: all of P2.**
-**Human approval before proceeding: YES** — approve the script before its first run (it installs software) and confirm P2 is done.
-
-### Stage 0A — Reconcile configuration, naming, and permissions
-
-Commit `b967c9b` fixed versioning in the config files but left the directory layout untouched. Combined with the new DLL names and renamed Make targets, five files now contradict 04-FLOW. Concrete proposed edits follow.
+- **`/MT` static CRT** for the DLL and every static dependency. Never mix `/MT` and `/MD` in one link. Verify with `dumpbin /directives` — expect `/DEFAULTLIB:LIBCMT`, never `MSVCRT`.
+- **Bitness parity.** x86 and x64 must both build and behave identically — same sources, same flags (`/std:c++17`, `/EHsc`, `/MT`), same export table. Only `/MACHINE:` and library path differ.
+- **Export contract.** The `CAPL_DLL_INFO_LIST`/`CAPL_DLL_INFO4` table in `src/module/exports.cpp` is the real API. Append-only; never rename, reorder, or remove. Reserved first entry (`CDLL_VERSION_NAME`/`CDLL_VERSION`) always present. Exported functions `extern "C"`.
+- **`exports.def` contains `EXPORTS` and nothing else** — no `LIBRARY` line. It is shared by both architecture builds, which emit differently-named DLLs; a `LIBRARY` line can only ever be right for one of them.
+- **Never return a raw text pointer** from a CAPL-exposed operation — always write into a caller-supplied buffer with its size. One violation of this hid *every* operation in CANoe last time, not just the new one.
+- **1-byte packing must cover the entire export table** through and including the terminating pointer; pragma ordering is critical.
+- **Dependency direction.** `src/core/` imports nothing from `src/http/`, `src/registry/`, `src/mapping/`. Only `src/module/` includes the CAPL SDK headers.
+- **Tests run outside CANoe.** Logic must be reachable without the export glue.
+- **No version number is ever typed by hand.** Git tag `vX.Y.Z` is the single source of truth.
+- **Agents cannot `git push` or `git tag`** — both denied by design. Pushes and release tags are human actions.
 
 ---
 
-**File 1 — `CLAUDE.md`**
+## 5. Phase 1 — Foundation & Environment
 
-*Replace the `## Build` section:*
+### Stage 1 — Finish configuration reconciliation
 
-````markdown
-## Build
+Six files were already brought to target state. Five items remain. **Ownership note:** `.claude/**` and `CLAUDE.md` edits are routed to the **main session under human supervision**, not to a subagent — these files govern agent behaviour, and having an agent rewrite its own operating instructions is a governance smell. `code-reviewer` verifies afterwards.
 
-- `make all` — builds both architectures (default target).
-- `make build-x86` — builds `build/x86/restifycapl-x86.dll` (`/MACHINE:X86`).
-- `make build-x64` — builds `build/x64/restifycapl-x64.dll` (`/MACHINE:X64`).
-- `make test` — builds and runs the GoogleTest suite (outside CANoe).
-- `make clean` — removes all build output and intermediate files.
-- Dependencies live in `lib/x86/` and `lib/x64/`, matched to `/MT`.
-- Both architecture targets are thin wrappers over a single parameterized
-  rule, so compiler and linker flags cannot drift between x86 and x64.
-- First-time local setup: `scripts/setup-dev-env.ps1`. It cannot install
-  CANoe — that step is manual.
-````
+**HUM-1 — Move the SDK headers.** `include/vendor/cdll.h`, `VIA.h`, `VIA_CDLL.h` → `include/vendor/capl-dll-sdk/`. `json.hpp` lands in `include/vendor/` at Stage 2; keeping Vector's three licensed headers flat beside it destroys the "what's foreign, and whose" separation that justifies `vendor/` existing, and blurs the licensing boundary.
 
-*Replace the `## Directory layout` block:*
+**HUM-2 — Fix `.claude/agents/build-pipeline-engineer.md`** (three stale spots plus additions):
 
-````markdown
-## Directory layout
+- Frontmatter `description`: "Maintains the Makefile build targets (build32/build64)…" → "…the Makefile build targets (`all`, `build-x86`, `build-x64`, `test`, `clean`)…"
+- Responsibilities bullet 1: replace with —
 
-```
-include/vendor/         third-party headers, never edited by hand
-  json.hpp                nlohmann/json, pinned v3.11.3
-  capl-dll-sdk/           Vector SDK headers (cdll.h, VIA.h, VIA_CDLL.h)
-src/core/               LEVEL 0: pure logic, zero I/O, no CANoe knowledge
-src/http/               LEVEL 1+3: http-client, sync-operations, async-operations
-src/registry/           LEVEL 1: struct-registry (conditional, not yet in scope)
-src/mapping/            LEVEL 2: json-flatten, json-accessors, struct-mapping
-src/module/             LEVEL 4: the ONLY place that knows about CANoe/CAPL
-                          exports.cpp, exports.def, version.rc
-lib/x86/, lib/x64/      static dependencies (.lib), built with /MT
-build/x86/, build/x64/  build output (gitignored)
-tests/                  GoogleTest unit tests, run without CANoe
-examples/               .can examples showing usage from the CAPL side
-scripts/                setup-dev-env.ps1 — environment bootstrap
-docs/                   project documentation
+```markdown
+- Maintain the `all`, `build-x86`, `build-x64`, `test` and `clean` Makefile
+  targets. `build-x86` and `build-x64` must be thin wrappers over a single
+  parameterized rule with the architecture passed as a Make variable — never
+  two parallel recipes. MSVC flags (`/MT`, `/std:c++17`, `/EHsc`) are
+  identical across architectures; only `/MACHINE:` and the `lib/` path differ.
 ```
 
-Folders map 1:1 onto dependency levels. `src/core/` must not import from
-`src/http/`, `src/registry/`, or `src/mapping/`. Only `src/module/` may
-include the CAPL SDK headers.
-````
+- Hard rule 4: `version.rc`, `build32`, `build64` → `src/module/version.rc`, `build-x86`, `build-x64`.
+- Add a responsibility: "Own `scripts/setup-dev-env.ps1`. It provisions the environment only — it must never become a second build system."
 
-*Replace the Export contract bullet:*
+**HUM-3 — Fix `.claude/agents/test-engineer.md`.** Replace the first two responsibility bullets:
 
-````markdown
-- **Export contract**: the real contract with CANoe is the
-  `CAPL_DLL_INFO_LIST` / `CAPL_DLL_INFO4` table in `src/module/exports.cpp`,
-  not just `src/module/exports.def`. Never rename, reorder, or remove an
-  existing entry — see the `capl-export-contract` skill before touching
-  this file.
-````
-
-*In `## Tech stack`, replace the dependencies line:*
-
-````markdown
-- Dependencies: libcurl (vcpkg static triplets, Schannel TLS backend), zlib
-  (transitive), nlohmann/json v3.11.3 (header-only), plus Windows system
-  libs (crypt32, bcrypt, secur32, ws2_32, normaliz, wldap32, advapi32).
-- Toolchain: Visual Studio **Build Tools** (no IDE required); development
-  in VS Code.
-````
-
-*Add a `## Scope` note after Tech stack:*
-
-````markdown
-## Scope
-
-In scope now: sync + async REST/HTTP, JSON flattening, typed JSON path
-accessors. Deferred until a demonstrated need: struct registry / JSON→struct
-mapping, and CAPL-side request-body building. Do not build the deferred
-modules pre-emptively.
-````
-
----
-
-**File 2 — `.claude/skills/msvc-build-conventions/SKILL.md`**
-
-*Replace the "Architecture targets" bullets:*
-
-````markdown
-- `build-x86` compiles with `/MACHINE:X86`, links against `lib/x86/`,
-  produces `build/x86/restifycapl-x86.dll`.
-- `build-x64` compiles with `/MACHINE:X64`, links against `lib/x64/`,
-  produces `build/x64/restifycapl-x64.dll`.
-- `all` builds both; `test` and `clean` follow GNU target conventions.
-- Both architecture targets must be thin wrappers over a **single
-  parameterized rule**, with the architecture passed as a Make variable.
-  Do not write two parallel recipes — flag drift between x86 and x64 is a
-  top project risk, and one shared rule makes it structurally impossible.
-- The two targets stay behaviorally identical: same source files, same
-  flags (`/std:c++17`, `/EHsc`, `/MT`), same export table — only the
-  architecture flag and library path differ.
-````
-
-*Replace the "Directory conventions" block:*
-
-````markdown
-lib/x86/, lib/x64/       static dependencies (.lib), built with /MT
-build/x86/, build/x64/   build output (.dll, .lib, .exp, .res) — gitignored
-include/vendor/          third-party headers (json.hpp, capl-dll-sdk/)
-scripts/                 setup-dev-env.ps1 — environment bootstrap only,
-                         never a second build system
-````
-
-*In the CI/CD section, replace the first bullet:*
-
-````markdown
-- The GitHub Actions workflow must invoke the same `build-x86`/`build-x64`
-  Make targets used locally — do not duplicate the `cl.exe`/`rc.exe`
-  invocation directly in YAML.
-````
-
-*Add a new section:*
-
-````markdown
-## Dependency acquisition
-
-- libcurl: vcpkg, `curl[schannel]:x86-windows-static` and
-  `curl[schannel]:x64-windows-static`. Static triplets are `/MT` by
-  default — verify with `dumpbin /directives`, expecting
-  `/DEFAULTLIB:LIBCMT` and never `MSVCRT`.
-- zlib arrives transitively with libcurl.
-- nlohmann/json: `json.hpp` pinned to v3.11.3, taken from the Releases page
-  (amalgamated single file) and SHA-256 verified. Not `git clone`.
-- Windows system libs, always link all of them: crypt32, bcrypt, secur32,
-  ws2_32, normaliz, wldap32, advapi32.
-- Record exact versions in `lib/README`.
-- Toolchain: Visual Studio Build Tools with the `VCTools` workload; the
-  full VS IDE is not required.
-````
-
----
-
-**File 3 — `.claude/skills/capl-export-contract/SKILL.md`**
-
-*Frontmatter `description`:* replace "Load this before touching src/capl-rest-dll.cpp, includes/*.h, or the .def file." with "Load this before touching `src/module/exports.cpp`, `src/module/exports.def`, or anything in `include/vendor/capl-dll-sdk/`."
-
-*Path replacements throughout:* `capl-rest-dll.def` → `src/module/exports.def`; `src/capl-rest-dll.cpp` → `src/module/exports.cpp` (both in "What the real contract is" and in the Rules section).
-
-*Replace the first Bitness bullet pair:*
-
-````markdown
-- Both `build/x86/restifycapl-x86.dll` and `build/x64/restifycapl-x64.dll`
-  must always be built and kept behaviorally identical (same exported
-  table, same behavior) — only the target architecture differs.
-````
-
-*Add a new section:*
-
-````markdown
-## The .def file must not contain a LIBRARY statement
-
-`src/module/exports.def` is shared by both architecture builds, which
-produce two differently-named DLLs. It must contain only an EXPORTS
-section:
-
-    EXPORTS
-        CAPLDLLEntryPoint
-
-Do NOT add a `LIBRARY` line (e.g. `LIBRARY restifycapl-x86`). It pins one
-internal module name into a file both builds share, so it can only ever be
-correct for one of the two — forcing either duplicate .def files kept in
-sync by hand, or build-time generation. Omitting it lets each build's
-`/OUT:` flag alone determine its filename, so one .def serves both
-architectures. `code-reviewer` flags any added LIBRARY line as a defect.
-````
-
----
-
-**File 4 — `.claude/agents/code-reviewer.md`**
-
-*Frontmatter `description`:* "…any task that touched `src/`, `include/`, the `.def` file, or build scripts."
-
-*Replace check #1:*
-
-````markdown
-1. **Export contract**: any change to the `CAPL_DLL_INFO_LIST` /
-   `CAPL_DLL_INFO4` table in `src/module/exports.cpp`, or to
-   `src/module/exports.def`. Flag renamed, reordered, removed, or retyped
-   entries as a breaking change requiring explicit sign-off, per the
-   `capl-export-contract` skill. Also flag any `LIBRARY` statement added
-   to `exports.def`.
-````
-
-*Replace check #4 (Versioning) file references:* `version.rc`, `build32`, `build64` → `src/module/version.rc`, `build-x86`, `build-x64`.
-
-*Insert a new check between current #3 and #4:*
-
-````markdown
-4. **Dependency direction**: `src/core/` must not include from `src/http/`,
-   `src/registry/`, or `src/mapping/`. Only `src/module/` may include the
-   CAPL SDK headers. A violation here is an architecture break, not a
-   style issue.
-````
-
-(renumber the rest)
-
----
-
-**File 5 — `.claude/agents/cpp-implementer.md`**
-
-*Replace the first Responsibilities bullet:*
-
-````markdown
-- Implement and modify logic under `src/`, respecting the layered layout:
-  - `src/core/` — type-conversion, json-path (pure logic, no I/O, no CANoe)
-  - `src/http/` — http-client, sync-operations, async-operations
-  - `src/registry/` — struct-registry (conditional, not yet in scope)
-  - `src/mapping/` — json-flatten, json-accessors, struct-mapping
-    (struct-mapping conditional, not yet in scope)
-  - `src/module/` — exports.cpp: the ONLY file that knows about CANoe/CAPL
-````
-
-*In the second bullet,* name the file explicitly: "the code that fills `CAPL_DLL_INFO_LIST` in `src/module/exports.cpp` and the `extern "C"` wrapper functions".
-
-*Add two hard rules:*
-
-````markdown
-- Never add a `LIBRARY` statement to `src/module/exports.def` — it is
-  shared by both architecture builds. See `capl-export-contract`.
-- Never import from a higher layer into a lower one. `src/core/` depends on
-  nothing inside `src/` except the standard library and `json.hpp`.
-````
-
-*Replace workflow step 2:*
-
-````markdown
-2. Implement the change in the appropriate `src/` subfolder. Headers live
-   beside their `.cpp` in the same folder — `include/` contains only
-   `vendor/`, which is third-party code and is never edited by hand.
-````
-
----
-
-**`settings.json` — replacement `allow` array** (deny block unchanged):
-
-```json
-"allow": [
-  "Bash(make)",
-  "Bash(make all*)",
-  "Bash(make build-x86*)",
-  "Bash(make build-x64*)",
-  "Bash(make test*)",
-  "Bash(make clean*)",
-  "Bash(cl.exe *)",
-  "Bash(cl *)",
-  "Bash(rc.exe *)",
-  "Bash(rc *)",
-  "Bash(link.exe *)",
-  "Bash(link *)",
-  "Bash(dumpbin.exe *)",
-  "Bash(dumpbin *)",
-  "Bash(vcpkg install *)",
-  "Bash(vcpkg list*)",
-  "Bash(git status)",
-  "Bash(git diff *)",
-  "Bash(git log *)",
-  "Bash(git describe)",
-  "Bash(git describe *)",
-  "Bash(git rev-list *)",
-  "Bash(git add *)",
-  "Bash(git commit *)"
-]
+```markdown
+- Write and maintain unit tests in `tests/`, mirroring the layered `src/`
+  layout: `tests/core/`, `tests/http/`, `tests/mapping/` (and `tests/registry/`
+  only if that module is ever built).
+- Test targets, in build order: `type-conversion`, `json-path` (core);
+  `http-client`, `sync-operations`, `async-operations` (http); `json-flatten`,
+  `json-accessors` (mapping). `struct-registry` and `struct-mapping` are
+  deferred and out of scope unless explicitly reactivated.
 ```
 
-Rationale per change: Make entries become prefix patterns under the **new target names**, so the versioning mechanism can pass variables (`make build-x86 VER_MAJOR=0` would not match an exact-string entry and would prompt on every build); `Bash(make)` bare covers the default `all`; `dumpbin` (and now `cl`/`rc`/`link`) in **both** suffixed and bare forms, since bare invocation is common; bare `git describe` **and** the argument form, because the local-version path calls it bare; `vcpkg install`/`list` scoped rather than `vcpkg *`, so the allowlist doesn't cover state-mutating subcommands.
+**HUM-4 — Fix `.claude/skills/cpp-testing-conventions/SKILL.md`.** Same substitution in "Framework" and "What can and cannot be tested here": the testable list becomes `type-conversion`, `json-path`, `json-flatten`, `json-accessors`, plus logic extracted from `sync-operations`/`async-operations`. Add: "Tests mirror the layered `src/` structure — `tests/core/`, `tests/http/`, `tests/mapping/`." Add a required-coverage bullet: "for the async layer specifically: ready-flag-cleared-after-read, and request-ID correlation across consecutive requests."
 
-Deliberately **not** added: `Bash(powershell *)` or any wildcard shell entry — that is arbitrary code execution and would hollow out the deny list beneath it. If agents should run the bootstrap unprompted, scope it to exactly `"Bash(powershell -File scripts/setup-dev-env.ps1*)"`. Recommendation is to omit even that and run the bootstrap manually the first time, since it installs software.
+**HUM-5 — Update `docs/.locals/04-FLOW-AND-DEPENDENCIES.md`.** §6.2's conclusion ("a dedicated script to bootstrap the whole project isn't needed here") now contradicts a decided position; rewrite it to state that a local bootstrap script *is* used, and why the original reasoning no longer holds — category 3 shrank once the headers were committed, and a script is re-runnable on a second machine and verifiable in CI, which a prose checklist is not. In §6.1 and §6.3, replace "Visual Studio (Desktop development with C++)" with "Visual Studio **Build Tools** (`VCTools` workload)" and note that silent unattended install is supported, so it belongs in the script rather than in a manual checklist.
 
-Unchanged by design: **`git push` and `git tag` stay denied**, keeping 04-FLOW Step 0's push and every release tag a human action.
+**REV-1 — Verification pass.** `code-reviewer` confirms no `build32`/`build64`, `lib-32b`/`lib-64b`, `build-32b`/`build-64b`, `capl-rest-dll.cpp`, `capl-rest-32b.dll`, or previous-iteration module names survive anywhere in `CLAUDE.md`, `.claude/**`, or `docs/.locals/**`. A single grep sweep; this is exactly the drift that v4 missed twice.
 
-**Also in this stage:** move the three SDK headers into `include/vendor/capl-dll-sdk/`; update 04-FLOW section 6.2 to reflect that a local bootstrap script *is* used (the user confirmed this; leaving 6.2's "no script needed" conclusion in place would contradict the plan for the next reader, human or agent); and note in 04-FLOW section 6.3 that Build Tools, not the full IDE, is the target.
+**Human approval gate: YES.** These files direct every later stage.
 
-**Touches:** the five files above, `settings.json`, `include/vendor/capl-dll-sdk/`, 04-FLOW sections 6.2 and 6.3.
-**Agent:** `build-pipeline-engineer` for the build-convention files. The `CLAUDE.md` and agent-definition edits are the user's or the main session's — no agent formally owns them, so route that deliberately rather than by default.
-**Human approval before proceeding: YES.** These files govern every later stage; an error here silently misdirects every agent that follows.
+### Stage 2 — Scripted development-environment bootstrap
 
-### Stage 0B — Repo skeleton and Makefile with versioning wired in from day one
+**BPE-1 — Write `scripts/setup-dev-env.ps1`.** Idempotent, re-runnable, safe to run twice, prints a pass/fail summary (modelled on 04-FLOW §6.9) rather than aborting at the first problem. Tasks:
 
-**Outcome:** `.gitignore` finished (drop dead `build-*/`; annotate lines 35 and 51). Full 04-FLOW section 3.3 tree. A single `Makefile` with `all`, `build-x86`, `build-x64`, `test`, `clean` — `clean` removing **all** intermediates — implemented over one parameterized per-architecture rule. GoogleTest built `/MT`. Windows system libs wired: crypt32, bcrypt, secur32, ws2_32, normaliz, wldap32, advapi32 — link all, they're transitively required by libcurl.
+1. Probe for an existing MSVC toolchain via `vswhere.exe` at `%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe` before attempting any install.
+2. If absent, silently install **VS Build Tools**: `vs_BuildTools.exe --quiet --wait --norestart --nocache --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended`. Detect non-elevated sessions and print the exact command to run elevated rather than failing obscurely. Treat exit code `3010` as success-pending-reboot, not failure.
+3. Resolve and report `vcvarsall.bat`; confirm `cl`, `rc`, `link`, `dumpbin` resolve for **both** architectures. Refuse to continue silently in the wrong Native Tools environment — running an x64 build from an x86 prompt is 04-FLOW §6.3's named cause of misleading linker errors.
+4. Detect `make`; install via MSYS2/Chocolatey/Scoop if absent, or report the exact command when elevation is required.
+5. Detect or bootstrap vcpkg; run `vcpkg install curl[schannel]:x86-windows-static` and `curl[schannel]:x64-windows-static`.
+6. Copy the resulting `.lib` files into `lib/x86/` and `lib/x64/` — **separate per-architecture folders**, never a shared vcpkg tree; the whole point is making a wrong-architecture link impossible.
+7. Download `json.hpp` from the pinned v3.11.3 Releases URL (amalgamated single file, not `git clone`) and **verify its SHA-256** before placing it in `include/vendor/`. A pin without a checksum is a pin in name only.
+8. Create the directory skeleton and write `lib/README` recording exact libcurl and json.hpp versions.
+9. **Verify, never fetch,** that `include/vendor/capl-dll-sdk/` holds the three SDK headers, and fail with a clear message pointing at Stage 3 if not.
 
-The **git-tag versioning mechanism is built in now, not retrofitted**: `version.rc` parameterized via `rc.exe /D VER_MAJOR/VER_MINOR/VER_BUILD/VER_REV` with `#ifndef` fallbacks, `/VERSION:X.Y` on the linker, `git describe --tags --always --dirty` into `StringFileInfo`, `git rev-list --count` for local build/revision. These files are being written fresh, so migration cost is zero.
+**Human approval gate: YES** — approve before first run; it installs software and touches global state.
 
-Then commit and **push** (human action — agents are denied `git push`).
-**Touches:** `.gitignore`, `Makefile`, `src/module/version.rc`, directory skeleton, `lib/README`.
-**Agent:** `build-pipeline-engineer`.
-**Human approval before proceeding: YES** — and confirm `dumpbin /directives` on every vendored `.lib` shows `/DEFAULTLIB:LIBCMT`, **not** `MSVCRT`. A `/MD` lib slipping through here poisons everything downstream.
+### Stage 3 — Manual toolchain setup (human only)
 
-### Stage 1 — "Hello DLL": one operation, verified inside CANoe
+No automation path exists for either item — a licensing constraint, not a technical one.
 
-**Outcome:** a DLL exporting exactly **one** trivial operation (e.g. returning a fixed version string into a caller-supplied buffer), with `exports.def` (EXPORTS only, no `LIBRARY`) and `version.rc`, built for both architectures as `restifycapl-x86.dll` / `restifycapl-x64.dll`, and actually loaded and called from a real `.can` script in CANoe. No REST logic.
+**HUM-6 — Install Vector CANoe/CANalyzer.** Licensed, GUI-installed, machine-bound.
 
-This stage permanently fixes the **CAPL-visible naming convention** for every operation the project will ever expose — the never-rename rule means it cannot be revised later without a major-version break. Decide it deliberately.
+**HUM-7 — Build and load the official "Example of a Windows DLL for CAPL" sample, unchanged, in CANoe.** The step people skip and shouldn't: it proves the toolchain + CANoe pairing works before any project code can be blamed for a failure. Build Tools ships MSBuild, so the sample compiles without the IDE; loading it into CANoe is manual.
 
-Two post-mortem rules are mandatory: (a) **never return a raw text pointer** from a CAPL-exposed operation — always write into a caller-supplied buffer with its size; one violation hid *every* operation in CANoe, not just the new one; (b) **1-byte packing must cover the entire export table through and including the terminating pointer** — pragma ordering is critical.
+Stage 3 runs in parallel with Stages 1–2 and 4. It only hard-blocks Stage 5.
 
-Verification is two-part: `dumpbin` export-list check, then the live CANoe test.
-**Touches:** `src/module/exports.cpp`, `exports.def`, `version.rc`, `Makefile`.
-**Agents:** `cpp-implementer` (table + glue), `build-pipeline-engineer` (link/resource wiring), then `code-reviewer` (mandatory).
-**Human approval before proceeding: YES — the most important gate in this plan.** Do not start Stage 2 until the operation is confirmed callable from CAPL. This is exactly why 04-FLOW moves CANoe integration to Step 1 rather than leaving it until dozens of operations exist.
+### Stage 4 — Repo skeleton, Makefile, versioning
 
-### Stage 2 — Level 0 pure logic: type conversion + JSON path resolution
-**Outcome:** `src/core/type-conversion.*` and `src/core/json-path.*`, depending on `json.hpp` only — zero I/O, no CANoe knowledge, not yet exported. GoogleTest coverage: valid input, malformed/missing fields, type mismatches. `core/` imports nothing from `http/`, `registry/`, `mapping/`.
-**Agents:** `cpp-implementer`, then `test-engineer`. **Human approval: no.**
+**BPE-2 — Finalize `.gitignore`.** Delete the dead `build-*/` (a leftover from the abandoned `build-32b/` naming; `build/` already covers output). Annotate the two commented lines (`#*.lib`, `# Makefile`) with *why* they are disabled — without a note, a future tidy-up of the "CMake generated files" and "Compiled Static libraries" blocks will silently untrack the Makefile and every vendored `.lib`.
 
-### Stage 3 — HTTP layer + synchronous GET (logic only)
-**Outcome:** `src/http/http-client.*` wrapping libcurl, `src/http/sync-operations.*` for blocking requests. Verified as a standalone console program against httpbin.org per 04-FLOW Step 2. Tests mock the libcurl boundary — no real network in the suite — covering simulated timeouts and error responses.
-**Agents:** `cpp-implementer`, then `test-engineer`. **Human approval: no.**
+**BPE-3 — Create the directory skeleton** per `CLAUDE.md`'s layout: `src/{core,http,registry,mapping,module}/`, `lib/{x86,x64}/`, `build/{x86,x64}/`, `tests/{core,http,mapping}/`, `examples/`, `scripts/`.
 
-### Stage 4 — Expose synchronous REST to CAPL (first contract append)
-**Outcome:** sync operations appended to the export table, both architectures rebuilt, verified in CANoe.
-**Agents:** `cpp-implementer`, then `code-reviewer` (mandatory).
-**Human approval before proceeding: YES** — export contract append.
+**BPE-4 — Write the `Makefile`.** Targets `all` (default, both architectures), `build-x86`, `build-x64`, `test`, `clean`. The two architecture targets are thin wrappers over **one parameterized rule** with architecture as a Make variable — this makes flag drift between x86 and x64 structurally impossible rather than merely forbidden, which materially reduces the plan's second-largest risk. `clean` removes **all** intermediates, not a selected few.
 
-### Stage 5 — Asynchronous layer, response state designed correctly up front
-**Outcome:** background dispatch plus readiness-check and wait-for-result operations. Response-state semantics settled **now, not retrofitted**: ready flag cleared once read, request ID tying a response to the call that produced it. 04-FLOW section 5 item 3 records that the previous iteration identified this early but never confirmed implementation. Shared state is global within the DLL with per-module synchronization; **one active response at a time** by deliberate design.
-**Agents:** `cpp-implementer`, `test-engineer`, then `code-reviewer`.
-**Human approval before proceeding: YES** — contract append, and the one-active-response simplification bounds what the DLL can ever do.
+**BPE-5 — Wire the versioning mechanism in from day one.** `src/module/version.rc` parameterized via `rc.exe /D VER_MAJOR/VER_MINOR/VER_BUILD/VER_REV` with `#ifndef` fallbacks; `/VERSION:X.Y` on the linker; `git describe --tags --always --dirty` into `StringFileInfo`; `git rev-list --count <tag>..HEAD` for local build/revision. Feed only small integers to `FILEVERSION`/`PRODUCTVERSION` — four 16-bit fields capped at 65535 that **wrap silently**. Test it deliberately now, in a repo that currently has **no tags at all** — `--tags --always` carries both flags precisely for this case.
 
-### Stage 6 — JSON flattening (highest user value — ship before struct mapping)
-**Outcome:** flatten the response to a dot-notation key/value map, plus key count, key-by-index, value-by-key. 04-FLOW Step 4 is emphatic this is the highest-value API and that the previous iteration wrongly deprioritized it.
-**Mandatory sub-step before any `.can` example:** verify associative-field syntax against the official CANoe help (`Help → CAPL → General → Associative Fields`). The correct form has **no extra keyword before the type** — `char[30] name[char[]];`. An invented keyword was copied across many docs and examples last time. Check the product help; do not trust generated snippets.
-**Agents:** `cpp-implementer`, `test-engineer`, then `code-reviewer`.
-**Human approval before proceeding: YES** — contract append; confirm the syntax check happened.
+**BPE-6 — Write `lib/README`** recording exact libcurl and json.hpp versions.
 
-### Stage 7 — Typed JSON accessors
-**Outcome:** typed point reads at a JSON path (integer/float/bool/string) without flattening, array helpers (length, element-by-index), optional cache for recent queries.
-**Agents:** `cpp-implementer`, `test-engineer`, then `code-reviewer`.
-**Human approval before proceeding: YES** — contract append.
+**BPE-7 — Integrate GoogleTest built `/MT`** and make `make test` functional.
 
-### Stage 8 — CI/CD on GitHub Actions
-Because the SDK headers are committed, **CI compiles `src/module/` and links both DLLs itself.**
+**TEST-1 — Create the `tests/` skeleton with one trivial passing test** so `make test` is green from the very first commit. 04-FLOW §3.3 is explicit that `tests/` existing from day one — not as a "nice to have" — is what forces the reflex of writing a test before moving on.
 
-**Outcome:** `windows-latest`, matrix over x86/x64, MSVC environment activated (`vcvarsall.bat` or equivalent) for the matching architecture before invoking Make, calling the **same `build-x86`/`build-x64` targets used locally** — never duplicating `cl.exe`/`rc.exe` in YAML. GoogleTest suite on every push. Both DLLs uploaded as workflow artifacts on every push, so a reviewable binary always exists. Release flow: tag push (`vX.Y.Z`) → build + test → **manual approval gate** (a GitHub Environment with required reviewers is the natural mechanism) → publish to GitHub Releases. Tag creation stays a human action.
+**REV-2 — Review** Makefile parameterization, versioning derivation, `.gitignore` semantics, and confirm `dumpbin /directives` on every vendored `.lib` shows `/DEFAULTLIB:LIBCMT`.
 
-Also here: generate the exposed-operation list from the export table at build time so documentation cannot drift from code — the previous iteration had different operation counts in different README files depending on when each was last edited.
+**HUM-8 — Commit and push** (agents are denied `git push`).
 
-Note the ordering: CI produces the artifact, the user verifies it manually in CANoe, and only then approves the publish. The approval gate is what makes manual CANoe verification a real precondition of release rather than an aspiration.
-**Touches:** `.github/workflows/`, `Makefile`.
-**Agent:** `build-pipeline-engineer`, then `code-reviewer`.
-**Human approval before proceeding: YES** — this determines what ships.
-
-### Stage 9 (CONDITIONAL) — Struct registry + JSON→struct mapping
-Per 04-FLOW Step 6, build **only if** Stage 7's typed accessors prove insufficient for a concrete use case (large, stable response schemas).
-**Agents:** `cpp-implementer`, `test-engineer`, `code-reviewer`. **Human approval: YES.**
-
-### Stage 10 (CONDITIONAL) — CAPL-side request-body building
-Per 04-FLOW Step 7, build **only if** hand-assembling JSON in CAPL proves genuinely cumbersome. Dead code last time.
-**Agents:** as above. **Human approval: YES.**
-
-### Stage 11 — Cleanup and consistency pass
-**Outcome:** one `Makefile`, no historical variants; `clean` removes every intermediate; no build artifacts tracked; operation list generated, not hand-maintained; anything removed as dead code removed **in full** (table entry + implementation + docs) in a single commit.
-**Agents:** `build-pipeline-engineer`, then `code-reviewer`. **Human approval: no**, unless it touches the export table.
+**Human approval gate: YES** — a `/MD` library slipping through here poisons everything downstream.
 
 ---
 
-## 5. Risks
+## 6. Phase 2 — ABI Proof & Continuous Verification
 
-**Export contract.** Stage 1 is irreversible in practice: the naming convention and version-entry layout chosen there bind every later append. Stages 4, 5, 6, 7, 9, 10 each append — each requires `code-reviewer`. The reserved first entry (`CDLL_VERSION_NAME`/`CDLL_VERSION`) must always be present. Exported functions must be `extern "C"` to keep names undecorated.
+### Stage 5 — "Hello DLL": one operation, verified in CANoe — HARD GATE
 
-**ABI failure modes that hide *all* operations, not just the new one.** Raw text pointer instead of the caller-supplied buffer; incorrect 1-byte alignment coverage through the terminating pointer. 04-FLOW section 7 states plainly that this project's historical difficulty was never business logic — it was ABI compatibility with CANoe.
+**CPP-1 — Write `src/module/exports.cpp` and `exports.def`.** Exactly **one** trivial operation (e.g. return a fixed version string into a caller-supplied buffer). `exports.def` contains `EXPORTS` and nothing else. Apply both post-mortem rules from section 4: output-buffer pattern, and 1-byte packing across the whole table including the terminating pointer. **This stage permanently fixes the CAPL-visible naming convention** for every operation the project will ever expose — the never-rename rule means it cannot be revised later without a major-version break. Decide it deliberately and write it down.
 
-**`/MT` contamination.** A `/MD` libcurl/zlib/GoogleTest yields `LNK4098` at best and a second CRT heap inside the CANoe host process at worst. Static triplets are `/MT` by default, but verify with `dumpbin /directives` rather than trusting it. If a dependency is only available as `/MD`, **stop and ask**.
+**BPE-8 — Link and resource wiring** for both architectures, producing `build/x86/restifycapl-x86.dll` and `build/x64/restifycapl-x64.dll`; verify the export list with `dumpbin /exports`.
 
-**Bitness parity.** CANoe loads only a matching-bitness DLL; a mismatch gives "Requested CAPL DLL is invalid". Identical source lists, identical flags, identical export table — only `/MACHINE:` and library path differ. **This risk drops materially because Stage 0B uses one parameterized rule** instead of two near-duplicate recipes. The related `.def` trap is neutralized by the no-`LIBRARY` rule in section 3.1. Environment trap from 04-FLOW section 6.3: building x64 from an x86 Native Tools prompt gives misleading linker errors.
+**REV-3 — Export-contract review. The single most important review in this plan.** Naming convention, table layout, reserved version entry, `extern "C"`, packing, absence of a `LIBRARY` line.
 
-**Vector SDK header redistribution — accepted risk.** The repository is public and the headers are committed. The user has made this call explicitly and knowingly; it is recorded here as a conscious decision rather than an oversight, and is not re-litigated. Practical note only: git history makes it effectively permanent, so if the position ever changes, removal requires history rewriting, not a delete commit.
+**HUM-9 — Load and call the operation from a real `.can` script in CANoe.** No agent can do this.
 
-**Configuration drift across five files.** `CLAUDE.md`, both skills and two agent definitions are actively wrong until Stage 0A lands. Agents load skills automatically, so a stale `capl-export-contract` skill pointing at `src/capl-rest-dll.cpp` with old DLL and target names would misdirect `cpp-implementer` and `code-reviewer` on the most safety-critical file in the project. Stage 0A must complete before Stage 1, not alongside it.
+**Human approval gate: YES — the most important gate in this plan.** Do not start Stage 6 until the operation is confirmed callable from CAPL. Everything downstream assumes the ABI is proven. This is exactly why 04-FLOW moves CANoe integration to its Step 1 rather than leaving it until dozens of operations exist — a return-value bug at that point hid every operation at once and cost disproportionate time to find.
 
-**A "tidy-up" regression in `.gitignore`.** The `Makefile` and `*.lib` rules are commented out, not deleted, and sit inside blocks labelled "CMake generated files" and "Compiled Static libraries" where they look like they belong. Without an inline note saying why they're disabled, someone — or some agent — will eventually restore them and silently untrack the Makefile and every vendored `.lib`.
+### Stage 6 — CI baseline: build both architectures and run tests on every push
 
-**Bootstrap script scope creep.** `scripts/setup-dev-env.ps1` installs software and touches global state (Build Tools, vcpkg, package managers). It must stay idempotent and must never become a second build system — 04-FLOW section 5 explicitly warns against "a growing set of helper scripts" in place of one Makefile. The script sets up the environment; `make` builds the project. That line must not blur.
+**BPE-9 — Write `.github/workflows/ci.yml`.** `windows-latest`, matrix over x86/x64, MSVC environment activated (`vcvarsall.bat` or an equivalent action) for the matching architecture before invoking Make. **Calls the same `build-x86`/`build-x64` Make targets used locally — never duplicates `cl.exe`/`rc.exe` invocations in YAML.** Runs `make test`. Uploads both DLLs as workflow artifacts on every push so a reviewable binary always exists. Because the SDK headers are committed, CI compiles `src/module/` and links the DLLs itself — no split-responsibility design is needed.
 
-**Toolchain divergence between local Build Tools and the CI runner image.** Local setup installs Build Tools at whatever version is current; `windows-latest` ships its own. Usually harmless, but if a reproducibility question ever arises, pin the toolset version in both places rather than debugging a version-skew symptom.
+**REV-4 — Review** that CI reuses Make targets rather than reimplementing the build, and that the matrix covers both architectures symmetrically.
 
-**Versioning is new, untested machinery.** The tag mechanism removes the old three-places drift risk by design. What replaces it is narrow and mechanical: `FILEVERSION`/`PRODUCTVERSION` are four 16-bit fields capped at 65535 that **wrap silently** if exceeded — feed only small integers; `/VERSION:` accepts major.minor only; `version.rc` needs working `#ifndef` fallbacks so a bare `rc.exe` doesn't fail. `git describe --tags --always` carries both flags precisely so it works in a repo with no tags — this repo's current state. Test it deliberately in Stage 0B, before a real release depends on it.
-
-**Steps no agent can verify.** Stage 1's CANoe test, Stage P2, and the pre-release verification in Stage 8 are human-only. 04-FLOW section 5's last checklist item names the previous iteration's habit of leaving these perpetually open: "status: ready to build" ≠ "status: tested and working".
-
-**Scope creep toward struct mapping.** The strongest historical lesson: the previous iteration built the largest, most complex feature first while the highest-value one waited. Stages 6 and 7 must ship before Stage 9 is reconsidered.
+**Human approval gate: YES** — this defines what gets verified from here on.
 
 ---
 
-## 6. Execution order
+## 7. Phase 3 — Business Logic & CAPL Surface
 
-Stage P → 0A → 0B → 1 (hard gate) → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 11, with 9 and 10 only on demonstrated need. Stage 0A must not run in parallel with Stage 1.
+Stages 9–12 each append to the export table. Every append is a contract change requiring `code-reviewer` and a human gate.
 
-**Source files (absolute paths):**
-- `C:\Workspace\restifycapl\docs\.locals\04-FLOW-AND-DEPENDENCIES.md` — authoritative for layout and roadmap; sections 6.2 and 6.3 updated in Stage 0A
-- `C:\Workspace\restifycapl\docs\.locals\capl-rest-dll-design-log.md` — section 7 is the versioning spec
-- `C:\Workspace\restifycapl\CLAUDE.md`
-- `C:\Workspace\restifycapl\.claude\skills\msvc-build-conventions\SKILL.md`
-- `C:\Workspace\restifycapl\.claude\skills\capl-export-contract\SKILL.md`
-- `C:\Workspace\restifycapl\.claude\agents\code-reviewer.md`, `...\cpp-implementer.md`, `...\build-pipeline-engineer.md`
-- `C:\Workspace\restifycapl\.claude\settings.json`
-- `C:\Workspace\restifycapl\.gitignore`
-- `C:\Workspace\restifycapl\include\vendor\cdll.h`, `...\VIA.h`, `...\VIA_CDLL.h` — move to `include\vendor\capl-dll-sdk\`
+### Stage 7 — Core pure logic (level 0)
 
-**Status:** Approved by the user and finalized. Ready for Stage P.
+**CPP-2** — `src/core/type-conversion.*` (JSON ↔ C++ value conversions).
+**CPP-3** — `src/core/json-path.*` (path resolution inside a JSON tree).
+Both depend on `json.hpp` only — zero I/O, zero CANoe knowledge, not yet exported.
+**TEST-2 / TEST-3** — `tests/core/` coverage for each: valid input, malformed/missing JSON fields, type mismatches.
+**Human approval: no.**
+
+### Stage 8 — HTTP layer and synchronous operations (logic only)
+
+**CPP-4** — `src/http/http-client.*` wrapping libcurl.
+**CPP-5** — `src/http/sync-operations.*` (blocking request/response).
+**BPE-10** — Link libcurl + zlib + all Windows system libs (crypt32, bcrypt, secur32, ws2_32, normaliz, wldap32, advapi32 — link all, they are transitively required).
+**TEST-4** — Build the libcurl fake/mock boundary. No real network calls in the suite.
+**TEST-5** — Coverage including **simulated timeouts and error responses**, not just the happy path.
+Verify as a standalone console program against httpbin.org, per 04-FLOW Step 2.
+**Human approval: no.**
+
+### Stage 9 — Expose synchronous REST to CAPL (first contract append)
+
+**CPP-6** — Append sync operations to the export table; rebuild both architectures.
+**REV-5** — Export-contract review (mandatory).
+**HUM-10** — Verify in CANoe.
+**Human approval gate: YES.**
+
+### Stage 10 — Asynchronous layer with response state designed correctly up front
+
+**CPP-7** — `src/http/async-operations.*`: background dispatch, readiness check, wait-for-result. Response-state semantics settled **now, not retrofitted** — the ready flag is cleared once read, and a request ID ties a response to the call that produced it. 04-FLOW §5 item 3 records that the previous iteration identified this early but never confirmed it was implemented. Shared state is global within the DLL with per-module synchronization; **one active response at a time** by deliberate design, not a concurrent request pool.
+**TEST-6** — `tests/http/` coverage specifically for ready-flag-cleared-after-read and request-ID correlation across consecutive requests.
+**CPP-8** — Append async operations to the export table.
+**REV-6** — Export-contract review.
+**HUM-11** — Verify in CANoe.
+**Human approval gate: YES** — contract append, and the one-active-response simplification bounds what the DLL can ever do.
+
+### Stage 11 — JSON flattening (highest user value — ship before struct mapping)
+
+**CPP-9** — `src/mapping/json-flatten.*`: flatten the response into a dot-notation key/value map, plus key count, key-by-index, value-by-key.
+**TEST-7** — `tests/mapping/` coverage including deeply nested objects, arrays, and empty/malformed documents.
+**HUM-12 — Mandatory before any `.can` example is written:** verify associative-field syntax against the official CANoe help (`Help → CAPL → General → Associative Fields`). The correct form has **no extra keyword before the type** — `char[30] name[char[]];`. An invented keyword was copied across many docs and example files last time. Check the product help; do not trust generated snippets.
+**CPP-10** — Append flattening operations to the export table.
+**CPP-11** — Write `examples/*.can`, only after HUM-12 confirms the syntax.
+**REV-7** — Export-contract review.
+**Human approval gate: YES** — contract append; confirm HUM-12 actually happened.
+
+### Stage 12 — Typed JSON accessors
+
+**CPP-12** — `src/mapping/json-accessors.*`: typed point reads at a JSON path (integer/float/bool/string) without flattening, array helpers (length, element-by-index), optional cache for recent queries.
+**TEST-8** — Coverage including type mismatches at each accessor type and cache invalidation between responses.
+**CPP-13** — Append accessor operations to the export table.
+**REV-8** — Export-contract review.
+**Human approval gate: YES** — contract append.
+
+---
+
+## 8. Phase 4 — Release Pipeline
+
+### Stage 13 — Tag-driven release with an approval gate
+
+**BPE-11 — Write `.github/workflows/release.yml`.** Triggered by a `vX.Y.Z` tag push. Extracts `X.Y.Z` from `github.ref_name` (stripping `v`), feeds `X.Y` to `/VERSION:` and `major,minor,build,revision` to `FILEVERSION`/`PRODUCTVERSION` via `rc.exe /D`. Builds both architectures and runs tests, then **halts at a manual approval gate** (a GitHub Environment with required reviewers is the natural mechanism), and only publishes to GitHub Releases after approval.
+
+**BPE-12 — Generate the exposed-operation list from the export table at build time** and publish it with the release, so documentation cannot drift from code. The previous iteration had different operation counts stated in different README files depending on when each was last edited.
+
+**REV-9 — Review** the release workflow, confirming no hardcoded version anywhere and that the approval gate genuinely blocks publication.
+
+**HUM-13 — Create the release tag** (agents are denied `git tag`).
+**HUM-14 — Verify the CI-built artifact manually in CANoe, then approve the publish.** This ordering is what makes manual CANoe verification a real precondition of release rather than an aspiration.
+
+**Human approval gate: YES** — this determines what ships.
+
+---
+
+## 9. Phase 5 — Hardening
+
+### Stage 14 — Cleanup and consistency pass
+
+**BPE-13** — One `Makefile`, no historical variants; `clean` removes every intermediate; no build artifacts tracked; version and operation list each maintained in exactly one place.
+**TEST-9** — Coverage audit: every module in `src/` that can be tested has a corresponding test file in the mirrored `tests/` location.
+**REV-10** — Final review. Anything removed as dead code must be removed **in full** (export-table entry + implementation + documentation) in a single commit — last time part of the JSON-building operations were removed while a simpler variant stayed exposed, contradicting docs that claimed the whole module was gone.
+**Human approval: no**, unless it touches the export table.
+
+---
+
+## 10. Phase 6 — Conditional Extensions
+
+Build **only** on demonstrated need. 04-FLOW is emphatic that the previous iteration built these first and largest while the highest-value feature (flattening) waited.
+
+### Stage 15 (CONDITIONAL) — Struct registry + JSON→struct mapping
+
+Trigger: Stage 12's typed accessors prove insufficient for a concrete use case (large, stable response schemas).
+**CPP-14** — `src/registry/struct-registry.*`, `src/mapping/struct-mapping.*`. **TEST-10** — coverage. **REV-11** — contract review. **Human approval gate: YES.**
+
+### Stage 16 (CONDITIONAL) — CAPL-side request-body building
+
+Trigger: hand-assembling JSON in CAPL proves genuinely cumbersome in practice. This was dead code last time — real flows built bodies by hand despite a ready-made API existing.
+**CPP-15** / **TEST-11** / **REV-12**. **Human approval gate: YES.**
+
+---
+
+## 11. Task index by agent
+
+### `build-pipeline-engineer` — 13 tasks
+
+| ID | Stage | Task |
+|---|---|---|
+| BPE-1 | 2 | Write `scripts/setup-dev-env.ps1` (Build Tools probe/install, make, vcpkg curl[schannel] both triplets, json.hpp v3.11.3 + SHA-256, skeleton, `lib/README`, SDK-header verification) |
+| BPE-2 | 4 | Finalize `.gitignore` — remove dead `build-*/`, annotate the two commented lines |
+| BPE-3 | 4 | Create the directory skeleton |
+| BPE-4 | 4 | Write the `Makefile` — `all`/`build-x86`/`build-x64`/`test`/`clean` over one parameterized rule |
+| BPE-5 | 4 | Wire the git-tag versioning mechanism (`version.rc` + `rc.exe /D` + `/VERSION:` + `git describe`) |
+| BPE-6 | 4 | Write `lib/README` with exact dependency versions |
+| BPE-7 | 4 | Integrate GoogleTest built `/MT`; make `make test` functional |
+| BPE-8 | 5 | Link/resource wiring for both DLLs; `dumpbin /exports` verification |
+| BPE-9 | 6 | CI baseline workflow — build both arches + tests on every push, artifact upload |
+| BPE-10 | 8 | Link libcurl, zlib and all seven Windows system libs |
+| BPE-11 | 13 | Release workflow — tag extraction, approval gate, publish |
+| BPE-12 | 13 | Generate the operation list from the export table at build time |
+| BPE-13 | 14 | Build-system cleanup pass |
+
+### `cpp-implementer` — 15 tasks
+
+| ID | Stage | Task |
+|---|---|---|
+| CPP-1 | 5 | `exports.cpp` + `exports.def` — one operation; fixes the CAPL naming convention permanently |
+| CPP-2 | 7 | `src/core/type-conversion.*` |
+| CPP-3 | 7 | `src/core/json-path.*` |
+| CPP-4 | 8 | `src/http/http-client.*` (libcurl wrapper) |
+| CPP-5 | 8 | `src/http/sync-operations.*` |
+| CPP-6 | 9 | Append sync operations to the export table |
+| CPP-7 | 10 | `src/http/async-operations.*` + response-state semantics |
+| CPP-8 | 10 | Append async operations |
+| CPP-9 | 11 | `src/mapping/json-flatten.*` |
+| CPP-10 | 11 | Append flattening operations |
+| CPP-11 | 11 | `examples/*.can` — only after HUM-12 |
+| CPP-12 | 12 | `src/mapping/json-accessors.*` |
+| CPP-13 | 12 | Append accessor operations |
+| CPP-14 | 15 | Struct registry + mapping (conditional) |
+| CPP-15 | 16 | CAPL-side request building (conditional) |
+
+### `test-engineer` — 11 tasks
+
+| ID | Stage | Task |
+|---|---|---|
+| TEST-1 | 4 | `tests/` skeleton + one passing test so `make test` is green from the first commit |
+| TEST-2 | 7 | `tests/core/` — type-conversion |
+| TEST-3 | 7 | `tests/core/` — json-path |
+| TEST-4 | 8 | libcurl fake/mock boundary (no real network in the suite) |
+| TEST-5 | 8 | `tests/http/` — http-client + sync-operations, incl. timeouts and error responses |
+| TEST-6 | 10 | `tests/http/` — async: ready-flag-cleared-after-read, request-ID correlation |
+| TEST-7 | 11 | `tests/mapping/` — json-flatten (nesting, arrays, empty/malformed) |
+| TEST-8 | 12 | `tests/mapping/` — json-accessors (type mismatches, cache invalidation) |
+| TEST-9 | 14 | Coverage audit across all of `src/` |
+| TEST-10 | 15 | Struct mapping tests (conditional) |
+| TEST-11 | 16 | Request-builder tests (conditional) |
+
+### `code-reviewer` — 12 tasks
+
+| ID | Stage | Focus |
+|---|---|---|
+| REV-1 | 1 | Verify configuration reconciliation is complete — grep sweep for every stale identifier |
+| REV-2 | 4 | Makefile parameterization, versioning derivation, `/MT` provenance of vendored libs |
+| REV-3 | 5 | **Export-contract genesis — the most important review in the plan** |
+| REV-4 | 6 | CI reuses Make targets; matrix symmetry |
+| REV-5 | 9 | Contract append — sync |
+| REV-6 | 10 | Contract append — async |
+| REV-7 | 11 | Contract append — flattening |
+| REV-8 | 12 | Contract append — accessors |
+| REV-9 | 13 | Release workflow; no hardcoded versions; approval gate actually blocks |
+| REV-10 | 14 | Final consistency review |
+| REV-11 | 15 | Contract append — struct mapping (conditional) |
+| REV-12 | 16 | Contract append — request building (conditional) |
+
+### Human — 14 tasks
+
+| ID | Stage | Task |
+|---|---|---|
+| HUM-1 | 1 | Move SDK headers into `include/vendor/capl-dll-sdk/` |
+| HUM-2 | 1 | Fix `.claude/agents/build-pipeline-engineer.md` |
+| HUM-3 | 1 | Fix `.claude/agents/test-engineer.md` |
+| HUM-4 | 1 | Fix `.claude/skills/cpp-testing-conventions/SKILL.md` |
+| HUM-5 | 1 | Update 04-FLOW §6.1, §6.2, §6.3 |
+| HUM-6 | 3 | Install Vector CANoe/CANalyzer |
+| HUM-7 | 3 | Build + load the official Vector sample unchanged in CANoe |
+| HUM-8 | 4 | Commit and push the skeleton |
+| HUM-9 | 5 | Load and call the Hello DLL operation from a real `.can` script |
+| HUM-10 | 9 | Verify sync operations in CANoe |
+| HUM-11 | 10 | Verify async operations in CANoe |
+| HUM-12 | 11 | Verify CAPL associative-field syntax against the official CANoe help |
+| HUM-13 | 13 | Create the release tag |
+| HUM-14 | 13 | Verify the CI artifact in CANoe, then approve the publish |
+
+---
+
+## 12. Risks
+
+**Export contract.** Stage 5 is irreversible in practice: the naming convention and version-entry layout chosen there bind every later append. Stages 9, 10, 11, 12, 15, 16 each append — each requires `code-reviewer` and a human gate.
+
+**ABI failure modes that hide *all* operations, not just the new one.** Raw text pointer instead of the caller-supplied buffer; incorrect 1-byte alignment coverage through the terminating pointer. 04-FLOW §7 states plainly that this project's historical difficulty was never business logic — it was ABI compatibility with CANoe. Stage 5 exists as its own hard gate for exactly this reason.
+
+**`/MT` contamination.** A `/MD` libcurl/zlib/GoogleTest yields `LNK4098` at best and a second CRT heap inside the CANoe host process at worst. Static triplets are `/MT` by default — verify with `dumpbin /directives` rather than trusting it. If a dependency is only available as `/MD`, **stop and ask**.
+
+**Bitness parity.** CANoe loads only a matching-bitness DLL; a mismatch gives "Requested CAPL DLL is invalid". This risk drops materially because BPE-4 uses one parameterized rule instead of two near-duplicate recipes, and the related `.def` trap is neutralized by the no-`LIBRARY` rule. Environment trap: building x64 from an x86 Native Tools prompt gives misleading linker errors.
+
+**Configuration drift — demonstrated twice, not hypothetical.** v4 declared five stale files; the real number was eight, and `build-pipeline-engineer.md`, `test-engineer.md` and `cpp-testing-conventions` were all still directing agents with previous-iteration names after the "completed" pass. Agents load skills automatically, so a stale skill silently misdirects work on the most safety-critical files in the project. REV-1 exists specifically to close this class of error with a mechanical sweep rather than another manual enumeration. Stage 1 must complete before Stage 5.
+
+**Vector SDK header redistribution — accepted risk.** The repository is public and the headers are committed; this was an explicit user decision and is not re-litigated here. Practical note only: git history makes it effectively permanent — reversing the position later requires history rewriting, not a delete commit.
+
+**A "tidy-up" regression in `.gitignore`.** The `Makefile` and `*.lib` rules are commented out, not deleted, and sit inside blocks labelled "CMake generated files" and "Compiled Static libraries" where they look like they belong. Without the annotation in BPE-2, someone — or some agent — will eventually restore them and silently untrack the Makefile and every vendored `.lib`.
+
+**Bootstrap script scope creep.** `scripts/setup-dev-env.ps1` installs software and touches global state. It must stay idempotent and must never become a second build system — 04-FLOW §5 explicitly warns against "a growing set of helper scripts" in place of one Makefile. The script provisions the environment; `make` builds the project.
+
+**Toolchain divergence between local Build Tools and the CI runner image.** Local setup installs whatever Build Tools version is current; `windows-latest` ships its own. Usually harmless, but pin the toolset in both places if a reproducibility question ever arises, rather than debugging a version-skew symptom.
+
+**Versioning is new, untested machinery.** `FILEVERSION`/`PRODUCTVERSION` are four 16-bit fields capped at 65535 that **wrap silently**; `/VERSION:` accepts major.minor only; `version.rc` needs working `#ifndef` fallbacks so a bare `rc.exe` doesn't fail. `git describe --tags --always` carries both flags precisely so it works in a repo with no tags — this repo's current state. BPE-5 must test this before a real release depends on it.
+
+**Steps no agent can verify.** All fourteen HUM tasks, particularly the CANoe verifications at Stages 5, 9, 10, 11 and 13. 04-FLOW §5's last checklist item names the previous iteration's habit of leaving these perpetually open: "status: ready to build" ≠ "status: tested and working".
+
+**Scope creep toward struct mapping.** Stages 11 and 12 must ship before Stage 15 is reconsidered.
+
+---
+
+## 13. Execution order
+
+**1 → 2 → 4 → 5 (hard gate) → 6 → 7 → 8 → 9 → 10 → 11 → 12 → 13 → 14**, with Stage 3 running in parallel with 1–2–4 but completing before Stage 5, and Stages 15–16 only on demonstrated need. Stage 1 must not run in parallel with Stage 5.
+
+**Status:** v5 revision. Stage 1 partially complete (six of eleven items done); Stages 2 onward not started.
