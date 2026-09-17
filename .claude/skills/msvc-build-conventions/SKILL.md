@@ -107,9 +107,14 @@ number found anywhere as a bug.
 
 ## Dependency acquisition
 
-- libcurl: vcpkg, `curl[schannel]:x86-windows-static` and
-  `curl[schannel]:x64-windows-static`. Static triplets are `/MT` by
-  default — verify with `dumpbin /directives`, expecting
+- libcurl: vcpkg, `curl:x86-windows-static` and `curl:x64-windows-static`.
+  Do not add an explicit `[schannel]` feature — the current vcpkg `curl`
+  port has no feature by that name (`vcpkg install curl[schannel]:...`
+  fails with "curl has no feature named schannel"); SChannel is wired in
+  automatically by the port's default `ssl` feature on Windows
+  (non-UWP), which sets `-DCURL_USE_SCHANNEL=ON`, so plain `curl:<triplet>`
+  already gets SChannel with no OpenSSL dependency. Static triplets are
+  `/MT` by default — verify with `dumpbin /directives`, expecting
   `/DEFAULTLIB:LIBCMT` and never `MSVCRT`.
 - zlib arrives transitively with libcurl.
 - nlohmann/json: `json.hpp` pinned to v3.11.3, taken from the Releases page

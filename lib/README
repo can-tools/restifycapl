@@ -1,0 +1,26 @@
+# lib/
+
+Static dependencies for restifycapl, built with /MT (static multithreaded
+CRT) to match the project. Populated by scripts/setup-dev-env.ps1 -- do not
+hand-edit the .lib files; re-run the script instead.
+
+## Layout
+
+lib/x86/   x86 static libraries (vcpkg triplet x86-windows-static)
+lib/x64/   x64 static libraries (vcpkg triplet x64-windows-static)
+
+## Versions
+
+- libcurl: 8.22.0#1 (vcpkg port `curl` default features, which pull in
+  SChannel automatically on Windows -- no OpenSSL dependency)
+- zlib: bundled transitively via vcpkg's libcurl dependency; see
+  installed/<triplet>/lib for the exact file
+- nlohmann/json: v3.11.3, single-header `json.hpp` at
+  include/vendor/json.hpp, SHA-256 verified against the official v3.11.3
+  GitHub Release asset (see scripts/setup-dev-env.ps1 for the pinned hash
+  and verification provenance)
+
+Verify /MT provenance with `dumpbin /directives <lib>` -- expect
+`/DEFAULTLIB:LIBCMT`, never `MSVCRT`.
+
+Last refreshed: 2026-09-17 21:41:47 by scripts/setup-dev-env.ps1

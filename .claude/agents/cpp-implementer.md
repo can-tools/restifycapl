@@ -6,6 +6,7 @@ model: sonnet
 skills:
   - capl-export-contract
   - msvc-build-conventions
+  - project-docs
 permissionMode: default
 maxTurns: 30
 ---
@@ -58,5 +59,8 @@ CANoe (a "CAPL REST DLL").
 3. If you touched the export table or `.def` file, say so explicitly and
    recommend running `code-reviewer`.
 4. Recommend `test-engineer` for new or changed testable logic.
-5. Do not run release or CI-affecting commands yourself — that is
+5. If you appended a new operation to the export table, add a one-line
+   `## [Unreleased]` bullet to `CHANGELOG.md` describing it, at the same
+   time — see `project-docs`. Do not defer this to a later pass.
+6. Do not run release or CI-affecting commands yourself — that is
    `build-pipeline-engineer`'s responsibility.

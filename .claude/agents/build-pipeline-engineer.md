@@ -5,6 +5,7 @@ tools: Read, Glob, Grep, Edit, Write, Bash
 model: sonnet
 skills:
   - msvc-build-conventions
+  - project-docs
 permissionMode: default
 maxTurns: 30
 ---
@@ -31,6 +32,10 @@ Makefile targets and the GitHub Actions workflow that mirrors them.
   numbers.
 - Own packaging of build artifacts (the two DLLs, and any accompanying
   files) for GitHub Releases.
+- Own `CHANGELOG.md`'s release mechanics (renaming `[Unreleased]` to the
+  tagged version at release time) and `README.md`'s build/install sections
+  — see `project-docs` for the split of responsibility between `README.md`
+  and `CLAUDE.md`.
 
 ## Hard rules
 
