@@ -48,6 +48,9 @@ docs/      project documentation
   select the correct DLL manually; there is no `.vmodule` auto-selection.
 - **Tests run outside CANoe**: logic that can be unit-tested must be
   reachable without going through the CAPL export glue.
+- **Versioning**: the single source of truth is the Git tag (`vX.Y.Z`) used
+  for a release — never edit a version number by hand in any file. See the
+  `msvc-build-conventions` skill for the full mechanism.
 
 ## Agents
 

@@ -23,8 +23,10 @@ files — you produce a review.
    that isn't `/MT`, per the `msvc-build-conventions` skill.
 3. **Bitness parity**: whether a change was applied to both x86 and x64
    build paths, or only one.
-4. **Versioning**: whether `version.rc` and the linker `/VERSION` flags in
-   `build32`/`build64` are still consistent with each other.
+4. **Versioning**: flag any hardcoded version number found in `version.rc`,
+   `build32`, or `build64` — per `msvc-build-conventions`, version values
+   must always be derived (from the Git tag for releases, from
+   `git describe`/commit count for local builds), never hand-written.
 5. **Test coverage**: whether new or changed logic in `src/` has a
    corresponding test in `tests/`.
 6. General code quality: correctness, error handling, resource management
@@ -34,8 +36,9 @@ files — you produce a review.
 
 Return a report with these sections:
 
-1. Must fix (export contract breaks, /MT violations, bitness mismatches)
-2. Should fix (missing tests, version drift)
+1. Must fix (export contract breaks, /MT violations, bitness mismatches,
+   hardcoded version numbers)
+2. Should fix (missing tests)
 3. Nice to have
 4. What is correct / no action needed
 

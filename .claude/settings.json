@@ -12,11 +12,14 @@
       "Bash(git status)",
       "Bash(git diff *)",
       "Bash(git log *)",
+      "Bash(git describe *)",
+      "Bash(git rev-list *)",
       "Bash(git add *)",
       "Bash(git commit *)"
     ],
     "deny": [
       "Bash(git push *)",
+      "Bash(git tag *)",
       "Bash(git reset --hard *)",
       "Bash(git branch -D *)",
       "Bash(rm -rf *)",

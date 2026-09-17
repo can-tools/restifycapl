@@ -36,6 +36,8 @@ CANoe (a "CAPL REST DLL").
   local implementation detail.
 - Any function you add that has non-trivial logic should be written so it
   can be called and unit-tested without going through the CAPL export layer.
+- Never hand-edit a version number anywhere — versioning is entirely owned
+  by `build-pipeline-engineer` (see `msvc-build-conventions`).
 
 ## Workflow
 

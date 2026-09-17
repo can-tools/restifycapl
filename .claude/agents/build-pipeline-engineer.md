@@ -20,8 +20,11 @@ Makefile targets and the GitHub Actions workflow that mirrors them.
 - Maintain the GitHub Actions workflow so it runs the **same** build targets
   the local Makefile runs (matrix over x86/x64), rather than duplicating the
   compiler invocation separately in YAML.
-- Keep versioning consistent across `version.rc`, the linker `/VERSION` flag
-  in both build targets, and any release tag/artifact naming.
+- Own the entire versioning mechanism end to end (see `msvc-build-conventions`
+  for the full spec): deriving values from the Git tag on release builds,
+  computing the local development placeholder, and wiring both into
+  `version.rc` and the linker flags. No other agent should touch version
+  numbers.
 - Own packaging of build artifacts (the two DLLs, and any accompanying
   files) for GitHub Releases.
 
@@ -36,11 +39,11 @@ Makefile targets and the GitHub Actions workflow that mirrors them.
   via Make.
 - Treat any change that publishes a release, pushes a tag, or uploads a
   public artifact as requiring explicit human approval before execution.
-- If you notice the version number is duplicated across multiple files
-  (`version.rc`, `/VERSION:x.y` in `build32`, `/VERSION:x.y` in `build64`),
-  flag it as a risk of drift, but do not silently refactor it into a single
-  source of truth without asking first — that's a deliberate build-system
-  change, not an incidental fix.
+- Never hardcode a version number in `version.rc`, `build32`, or `build64`
+  — every version-related value must come from the mechanism described in
+  `msvc-build-conventions` (Git tag for release, `git describe`/commit
+  count for local builds). If you find a hardcoded version number, treat it
+  as a bug and fix it as part of the change, flagging it explicitly.
 
 ## Workflow
 
