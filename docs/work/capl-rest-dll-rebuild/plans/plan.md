@@ -1,6 +1,8 @@
-# Plan (v6): Build the CAPL REST DLL (restifycapl) from zero
+<!-- Produced by: planner agent, 2026-09-17 -->
 
-Revision of v5. Changes: Stage 1 marked complete, REV-1 outcome recorded with a narrowed sweep scope, two frontmatter fixes added.
+# Plan (v7): Build the CAPL REST DLL (restifycapl) from zero
+
+Revision of v6. Change: Stage 1 fully complete and verified; Stage 2 is now the active stage.
 
 ---
 
@@ -12,17 +14,21 @@ Build the CAPL REST DLL (`restifycapl`) from the cloned repository to a working,
 
 ## 2. Current state
 
-**Stage 1 is complete.** All five HUM items were applied:
+**Stage 1 is complete and verified.** All nine items applied and independently re-read on disk:
 
-- HUM-1 — the three Vector SDK headers moved via `git mv` to `include/vendor/capl-dll-sdk/`. Verified present.
-- HUM-2 — `.claude/agents/build-pipeline-engineer.md`: description, target names, hard rule, and the new `setup-dev-env.ps1` responsibility.
-- HUM-3 — `.claude/agents/test-engineer.md`: responsibility bullets rewritten for the layered `tests/` structure and current module names.
-- HUM-4 — `.claude/skills/cpp-testing-conventions/SKILL.md`: same substitution plus the async coverage bullet.
-- HUM-5 — `docs/.locals/04-FLOW-AND-DEPENDENCIES.md` §6.1/§6.2/§6.3: bootstrap script recorded as the decision; Build Tools replaces the full VS IDE.
+- HUM-1 — three Vector SDK headers at `include/vendor/capl-dll-sdk/` (moved via `git mv`, history preserved).
+- HUM-2 — `build-pipeline-engineer.md`: target names, single-parameterized-rule requirement, `version.rc` path, `setup-dev-env.ps1` ownership.
+- HUM-3 — `test-engineer.md` responsibility bullets: layered `tests/` structure, current module names.
+- HUM-4 — `cpp-testing-conventions/SKILL.md`: module names, layered structure, async coverage bullet.
+- HUM-5 — 04-FLOW §6.1/§6.2/§6.3: bootstrap script recorded as the decision; Build Tools replaces the full VS IDE.
+- HUM-6 — `test-engineer.md` frontmatter `description` corrected.
+- HUM-7 — `cpp-implementer.md` frontmatter `description` corrected.
+- HUM-8 — `code-reviewer.md` check 5 file list corrected; `cpp-testing-conventions` added to its skills.
+- HUM-9 — supersession banner on `capl-rest-dll-design-log.md`.
 
-Two frontmatter fixes remain (HUM-6, HUM-7 below) plus one optional item (HUM-8).
+**REV-1 re-run after HUM-6…HUM-9 under its corrected scope: zero hits across `.claude/**` and `CLAUDE.md`. Confirmed clean.**
 
-**Not started:** no `src/`, `lib/`, `tests/`, `scripts/`, `examples/`, `Makefile`, or `.github/` exist.
+**Not started:** no `src/`, `lib/`, `tests/`, `scripts/`, `examples/`, `Makefile`, or `.github/` exist. **Stage 2 is the active stage.**
 
 ---
 
@@ -64,68 +70,47 @@ Repeated here so executing agents need no access to `docs/.locals/`:
 
 ## 5. Phase 1 — Foundation & Environment
 
-### Stage 1 — Configuration reconciliation — COMPLETE, with follow-ups
+### Stage 1 — Configuration reconciliation — COMPLETE
 
-**Ownership note:** `.claude/**` and `CLAUDE.md` edits are routed to the **main session under human supervision**, not to a subagent — these files govern agent behaviour, and having an agent rewrite its own operating instructions is a governance smell.
+**Ownership note:** `.claude/**` and `CLAUDE.md` edits were routed to the main session under human supervision, not to a subagent — these files govern agent behaviour, and having an agent rewrite its own operating instructions is a governance smell.
 
-#### Completed items
+#### Completed items — all verified on disk
 
-**HUM-1 — DONE.** SDK headers moved to `include/vendor/capl-dll-sdk/` via `git mv` (history preserved).
+**HUM-1 — DONE.** SDK headers at `include/vendor/capl-dll-sdk/` (`cdll.h`, `VIA.h`, `VIA_CDLL.h`), moved via `git mv`.
 **HUM-2 — DONE.** `build-pipeline-engineer.md`: `build32`/`build64` → `all`/`build-x86`/`build-x64`/`test`/`clean`; single-parameterized-rule requirement; `version.rc` path corrected; `scripts/setup-dev-env.ps1` ownership added.
-**HUM-3 — DONE (body only; see HUM-6).** `test-engineer.md` responsibility bullets.
+**HUM-3 — DONE.** `test-engineer.md` responsibility bullets.
 **HUM-4 — DONE.** `cpp-testing-conventions/SKILL.md` module names, layered `tests/` structure, async coverage bullet.
 **HUM-5 — DONE.** 04-FLOW §6.1/§6.2/§6.3.
+**HUM-6 — DONE.** `test-engineer.md` frontmatter `description` now reads "type conversion, JSON path resolution, HTTP client, sync/async operations, JSON flattening, JSON accessors" — in-scope modules only, no deferred ones.
+**HUM-7 — DONE.** `cpp-implementer.md` frontmatter `description` now reads "REST operations sync and async, JSON path resolution, flattening, typed accessors, type conversion".
+**HUM-8 — DONE.** `code-reviewer.md` check 5 now names "`src/module/version.rc`, the `Makefile`, or the CI workflow files" (the Make-target-as-file category error is gone); `cpp-testing-conventions` added to its `skills:` list, so its test-coverage check now has the conventions defining adequate coverage.
+**HUM-9 — DONE.** Supersession banner present on `capl-rest-dll-design-log.md`, placed after the intro paragraph and before §1.
 
-#### REV-1 outcome — resolved; the defect was in this plan, not the repository
+#### REV-1 — SATISFIED
 
-REV-1 as written in v5 instructed a stale-identifier sweep across `CLAUDE.md`, `.claude/**`, and `docs/.locals/**`. Run literally, it reports hits. Analysed, every hit is a false positive, and the fault is the sweep's scope. Three findings, recorded here so this is not re-litigated:
+REV-1 as originally written in v5 swept `CLAUDE.md`, `.claude/**`, and `docs/.locals/**`. Run literally, it reported hits, all false positives caused by the sweep's own scope. Three findings, recorded so this is not re-litigated:
 
-**Finding 1 — `CLAUDE.md` and `.claude/**` are clean.** Zero hits. These are the only files that are operationally loaded: skills and agent definitions are auto-loaded into agent context, and `CLAUDE.md` is auto-loaded into every session. This is the part of REV-1 that actually mattered, and it passes.
+**Finding 1 — the operational files are clean.** `CLAUDE.md` and `.claude/**` are the only files that are *operationally loaded*: skills and agent definitions auto-load into agent context, and `CLAUDE.md` auto-loads into every session. Zero hits, re-confirmed after HUM-6…HUM-9.
 
-**Finding 2 — `docs/.locals/**` hits are historical and are hereby exempt.** That directory is git-ignored (`.gitignore` line 72), never shipped, and per `CLAUDE.md`'s "Planning documents" section is planner-facing scratch that no agent auto-loads. The files are the superseded planning drafts (`plan-en.md`, `plan-pl.md`, `plan-v2-*.md`, `plan-v3-*.md`) and the design log.
+**Finding 2 — `docs/.locals/**` is exempt as historical record.** That directory is git-ignored (`.gitignore` line 72), never shipped, and per `CLAUDE.md`'s "Planning documents" section is planner-facing scratch that no agent auto-loads. The files are superseded planning drafts (`plan-en.md`, `plan-pl.md`, `plan-v2-*.md`, `plan-v3-*.md`) and the design log.
 
 These drafts must **not** be scrubbed. They are an audit trail: the v1–v3 drafts carry the user's inline answers, and those answers are only intelligible alongside the question they answered. Deleting the string `build32` from a file where the user wrote "so the target names should all be changed" destroys the evidence of *why* the current naming exists. Rewriting history to make a grep pass is the wrong trade — the same reason we don't rewrite old git commits to use current variable names.
 
-**Exemption rule going forward:** the stale-identifier sweep covers `CLAUDE.md` and `.claude/**` only. `docs/.locals/**` is exempt as historical record.
+**Exemption rule:** the stale-identifier sweep covers `CLAUDE.md` and `.claude/**` only.
 
-**One targeted exception.** The version-numbered drafts announce their own obsolescence through their filenames, so they need nothing. `capl-rest-dll-design-log.md` is different: it is *not* version-named, and this plan actively cites it as authoritative (§7 is the versioning specification). A reader has no way to tell that its §4 "Directory structure" — still showing `lib-32b/`, `build-32b/` — is obsolete while its §7 is current. **HUM-9** below adds a one-line header to that file only.
+**One targeted exception, now resolved by HUM-9.** The version-numbered drafts announce their own obsolescence through their filenames. `capl-rest-dll-design-log.md` did not — it is not version-named, and this plan cites it as authoritative (§7 is the versioning specification), so a reader had no way to tell that its §4 "Directory structure" was obsolete while its §7 was current. The banner closes that gap.
 
-**Finding 3 — the sweep is self-matching, and must exempt this plan.** The only hits outside `docs/.locals/` are in `docs/work/capl-rest-dll-rebuild/plans/plan.md` — this document, which necessarily *names* the identifiers being searched for, both in §2's record of what was stale and in REV-1's own task description. A sweep whose definition lives inside its own search scope can never report clean. **REV-1's scope excludes this plan file.**
+**Finding 3 — the sweep is self-matching and excludes this plan.** This document necessarily *names* the identifiers being searched for, in its own historical record and in REV-1's task description. A sweep whose definition lives inside its own search scope can never report clean. **REV-1's scope excludes `docs/work/capl-rest-dll-rebuild/plans/plan.md`.**
 
-**Tooling note.** The `Grep` tool honours `.gitignore` by default, so it does not see `docs/.locals/` at all and naturally produces the correct scope. A Bash `grep -r` or `rg --no-ignore` does not, and will re-raise these same false positives. Use `Grep`, or pass an explicit path list of `CLAUDE.md` and `.claude/`.
+**Tooling note.** The `Grep` tool honours `.gitignore` by default, so it does not see `docs/.locals/` and naturally produces the correct scope. A Bash `grep -r` or `rg --no-ignore` does not, and will re-raise these false positives. Use `Grep`, or pass an explicit path list of `CLAUDE.md` and `.claude/`.
 
-**REV-1 status: satisfied.**
+#### One non-blocking observation, deliberately not a Stage 1 item
 
-#### Remaining items
+`CLAUDE.md`'s opening line describes the project as exposing "synchronous and asynchronous REST/HTTP operations, JSON parsing, and struct mapping to CAPL scripts" — naming struct mapping, which is deferred to conditional Stage 15. This is the same *class* of issue as HUM-6/HUM-7 but materially lower risk: unlike agent frontmatter, `CLAUDE.md`'s intro is not routing metadata, nothing selects on it, and the `## Scope` section fifteen lines below states the deferral explicitly, so a reader gets the correct picture from the same file. Left as-is deliberately rather than opened as a new item, because renumbering nine downstream HUM tasks for a cosmetic doc tweak costs more than it returns. Worth folding into any future `CLAUDE.md` edit that happens for another reason.
 
-**HUM-6 — Fix `test-engineer.md` frontmatter `description`.** HUM-3 corrected the body but not the frontmatter, which still reads "JSON parsing, struct mapping, type conversion, request building" — naming two *deferred* modules while omitting five in-scope ones. This is not cosmetic: the frontmatter `description` is the routing metadata the orchestrator uses to choose an agent, so a description advertising deferred work and hiding current work causes mis-selection. Replace with:
+**Stage 1 status: fully complete. No outstanding items.**
 
-```yaml
-description: Designs and implements GoogleTest unit tests for CAPL REST DLL logic (type conversion, JSON path resolution, HTTP client, sync/async operations, JSON flattening, JSON accessors) in isolation from CANoe. Use after implementing or changing logic in src/.
-```
-
-**HUM-7 — Fix `cpp-implementer.md` frontmatter `description`.** Same class, lower severity: it lists "struct mapping" among current responsibilities. Cheap to fix while adjacent. Replace with:
-
-```yaml
-description: Implements and modifies C++ source files (REST operations sync and async, JSON path resolution, flattening, typed accessors, type conversion) for the CAPL REST DLL. Use for adding features, fixing bugs, or refactoring logic in src/.
-```
-
-**HUM-8 — Optional, recommended: two small `code-reviewer.md` improvements.**
-- Check 5 (Versioning) says to flag hardcoded versions "in `src/module/version.rc`, `build-x86`, or `build-x64`". `build-x86`/`build-x64` are Make *targets*, not files — a category error that leaves the reviewer without a file to open. Replace the file list with "`src/module/version.rc`, the `Makefile`, or the CI workflow files".
-- Add `cpp-testing-conventions` to its `skills:` list. Check 6 asks it to judge test coverage, which it currently does without access to the conventions defining what adequate coverage means.
-
-**HUM-9 — Add a supersession header to `docs/.locals/capl-rest-dll-design-log.md`** (per Finding 2's targeted exception):
-
-```markdown
-> **Historical record.** This log captures decisions as they were made. Some
-> sections are superseded — notably §4 (Directory structure), which predates the
-> layered `src/` layout. The current authority is
-> `docs/work/capl-rest-dll-rebuild/plans/plan.md`. §7 (Versioning) remains current.
-```
-
-**Human approval gate: YES** for HUM-6 and HUM-7 before Stage 5, since they affect agent routing. HUM-8 and HUM-9 are non-blocking.
-
-### Stage 2 — Scripted development-environment bootstrap
+### Stage 2 — Scripted development-environment bootstrap — ACTIVE
 
 **BPE-1 — Write `scripts/setup-dev-env.ps1`.** Idempotent, re-runnable, safe to run twice, prints a pass/fail summary (modelled on 04-FLOW §6.9) rather than aborting at the first problem. Tasks:
 
@@ -149,7 +134,7 @@ No automation path exists for either item — a licensing constraint, not a tech
 
 **HUM-11 — Build and load the official "Example of a Windows DLL for CAPL" sample, unchanged, in CANoe.** The step people skip and shouldn't: it proves the toolchain + CANoe pairing works before any project code can be blamed for a failure. Build Tools ships MSBuild, so the sample compiles without the IDE; loading it into CANoe is manual.
 
-Stage 3 runs in parallel with Stages 1–2 and 4. It only hard-blocks Stage 5.
+Stage 3 runs in parallel with Stages 2 and 4. It only hard-blocks Stage 5.
 
 ### Stage 4 — Repo skeleton, Makefile, versioning
 
@@ -383,10 +368,10 @@ Trigger: hand-assembling JSON in CAPL proves genuinely cumbersome in practice. T
 | HUM-3 | 1 | Fix `.claude/agents/test-engineer.md` body | **DONE** |
 | HUM-4 | 1 | Fix `.claude/skills/cpp-testing-conventions/SKILL.md` | **DONE** |
 | HUM-5 | 1 | Update 04-FLOW §6.1, §6.2, §6.3 | **DONE** |
-| HUM-6 | 1 | Fix `test-engineer.md` frontmatter description (routing metadata) | |
-| HUM-7 | 1 | Fix `cpp-implementer.md` frontmatter description | |
-| HUM-8 | 1 | Optional: `code-reviewer.md` check-5 wording + add `cpp-testing-conventions` skill | |
-| HUM-9 | 1 | Add supersession header to `capl-rest-dll-design-log.md` | |
+| HUM-6 | 1 | Fix `test-engineer.md` frontmatter description (routing metadata) | **DONE** |
+| HUM-7 | 1 | Fix `cpp-implementer.md` frontmatter description | **DONE** |
+| HUM-8 | 1 | `code-reviewer.md` check-5 wording + add `cpp-testing-conventions` skill | **DONE** |
+| HUM-9 | 1 | Add supersession header to `capl-rest-dll-design-log.md` | **DONE** |
 | HUM-10 | 3 | Install Vector CANoe/CANalyzer | |
 | HUM-11 | 3 | Build + load the official Vector sample unchanged in CANoe | |
 | HUM-12 | 4 | Commit and push the skeleton | |
@@ -409,9 +394,9 @@ Trigger: hand-assembling JSON in CAPL proves genuinely cumbersome in practice. T
 
 **Bitness parity.** CANoe loads only a matching-bitness DLL; a mismatch gives "Requested CAPL DLL is invalid". This risk drops materially because BPE-4 uses one parameterized rule instead of two near-duplicate recipes, and the related `.def` trap is neutralized by the no-`LIBRARY` rule. Environment trap: building x64 from an x86 Native Tools prompt gives misleading linker errors.
 
-**Configuration drift — mitigated, and the mitigation itself is now scoped.** v4 declared five stale config files; the real number was eight, and three agent/skill files were still directing agents with previous-iteration names after a pass believed complete. All operational files are now clean. REV-1 remains the standing check, but with corrected scope (`CLAUDE.md` and `.claude/**` only, excluding this plan file) — as originally written it swept historical drafts and its own definition, producing noise that obscures real drift. A check that cries wolf gets ignored, which would have been a worse outcome than not having it.
+**Configuration drift — closed for now, with a scoped standing check.** v4 declared five stale config files; the real number was eight, and three agent/skill files were still directing agents with previous-iteration names after a pass believed complete. All operational files are now clean and re-verified. REV-1 remains the standing check, with corrected scope (`CLAUDE.md` and `.claude/**` only, excluding this plan file) — as originally written it swept historical drafts and its own definition, producing noise that obscures real drift. A check that cries wolf gets ignored, which would have been worse than not having it.
 
-**Agent routing metadata is easy to miss.** HUM-3 corrected `test-engineer.md`'s body but not its frontmatter `description` — the field the orchestrator actually reads when choosing an agent. Body and frontmatter are separate surfaces and both need updating; only the body is visible when reading the file as prose. HUM-6/HUM-7 close this, and any future agent-scope change should check both.
+**Agent routing metadata is easy to miss.** HUM-3 corrected `test-engineer.md`'s body but not its frontmatter `description` — the field the orchestrator actually reads when choosing an agent. Body and frontmatter are separate surfaces and both need updating; only the body is visible when reading a file as prose. Any future agent-scope change should check both.
 
 **Vector SDK header redistribution — accepted risk.** The repository is public and the headers are committed; this was an explicit user decision and is not re-litigated here. Practical note only: git history makes it effectively permanent — reversing the position later requires history rewriting, not a delete commit.
 
@@ -423,7 +408,7 @@ Trigger: hand-assembling JSON in CAPL proves genuinely cumbersome in practice. T
 
 **Versioning is new, untested machinery.** `FILEVERSION`/`PRODUCTVERSION` are four 16-bit fields capped at 65535 that **wrap silently**; `/VERSION:` accepts major.minor only; `version.rc` needs working `#ifndef` fallbacks so a bare `rc.exe` doesn't fail. `git describe --tags --always` carries both flags precisely so it works in a repo with no tags — this repo's current state. BPE-5 must test this before a real release depends on it.
 
-**Steps no agent can verify.** All eighteen HUM tasks, particularly the CANoe verifications at Stages 5, 9, 10, 11 and 13. 04-FLOW §5's last checklist item names the previous iteration's habit of leaving these perpetually open: "status: ready to build" ≠ "status: tested and working".
+**Steps no agent can verify.** The nine remaining HUM tasks, particularly the CANoe verifications at Stages 5, 9, 10, 11 and 13. 04-FLOW §5's last checklist item names the previous iteration's habit of leaving these perpetually open: "status: ready to build" ≠ "status: tested and working".
 
 **Scope creep toward struct mapping.** Stages 11 and 12 must ship before Stage 15 is reconsidered.
 
@@ -431,6 +416,6 @@ Trigger: hand-assembling JSON in CAPL proves genuinely cumbersome in practice. T
 
 ## 13. Execution order
 
-**1 → 2 → 4 → 5 (hard gate) → 6 → 7 → 8 → 9 → 10 → 11 → 12 → 13 → 14**, with Stage 3 running in parallel with 1–2–4 but completing before Stage 5, and Stages 15–16 only on demonstrated need.
+**1 (done) → 2 → 4 → 5 (hard gate) → 6 → 7 → 8 → 9 → 10 → 11 → 12 → 13 → 14**, with Stage 3 running in parallel with 2 and 4 but completing before Stage 5, and Stages 15–16 only on demonstrated need.
 
-**Status:** v6. Stage 1 complete except HUM-6/HUM-7 (blocking before Stage 5) and HUM-8/HUM-9 (non-blocking). Stage 2 is the next substantive work.
+**Status:** v7. Stage 1 complete and verified. **Stage 2 (`scripts/setup-dev-env.ps1`, owned by `build-pipeline-engineer`) is the active stage.**

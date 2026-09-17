@@ -41,10 +41,10 @@ docs/work/<slug>/
   needed unless the same slug is reused for unrelated work later — if so,
   prefix with the date: `<yyyy-mm-dd>-<slug>`).
 - If `docs/work/<slug>/plans/` doesn't exist yet, create it.
-- If `plan.md` already exists for this slug, treat the new save as a new
-  revision: ask whether to overwrite, or save as `plan-v2.md`,
-  `plan-v3.md`, etc., rather than silently overwriting a plan that may
-  still be in use.
+- If `plan.md` already exists for this slug, overwrite it in place — do not
+  ask, and do not create `plan-v2.md`/`plan-v3.md` siblings. History lives
+  in git (see "Provenance and history" below), not in parallel files or
+  filename suffixes.
 
 ## Temporary plans
 
@@ -56,6 +56,27 @@ already present) rather than under `docs/work/`.
 
 - Save the plan text exactly as produced — do not summarize, reformat
   headings, or drop sections.
-- Add a one-line header above the pasted plan noting the date and, if known,
-  which agent or mode produced it, e.g.:
-  `<!-- Produced by: planner agent, 2026-09-16 -->`
+- Do not add a "Produced by"/date header inside the file. That information
+  belongs to git (commit author + timestamp + message), not to the file
+  content — a hand-written header duplicates what git already tracks
+  reliably, and duplicated metadata drifts (it has, twice, in this
+  project's own history). Keep the file to exactly the plan text.
+
+## Provenance and history
+
+Git is the single source of truth for "who wrote this revision and when" —
+not a file header, not versioned filenames. `plan-writer` does not have
+`Bash`/git access, so it cannot commit its own save. After writing the
+file, say so explicitly in your report back (e.g. "Saved to
+`docs/work/<slug>/plans/plan.md` — needs a commit to preserve history"), so
+the orchestrating session (which does have git access) can commit it with a
+message describing the revision, e.g.:
+
+```
+docs(plan): capl-rest-dll-rebuild v7 — mark Stage 1 complete
+```
+
+Follow this project's standard commit-attribution convention (e.g. a
+`Co-Authored-By:` trailer) if one is in effect for the session, the same
+way it's applied to code commits — don't invent a different provenance
+mechanism for plans.
