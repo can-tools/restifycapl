@@ -1,18 +1,18 @@
 ---
 name: capl-export-contract
-description: The export contract between the DLL and CANoe/CAPL — the .def file, the CAPL_DLL_INFO_LIST table, and bitness rules. Load this before touching src/capl-rest-dll.cpp, includes/*.h, or the .def file.
+description: The export contract between the DLL and CANoe/CAPL — the .def file, the CAPL_DLL_INFO_LIST table, and bitness rules. Load this before touching `src/module/exports.cpp`, `src/module/exports.def`, or anything in `include/vendor/capl-dll-sdk/`.
 ---
 
 # CAPL export contract
 
 ## What the real contract is
 
-The `.def` file (`capl-rest-dll.def`) is a transport mechanism — it exposes
-whatever entry point CANoe needs to reach the description table. It is
-**not** the actual API contract.
+The `.def` file (`src/module/exports.def`) is a transport mechanism — it
+exposes whatever entry point CANoe needs to reach the description table. It
+is **not** the actual API contract.
 
 The actual contract seen by CAPL scripts is the `CAPL_DLL_INFO_LIST` (or
-`CAPL_DLL_INFO4`) table defined in `src/capl-rest-dll.cpp`. Each row of this
+`CAPL_DLL_INFO4`) table defined in `src/module/exports.cpp`. Each row of this
 table defines, for one function:
 
 - the name CAPL sees (which does not have to match the C++ function name),
@@ -35,7 +35,7 @@ The first row of the table is a reserved version entry
 - Functions exposed through the table should be declared `extern "C"` to
   avoid C++ name-mangling issues tying the export to a specific compiler
   version.
-- Any change to this table, or to `capl-rest-dll.def`, requires a
+- Any change to this table, or to `src/module/exports.def`, requires a
   `code-reviewer` pass before being considered done.
 - If a breaking change to the contract is genuinely required, treat it as a
   major version change and call it out explicitly — do not let it happen as
@@ -46,8 +46,24 @@ The first row of the table is a reserved version entry
 - CANoe's runtime kernel loads a DLL matching its own bitness exactly: a
   32-bit CANoe configuration will refuse a 64-bit DLL and vice versa
   ("Requested CAPL DLL is invalid").
-- Both `build-32b/capl-rest-32b.dll` and `build-64b/capl-rest-64b.dll` must
-  always be built and kept behaviorally identical (same exported table,
-  same behavior) — only the target architecture differs.
+- Both `build/x86/restifycapl-x86.dll` and `build/x64/restifycapl-x64.dll`
+  must always be built and kept behaviorally identical (same exported
+  table, same behavior) — only the target architecture differs.
 - Clients of this project select the correct DLL manually; there is no
   `.vmodule` auto-selection mechanism in scope for this project.
+
+## The .def file must not contain a LIBRARY statement
+
+`src/module/exports.def` is shared by both architecture builds, which
+produce two differently-named DLLs. It must contain only an EXPORTS
+section:
+
+    EXPORTS
+        CAPLDLLEntryPoint
+
+Do NOT add a `LIBRARY` line (e.g. `LIBRARY restifycapl-x86`). It pins one
+internal module name into a file both builds share, so it can only ever be
+correct for one of the two — forcing either duplicate .def files kept in
+sync by hand, or build-time generation. Omitting it lets each build's
+`/OUT:` flag alone determine its filename, so one .def serves both
+architectures. `code-reviewer` flags any added LIBRARY line as a defect.

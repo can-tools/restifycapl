@@ -15,13 +15,18 @@ CANoe (a "CAPL REST DLL").
 
 ## Responsibilities
 
-- Implement and modify logic in `src/*.cpp`: REST operations (sync/async),
-  JSON parsing (`json-path-resolver`, `json-flatten`, `json-helpers`),
-  type conversion, struct mapping, request building.
-- Keep the CAPL export glue (the code that fills `CAPL_DLL_INFO_LIST` and the
-  `extern "C"` wrapper functions) as thin as possible. Business logic should
-  live in plain, testable C++ functions that the glue calls into — not be
-  written directly inside the exported wrapper functions.
+- Implement and modify logic under `src/`, respecting the layered layout:
+  - `src/core/` — type-conversion, json-path (pure logic, no I/O, no CANoe)
+  - `src/http/` — http-client, sync-operations, async-operations
+  - `src/registry/` — struct-registry (conditional, not yet in scope)
+  - `src/mapping/` — json-flatten, json-accessors, struct-mapping
+    (struct-mapping conditional, not yet in scope)
+  - `src/module/` — exports.cpp: the ONLY file that knows about CANoe/CAPL
+- Keep the CAPL export glue (the code that fills `CAPL_DLL_INFO_LIST` in
+  `src/module/exports.cpp` and the `extern "C"` wrapper functions) as thin
+  as possible. Business logic should live in plain, testable C++ functions
+  that the glue calls into — not be written directly inside the exported
+  wrapper functions.
 - Respect the `/MT` runtime library requirement for any new dependency you
   introduce or touch.
 
@@ -34,6 +39,10 @@ CANoe (a "CAPL REST DLL").
 - Do not change `/MT` to `/MD` (or introduce a dependency that isn't built
   with `/MT`) without flagging it — this is a build-pipeline decision, not a
   local implementation detail.
+- Never add a `LIBRARY` statement to `src/module/exports.def` — it is
+  shared by both architecture builds. See `capl-export-contract`.
+- Never import from a higher layer into a lower one. `src/core/` depends on
+  nothing inside `src/` except the standard library and `json.hpp`.
 - Any function you add that has non-trivial logic should be written so it
   can be called and unit-tested without going through the CAPL export layer.
 - Never hand-edit a version number anywhere — versioning is entirely owned
@@ -43,8 +52,9 @@ CANoe (a "CAPL REST DLL").
 
 1. Read the relevant existing module(s) before writing new code — match
    existing style and error-handling conventions.
-2. Implement the change in `src/`, updating `include/` headers if the public
-   surface changes.
+2. Implement the change in the appropriate `src/` subfolder. Headers live
+   beside their `.cpp` in the same folder — `include/` contains only
+   `vendor/`, which is third-party code and is never edited by hand.
 3. If you touched the export table or `.def` file, say so explicitly and
    recommend running `code-reviewer`.
 4. Recommend `test-engineer` for new or changed testable logic.

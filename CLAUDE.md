@@ -11,36 +11,64 @@ scripts running inside CANoe.
 - Two architecture targets: x86 and x64. Both must exist and stay behaviorally
   identical except for architecture flags — CANoe's runtime kernel only loads
   a DLL matching its own bitness.
-- Dependencies: libcurl, zlib, plus Windows system libs (crypt32, bcrypt,
-  secur32, ws2_32, normaliz, wldap32, advapi32).
+- Dependencies: libcurl (vcpkg static triplets, Schannel TLS backend), zlib
+  (transitive), nlohmann/json v3.11.3 (header-only), plus Windows system
+  libs (crypt32, bcrypt, secur32, ws2_32, normaliz, wldap32, advapi32).
+- Toolchain: Visual Studio **Build Tools** (no IDE required); development
+  in VS Code.
 - Tests: GoogleTest, built with `/MT` to match the main project.
+
+## Scope
+
+In scope now: sync + async REST/HTTP, JSON flattening, typed JSON path
+accessors. Deferred until a demonstrated need: struct registry / JSON→struct
+mapping, and CAPL-side request-body building. Do not build the deferred
+modules pre-emptively.
 
 ## Build
 
-- `make build32` — builds `build-32b/capl-rest-32b.dll` (`/MACHINE:X86`).
-- `make build64` — builds `build-64b/capl-rest-64b.dll` (`/MACHINE:X64`).
+- `make all` — builds both architectures (default target).
+- `make build-x86` — builds `build/x86/restifycapl-x86.dll` (`/MACHINE:X86`).
+- `make build-x64` — builds `build/x64/restifycapl-x64.dll` (`/MACHINE:X64`).
 - `make test` — builds and runs the GoogleTest suite (outside CANoe).
-- Dependencies live in `lib-32b/` and `lib-64b/`, matched to `/MT`.
+- `make clean` — removes all build output and intermediate files.
+- Dependencies live in `lib/x86/` and `lib/x64/`, matched to `/MT`.
+- Both architecture targets are thin wrappers over a single parameterized
+  rule, so compiler and linker flags cannot drift between x86 and x64.
+- First-time local setup: `scripts/setup-dev-env.ps1`. It cannot install
+  CANoe — that step is manual.
 
 ## Directory layout
 
 ```
-include/   public headers (CAPL export declarations)
-src/       implementation (.cpp)
-lib-32b/   x86 static dependencies (.lib), built with /MT
-lib-64b/   x64 static dependencies (.lib), built with /MT
-build-32b/ x86 build output
-build-64b/ x64 build output
-tests/     GoogleTest unit tests, mirrors src/ module names
-docs/      project documentation
+include/vendor/         third-party headers, never edited by hand
+  json.hpp                nlohmann/json, pinned v3.11.3
+  capl-dll-sdk/           Vector SDK headers (cdll.h, VIA.h, VIA_CDLL.h)
+src/core/               LEVEL 0: pure logic, zero I/O, no CANoe knowledge
+src/http/               LEVEL 1+3: http-client, sync-operations, async-operations
+src/registry/           LEVEL 1: struct-registry (conditional, not yet in scope)
+src/mapping/            LEVEL 2: json-flatten, json-accessors, struct-mapping
+src/module/             LEVEL 4: the ONLY place that knows about CANoe/CAPL
+                          exports.cpp, exports.def, version.rc
+lib/x86/, lib/x64/      static dependencies (.lib), built with /MT
+build/x86/, build/x64/  build output (gitignored)
+tests/                  GoogleTest unit tests, run without CANoe
+examples/               .can examples showing usage from the CAPL side
+scripts/                setup-dev-env.ps1 — environment bootstrap
+docs/                   project documentation
 ```
+
+Folders map 1:1 onto dependency levels. `src/core/` must not import from
+`src/http/`, `src/registry/`, or `src/mapping/`. Only `src/module/` may
+include the CAPL SDK headers.
 
 ## Non-negotiable constraints
 
 - **Export contract**: the real contract with CANoe is the
-  `CAPL_DLL_INFO_LIST` table in `src/capl-rest-dll.cpp`, not just the `.def`
-  file. Never rename, reorder, or remove an existing entry — see the
-  `capl-export-contract` skill before touching this file.
+  `CAPL_DLL_INFO_LIST` / `CAPL_DLL_INFO4` table in `src/module/exports.cpp`,
+  not just `src/module/exports.def`. Never rename, reorder, or remove an
+  existing entry — see the `capl-export-contract` skill before touching
+  this file.
 - **Runtime library**: `/MT` is mandatory for the project and every static
   dependency (libcurl, zlib, GoogleTest). Never mix `/MT` and `/MD` in the
   same link — see the `msvc-build-conventions` skill.

@@ -18,19 +18,27 @@ description: MSVC build rules for the CAPL REST DLL — runtime library, archite
 
 ## Architecture targets
 
-- `build32` compiles with `/MACHINE:X86`, linking against `lib-32b/`.
-- `build64` compiles with `/MACHINE:X64`, linking against `lib-64b/`.
-- The two targets must stay behaviorally identical: same source files, same
-  compiler flags (`/std:c++17`, `/EHsc`, `/MT`), same export table — only
-  the architecture-specific flags and library paths differ.
-- Any change made to one target's flags or source list must be mirrored in
-  the other, unless the change is intentionally architecture-specific.
+- `build-x86` compiles with `/MACHINE:X86`, links against `lib/x86/`,
+  produces `build/x86/restifycapl-x86.dll`.
+- `build-x64` compiles with `/MACHINE:X64`, links against `lib/x64/`,
+  produces `build/x64/restifycapl-x64.dll`.
+- `all` builds both; `test` and `clean` follow GNU target conventions.
+- Both architecture targets must be thin wrappers over a **single
+  parameterized rule**, with the architecture passed as a Make variable.
+  Do not write two parallel recipes — flag drift between x86 and x64 is a
+  top project risk, and one shared rule makes it structurally impossible.
+- The two targets stay behaviorally identical: same source files, same
+  flags (`/std:c++17`, `/EHsc`, `/MT`), same export table — only the
+  architecture flag and library path differ.
 
 ## Directory conventions
 
 ```
-lib-32b/, lib-64b/     static dependencies (.lib), built with /MT
-build-32b/, build-64b/ build output (.dll, .lib, .exp, .res)
+lib/x86/, lib/x64/       static dependencies (.lib), built with /MT
+build/x86/, build/x64/   build output (.dll, .lib, .exp, .res) — gitignored
+include/vendor/          third-party headers (json.hpp, capl-dll-sdk/)
+scripts/                 setup-dev-env.ps1 — environment bootstrap only,
+                         never a second build system
 ```
 
 ## Versioning — single source of truth: the Git tag
@@ -88,7 +96,7 @@ number found anywhere as a bug.
 
 ## CI/CD
 
-- The GitHub Actions workflow must invoke the same `build32`/`build64`
+- The GitHub Actions workflow must invoke the same `build-x86`/`build-x64`
   Make targets used locally — do not duplicate the `cl.exe`/`rc.exe`
   invocation directly in YAML.
 - CI runs on `windows-latest` and must activate the MSVC developer
@@ -96,3 +104,18 @@ number found anywhere as a bug.
   architecture before invoking Make.
 - Do not introduce CMake or replace the Makefile-based build unless
   explicitly asked to.
+
+## Dependency acquisition
+
+- libcurl: vcpkg, `curl[schannel]:x86-windows-static` and
+  `curl[schannel]:x64-windows-static`. Static triplets are `/MT` by
+  default — verify with `dumpbin /directives`, expecting
+  `/DEFAULTLIB:LIBCMT` and never `MSVCRT`.
+- zlib arrives transitively with libcurl.
+- nlohmann/json: `json.hpp` pinned to v3.11.3, taken from the Releases page
+  (amalgamated single file) and SHA-256 verified. Not `git clone`.
+- Windows system libs, always link all of them: crypt32, bcrypt, secur32,
+  ws2_32, normaliz, wldap32, advapi32.
+- Record exact versions in `lib/README`.
+- Toolchain: Visual Studio Build Tools with the `VCTools` workload; the
+  full VS IDE is not required.

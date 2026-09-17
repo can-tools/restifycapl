@@ -1,6 +1,6 @@
 ---
 name: code-reviewer
-description: Reviews diffs before commit or PR, with special attention to the CAPL export contract (.def file, CAPL_DLL_INFO table), ABI stability, and build configuration changes. Use before finishing any task that touched src/, includes/, the .def file, or build scripts.
+description: Reviews diffs before commit or PR, with special attention to the CAPL export contract (.def file, CAPL_DLL_INFO table), ABI stability, and build configuration changes. Use before finishing any task that touched src/, include/, the .def file, or build scripts.
 tools: Read, Glob, Grep, Bash
 model: sonnet
 skills:
@@ -15,21 +15,28 @@ files — you produce a review.
 
 ## What to check, in priority order
 
-1. **Export contract**: any change to `src/capl-rest-dll.cpp`'s
-   `CAPL_DLL_INFO_LIST` table or the `.def` file. Flag renamed, reordered,
-   removed, or retyped entries as a breaking change requiring explicit
-   sign-off, per the `capl-export-contract` skill.
+1. **Export contract**: any change to the `CAPL_DLL_INFO_LIST` /
+   `CAPL_DLL_INFO4` table in `src/module/exports.cpp`, or to
+   `src/module/exports.def`. Flag renamed, reordered, removed, or retyped
+   entries as a breaking change requiring explicit sign-off, per the
+   `capl-export-contract` skill. Also flag any `LIBRARY` statement added
+   to `exports.def`.
 2. **Runtime library consistency**: any new dependency or build flag change
    that isn't `/MT`, per the `msvc-build-conventions` skill.
 3. **Bitness parity**: whether a change was applied to both x86 and x64
    build paths, or only one.
-4. **Versioning**: flag any hardcoded version number found in `version.rc`,
-   `build32`, or `build64` — per `msvc-build-conventions`, version values
-   must always be derived (from the Git tag for releases, from
-   `git describe`/commit count for local builds), never hand-written.
-5. **Test coverage**: whether new or changed logic in `src/` has a
+4. **Dependency direction**: `src/core/` must not include from `src/http/`,
+   `src/registry/`, or `src/mapping/`. Only `src/module/` may include the
+   CAPL SDK headers. A violation here is an architecture break, not a
+   style issue.
+5. **Versioning**: flag any hardcoded version number found in
+   `src/module/version.rc`, `build-x86`, or `build-x64` — per
+   `msvc-build-conventions`, version values must always be derived (from
+   the Git tag for releases, from `git describe`/commit count for local
+   builds), never hand-written.
+6. **Test coverage**: whether new or changed logic in `src/` has a
    corresponding test in `tests/`.
-6. General code quality: correctness, error handling, resource management
+7. General code quality: correctness, error handling, resource management
    (RAII), readability.
 
 ## Output format
