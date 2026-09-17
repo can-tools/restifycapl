@@ -1,6 +1,6 @@
-# Plan (v5): Build the CAPL REST DLL (restifycapl) from zero
+# Plan (v6): Build the CAPL REST DLL (restifycapl) from zero
 
-Revision of v4. Changes in this revision: consistent phase/stage numbering, per-agent task breakdowns, corrected configuration scope, and CI moved earlier.
+Revision of v5. Changes: Stage 1 marked complete, REV-1 outcome recorded with a narrowed sweep scope, two frontmatter fixes added.
 
 ---
 
@@ -10,18 +10,17 @@ Build the CAPL REST DLL (`restifycapl`) from the cloned repository to a working,
 
 ---
 
-## 2. Current state, verified
+## 2. Current state
 
-**Completed** — six configuration files already reflect the target state: `CLAUDE.md`, `.claude/skills/msvc-build-conventions/SKILL.md`, `.claude/skills/capl-export-contract/SKILL.md`, `.claude/agents/code-reviewer.md`, `.claude/agents/cpp-implementer.md`, `.claude/settings.json`.
+**Stage 1 is complete.** All five HUM items were applied:
 
-**Still stale — four items v4 missed or under-specified:**
+- HUM-1 — the three Vector SDK headers moved via `git mv` to `include/vendor/capl-dll-sdk/`. Verified present.
+- HUM-2 — `.claude/agents/build-pipeline-engineer.md`: description, target names, hard rule, and the new `setup-dev-env.ps1` responsibility.
+- HUM-3 — `.claude/agents/test-engineer.md`: responsibility bullets rewritten for the layered `tests/` structure and current module names.
+- HUM-4 — `.claude/skills/cpp-testing-conventions/SKILL.md`: same substitution plus the async coverage bullet.
+- HUM-5 — `docs/.locals/04-FLOW-AND-DEPENDENCIES.md` §6.1/§6.2/§6.3: bootstrap script recorded as the decision; Build Tools replaces the full VS IDE.
 
-- `.claude/agents/build-pipeline-engineer.md` — still says `build32`/`build64` in three places (frontmatter description, responsibilities bullet 1, hard rule 4) and references `version.rc` without its path. v4 listed this file under "source files" but never wrote an edit spec for it.
-- `.claude/agents/test-engineer.md` — still names previous-iteration modules (`json-path-resolver`, `type-converters`, `json-helpers`, `request-builder`, `sync-rest-operations`, `async-rest-operations`). Never mentioned in v4.
-- `.claude/skills/cpp-testing-conventions/SKILL.md` — same stale module names. Never mentioned in v4.
-- `docs/.locals/04-FLOW-AND-DEPENDENCIES.md` — §6.2 still concludes "a dedicated script to bootstrap the whole project isn't needed here"; §6.1 and §6.3 still say install full Visual Studio. Both contradict decisions already made.
-
-**Also outstanding:** the three Vector SDK headers are still flat at `include/vendor/cdll.h`, `VIA.h`, `VIA_CDLL.h` and need to move into `include/vendor/capl-dll-sdk/`.
+Two frontmatter fixes remain (HUM-6, HUM-7 below) plus one optional item (HUM-8).
 
 **Not started:** no `src/`, `lib/`, `tests/`, `scripts/`, `examples/`, `Makefile`, or `.github/` exist.
 
@@ -42,7 +41,7 @@ v4 used `P → 0A → 0B → 1…11` with conditional `9`/`10` — inconsistent,
 
 Mapping from v4: `P1→2`, `P2→3`, `0A→1`, `0B→4`, `1→5`, `2→7`, `3→8`, `4→9`, `5→10`, `6→11`, `7→12`, `8→6 and 13` (split), `11→14`, `9→15`, `10→16`.
 
-**One deliberate change beyond renumbering: CI is split and moved earlier.** v4 had a single CI stage after all logic was written. v5 splits it — a **CI baseline** (build both architectures, run tests, on every push) lands at Stage 6, right after the ABI is proven, so every subsequent stage is continuously verified on a clean machine rather than only on the developer's box. The **release pipeline** (tag extraction, approval gate, publish) stays late at Stage 13, because it only matters once there is something worth releasing. This directly serves the project's stated aim of catching problems at the cheapest possible point.
+**CI is split and moved earlier.** v4 had a single CI stage after all logic was written. A **CI baseline** (build both architectures, run tests, on every push) lands at Stage 6, right after the ABI is proven, so every subsequent stage is continuously verified on a clean machine rather than only on the developer's box. The **release pipeline** (tag extraction, approval gate, publish) stays late at Stage 13, because it only matters once there is something worth releasing.
 
 ---
 
@@ -65,47 +64,66 @@ Repeated here so executing agents need no access to `docs/.locals/`:
 
 ## 5. Phase 1 — Foundation & Environment
 
-### Stage 1 — Finish configuration reconciliation
+### Stage 1 — Configuration reconciliation — COMPLETE, with follow-ups
 
-Six files were already brought to target state. Five items remain. **Ownership note:** `.claude/**` and `CLAUDE.md` edits are routed to the **main session under human supervision**, not to a subagent — these files govern agent behaviour, and having an agent rewrite its own operating instructions is a governance smell. `code-reviewer` verifies afterwards.
+**Ownership note:** `.claude/**` and `CLAUDE.md` edits are routed to the **main session under human supervision**, not to a subagent — these files govern agent behaviour, and having an agent rewrite its own operating instructions is a governance smell.
 
-**HUM-1 — Move the SDK headers.** `include/vendor/cdll.h`, `VIA.h`, `VIA_CDLL.h` → `include/vendor/capl-dll-sdk/`. `json.hpp` lands in `include/vendor/` at Stage 2; keeping Vector's three licensed headers flat beside it destroys the "what's foreign, and whose" separation that justifies `vendor/` existing, and blurs the licensing boundary.
+#### Completed items
 
-**HUM-2 — Fix `.claude/agents/build-pipeline-engineer.md`** (three stale spots plus additions):
+**HUM-1 — DONE.** SDK headers moved to `include/vendor/capl-dll-sdk/` via `git mv` (history preserved).
+**HUM-2 — DONE.** `build-pipeline-engineer.md`: `build32`/`build64` → `all`/`build-x86`/`build-x64`/`test`/`clean`; single-parameterized-rule requirement; `version.rc` path corrected; `scripts/setup-dev-env.ps1` ownership added.
+**HUM-3 — DONE (body only; see HUM-6).** `test-engineer.md` responsibility bullets.
+**HUM-4 — DONE.** `cpp-testing-conventions/SKILL.md` module names, layered `tests/` structure, async coverage bullet.
+**HUM-5 — DONE.** 04-FLOW §6.1/§6.2/§6.3.
 
-- Frontmatter `description`: "Maintains the Makefile build targets (build32/build64)…" → "…the Makefile build targets (`all`, `build-x86`, `build-x64`, `test`, `clean`)…"
-- Responsibilities bullet 1: replace with —
+#### REV-1 outcome — resolved; the defect was in this plan, not the repository
 
-```markdown
-- Maintain the `all`, `build-x86`, `build-x64`, `test` and `clean` Makefile
-  targets. `build-x86` and `build-x64` must be thin wrappers over a single
-  parameterized rule with the architecture passed as a Make variable — never
-  two parallel recipes. MSVC flags (`/MT`, `/std:c++17`, `/EHsc`) are
-  identical across architectures; only `/MACHINE:` and the `lib/` path differ.
+REV-1 as written in v5 instructed a stale-identifier sweep across `CLAUDE.md`, `.claude/**`, and `docs/.locals/**`. Run literally, it reports hits. Analysed, every hit is a false positive, and the fault is the sweep's scope. Three findings, recorded here so this is not re-litigated:
+
+**Finding 1 — `CLAUDE.md` and `.claude/**` are clean.** Zero hits. These are the only files that are operationally loaded: skills and agent definitions are auto-loaded into agent context, and `CLAUDE.md` is auto-loaded into every session. This is the part of REV-1 that actually mattered, and it passes.
+
+**Finding 2 — `docs/.locals/**` hits are historical and are hereby exempt.** That directory is git-ignored (`.gitignore` line 72), never shipped, and per `CLAUDE.md`'s "Planning documents" section is planner-facing scratch that no agent auto-loads. The files are the superseded planning drafts (`plan-en.md`, `plan-pl.md`, `plan-v2-*.md`, `plan-v3-*.md`) and the design log.
+
+These drafts must **not** be scrubbed. They are an audit trail: the v1–v3 drafts carry the user's inline answers, and those answers are only intelligible alongside the question they answered. Deleting the string `build32` from a file where the user wrote "so the target names should all be changed" destroys the evidence of *why* the current naming exists. Rewriting history to make a grep pass is the wrong trade — the same reason we don't rewrite old git commits to use current variable names.
+
+**Exemption rule going forward:** the stale-identifier sweep covers `CLAUDE.md` and `.claude/**` only. `docs/.locals/**` is exempt as historical record.
+
+**One targeted exception.** The version-numbered drafts announce their own obsolescence through their filenames, so they need nothing. `capl-rest-dll-design-log.md` is different: it is *not* version-named, and this plan actively cites it as authoritative (§7 is the versioning specification). A reader has no way to tell that its §4 "Directory structure" — still showing `lib-32b/`, `build-32b/` — is obsolete while its §7 is current. **HUM-9** below adds a one-line header to that file only.
+
+**Finding 3 — the sweep is self-matching, and must exempt this plan.** The only hits outside `docs/.locals/` are in `docs/work/capl-rest-dll-rebuild/plans/plan.md` — this document, which necessarily *names* the identifiers being searched for, both in §2's record of what was stale and in REV-1's own task description. A sweep whose definition lives inside its own search scope can never report clean. **REV-1's scope excludes this plan file.**
+
+**Tooling note.** The `Grep` tool honours `.gitignore` by default, so it does not see `docs/.locals/` at all and naturally produces the correct scope. A Bash `grep -r` or `rg --no-ignore` does not, and will re-raise these same false positives. Use `Grep`, or pass an explicit path list of `CLAUDE.md` and `.claude/`.
+
+**REV-1 status: satisfied.**
+
+#### Remaining items
+
+**HUM-6 — Fix `test-engineer.md` frontmatter `description`.** HUM-3 corrected the body but not the frontmatter, which still reads "JSON parsing, struct mapping, type conversion, request building" — naming two *deferred* modules while omitting five in-scope ones. This is not cosmetic: the frontmatter `description` is the routing metadata the orchestrator uses to choose an agent, so a description advertising deferred work and hiding current work causes mis-selection. Replace with:
+
+```yaml
+description: Designs and implements GoogleTest unit tests for CAPL REST DLL logic (type conversion, JSON path resolution, HTTP client, sync/async operations, JSON flattening, JSON accessors) in isolation from CANoe. Use after implementing or changing logic in src/.
 ```
 
-- Hard rule 4: `version.rc`, `build32`, `build64` → `src/module/version.rc`, `build-x86`, `build-x64`.
-- Add a responsibility: "Own `scripts/setup-dev-env.ps1`. It provisions the environment only — it must never become a second build system."
+**HUM-7 — Fix `cpp-implementer.md` frontmatter `description`.** Same class, lower severity: it lists "struct mapping" among current responsibilities. Cheap to fix while adjacent. Replace with:
 
-**HUM-3 — Fix `.claude/agents/test-engineer.md`.** Replace the first two responsibility bullets:
-
-```markdown
-- Write and maintain unit tests in `tests/`, mirroring the layered `src/`
-  layout: `tests/core/`, `tests/http/`, `tests/mapping/` (and `tests/registry/`
-  only if that module is ever built).
-- Test targets, in build order: `type-conversion`, `json-path` (core);
-  `http-client`, `sync-operations`, `async-operations` (http); `json-flatten`,
-  `json-accessors` (mapping). `struct-registry` and `struct-mapping` are
-  deferred and out of scope unless explicitly reactivated.
+```yaml
+description: Implements and modifies C++ source files (REST operations sync and async, JSON path resolution, flattening, typed accessors, type conversion) for the CAPL REST DLL. Use for adding features, fixing bugs, or refactoring logic in src/.
 ```
 
-**HUM-4 — Fix `.claude/skills/cpp-testing-conventions/SKILL.md`.** Same substitution in "Framework" and "What can and cannot be tested here": the testable list becomes `type-conversion`, `json-path`, `json-flatten`, `json-accessors`, plus logic extracted from `sync-operations`/`async-operations`. Add: "Tests mirror the layered `src/` structure — `tests/core/`, `tests/http/`, `tests/mapping/`." Add a required-coverage bullet: "for the async layer specifically: ready-flag-cleared-after-read, and request-ID correlation across consecutive requests."
+**HUM-8 — Optional, recommended: two small `code-reviewer.md` improvements.**
+- Check 5 (Versioning) says to flag hardcoded versions "in `src/module/version.rc`, `build-x86`, or `build-x64`". `build-x86`/`build-x64` are Make *targets*, not files — a category error that leaves the reviewer without a file to open. Replace the file list with "`src/module/version.rc`, the `Makefile`, or the CI workflow files".
+- Add `cpp-testing-conventions` to its `skills:` list. Check 6 asks it to judge test coverage, which it currently does without access to the conventions defining what adequate coverage means.
 
-**HUM-5 — Update `docs/.locals/04-FLOW-AND-DEPENDENCIES.md`.** §6.2's conclusion ("a dedicated script to bootstrap the whole project isn't needed here") now contradicts a decided position; rewrite it to state that a local bootstrap script *is* used, and why the original reasoning no longer holds — category 3 shrank once the headers were committed, and a script is re-runnable on a second machine and verifiable in CI, which a prose checklist is not. In §6.1 and §6.3, replace "Visual Studio (Desktop development with C++)" with "Visual Studio **Build Tools** (`VCTools` workload)" and note that silent unattended install is supported, so it belongs in the script rather than in a manual checklist.
+**HUM-9 — Add a supersession header to `docs/.locals/capl-rest-dll-design-log.md`** (per Finding 2's targeted exception):
 
-**REV-1 — Verification pass.** `code-reviewer` confirms no `build32`/`build64`, `lib-32b`/`lib-64b`, `build-32b`/`build-64b`, `capl-rest-dll.cpp`, `capl-rest-32b.dll`, or previous-iteration module names survive anywhere in `CLAUDE.md`, `.claude/**`, or `docs/.locals/**`. A single grep sweep; this is exactly the drift that v4 missed twice.
+```markdown
+> **Historical record.** This log captures decisions as they were made. Some
+> sections are superseded — notably §4 (Directory structure), which predates the
+> layered `src/` layout. The current authority is
+> `docs/work/capl-rest-dll-rebuild/plans/plan.md`. §7 (Versioning) remains current.
+```
 
-**Human approval gate: YES.** These files direct every later stage.
+**Human approval gate: YES** for HUM-6 and HUM-7 before Stage 5, since they affect agent routing. HUM-8 and HUM-9 are non-blocking.
 
 ### Stage 2 — Scripted development-environment bootstrap
 
@@ -127,15 +145,15 @@ Six files were already brought to target state. Five items remain. **Ownership n
 
 No automation path exists for either item — a licensing constraint, not a technical one.
 
-**HUM-6 — Install Vector CANoe/CANalyzer.** Licensed, GUI-installed, machine-bound.
+**HUM-10 — Install Vector CANoe/CANalyzer.** Licensed, GUI-installed, machine-bound.
 
-**HUM-7 — Build and load the official "Example of a Windows DLL for CAPL" sample, unchanged, in CANoe.** The step people skip and shouldn't: it proves the toolchain + CANoe pairing works before any project code can be blamed for a failure. Build Tools ships MSBuild, so the sample compiles without the IDE; loading it into CANoe is manual.
+**HUM-11 — Build and load the official "Example of a Windows DLL for CAPL" sample, unchanged, in CANoe.** The step people skip and shouldn't: it proves the toolchain + CANoe pairing works before any project code can be blamed for a failure. Build Tools ships MSBuild, so the sample compiles without the IDE; loading it into CANoe is manual.
 
 Stage 3 runs in parallel with Stages 1–2 and 4. It only hard-blocks Stage 5.
 
 ### Stage 4 — Repo skeleton, Makefile, versioning
 
-**BPE-2 — Finalize `.gitignore`.** Delete the dead `build-*/` (a leftover from the abandoned `build-32b/` naming; `build/` already covers output). Annotate the two commented lines (`#*.lib`, `# Makefile`) with *why* they are disabled — without a note, a future tidy-up of the "CMake generated files" and "Compiled Static libraries" blocks will silently untrack the Makefile and every vendored `.lib`.
+**BPE-2 — Finalize `.gitignore`.** Delete the dead `build-*/` (a leftover from the abandoned per-architecture-suffix naming; `build/` already covers output). Annotate the two commented lines (`#*.lib`, `# Makefile`) with *why* they are disabled — without a note, a future tidy-up of the "CMake generated files" and "Compiled Static libraries" blocks will silently untrack the Makefile and every vendored `.lib`.
 
 **BPE-3 — Create the directory skeleton** per `CLAUDE.md`'s layout: `src/{core,http,registry,mapping,module}/`, `lib/{x86,x64}/`, `build/{x86,x64}/`, `tests/{core,http,mapping}/`, `examples/`, `scripts/`.
 
@@ -151,7 +169,7 @@ Stage 3 runs in parallel with Stages 1–2 and 4. It only hard-blocks Stage 5.
 
 **REV-2 — Review** Makefile parameterization, versioning derivation, `.gitignore` semantics, and confirm `dumpbin /directives` on every vendored `.lib` shows `/DEFAULTLIB:LIBCMT`.
 
-**HUM-8 — Commit and push** (agents are denied `git push`).
+**HUM-12 — Commit and push** (agents are denied `git push`).
 
 **Human approval gate: YES** — a `/MD` library slipping through here poisons everything downstream.
 
@@ -167,7 +185,7 @@ Stage 3 runs in parallel with Stages 1–2 and 4. It only hard-blocks Stage 5.
 
 **REV-3 — Export-contract review. The single most important review in this plan.** Naming convention, table layout, reserved version entry, `extern "C"`, packing, absence of a `LIBRARY` line.
 
-**HUM-9 — Load and call the operation from a real `.can` script in CANoe.** No agent can do this.
+**HUM-13 — Load and call the operation from a real `.can` script in CANoe.** No agent can do this.
 
 **Human approval gate: YES — the most important gate in this plan.** Do not start Stage 6 until the operation is confirmed callable from CAPL. Everything downstream assumes the ABI is proven. This is exactly why 04-FLOW moves CANoe integration to its Step 1 rather than leaving it until dozens of operations exist — a return-value bug at that point hid every operation at once and cost disproportionate time to find.
 
@@ -207,7 +225,7 @@ Verify as a standalone console program against httpbin.org, per 04-FLOW Step 2.
 
 **CPP-6** — Append sync operations to the export table; rebuild both architectures.
 **REV-5** — Export-contract review (mandatory).
-**HUM-10** — Verify in CANoe.
+**HUM-14** — Verify in CANoe.
 **Human approval gate: YES.**
 
 ### Stage 10 — Asynchronous layer with response state designed correctly up front
@@ -216,18 +234,18 @@ Verify as a standalone console program against httpbin.org, per 04-FLOW Step 2.
 **TEST-6** — `tests/http/` coverage specifically for ready-flag-cleared-after-read and request-ID correlation across consecutive requests.
 **CPP-8** — Append async operations to the export table.
 **REV-6** — Export-contract review.
-**HUM-11** — Verify in CANoe.
+**HUM-15** — Verify in CANoe.
 **Human approval gate: YES** — contract append, and the one-active-response simplification bounds what the DLL can ever do.
 
 ### Stage 11 — JSON flattening (highest user value — ship before struct mapping)
 
 **CPP-9** — `src/mapping/json-flatten.*`: flatten the response into a dot-notation key/value map, plus key count, key-by-index, value-by-key.
 **TEST-7** — `tests/mapping/` coverage including deeply nested objects, arrays, and empty/malformed documents.
-**HUM-12 — Mandatory before any `.can` example is written:** verify associative-field syntax against the official CANoe help (`Help → CAPL → General → Associative Fields`). The correct form has **no extra keyword before the type** — `char[30] name[char[]];`. An invented keyword was copied across many docs and example files last time. Check the product help; do not trust generated snippets.
+**HUM-16 — Mandatory before any `.can` example is written:** verify associative-field syntax against the official CANoe help (`Help → CAPL → General → Associative Fields`). The correct form has **no extra keyword before the type** — `char[30] name[char[]];`. An invented keyword was copied across many docs and example files last time. Check the product help; do not trust generated snippets.
 **CPP-10** — Append flattening operations to the export table.
-**CPP-11** — Write `examples/*.can`, only after HUM-12 confirms the syntax.
+**CPP-11** — Write `examples/*.can`, only after HUM-16 confirms the syntax.
 **REV-7** — Export-contract review.
-**Human approval gate: YES** — contract append; confirm HUM-12 actually happened.
+**Human approval gate: YES** — contract append; confirm HUM-16 actually happened.
 
 ### Stage 12 — Typed JSON accessors
 
@@ -249,8 +267,8 @@ Verify as a standalone console program against httpbin.org, per 04-FLOW Step 2.
 
 **REV-9 — Review** the release workflow, confirming no hardcoded version anywhere and that the approval gate genuinely blocks publication.
 
-**HUM-13 — Create the release tag** (agents are denied `git tag`).
-**HUM-14 — Verify the CI-built artifact manually in CANoe, then approve the publish.** This ordering is what makes manual CANoe verification a real precondition of release rather than an aspiration.
+**HUM-17 — Create the release tag** (agents are denied `git tag`).
+**HUM-18 — Verify the CI-built artifact manually in CANoe, then approve the publish.** This ordering is what makes manual CANoe verification a real precondition of release rather than an aspiration.
 
 **Human approval gate: YES** — this determines what ships.
 
@@ -317,7 +335,7 @@ Trigger: hand-assembling JSON in CAPL proves genuinely cumbersome in practice. T
 | CPP-8 | 10 | Append async operations |
 | CPP-9 | 11 | `src/mapping/json-flatten.*` |
 | CPP-10 | 11 | Append flattening operations |
-| CPP-11 | 11 | `examples/*.can` — only after HUM-12 |
+| CPP-11 | 11 | `examples/*.can` — only after HUM-16 |
 | CPP-12 | 12 | `src/mapping/json-accessors.*` |
 | CPP-13 | 12 | Append accessor operations |
 | CPP-14 | 15 | Struct registry + mapping (conditional) |
@@ -341,39 +359,43 @@ Trigger: hand-assembling JSON in CAPL proves genuinely cumbersome in practice. T
 
 ### `code-reviewer` — 12 tasks
 
-| ID | Stage | Focus |
-|---|---|---|
-| REV-1 | 1 | Verify configuration reconciliation is complete — grep sweep for every stale identifier |
-| REV-2 | 4 | Makefile parameterization, versioning derivation, `/MT` provenance of vendored libs |
-| REV-3 | 5 | **Export-contract genesis — the most important review in the plan** |
-| REV-4 | 6 | CI reuses Make targets; matrix symmetry |
-| REV-5 | 9 | Contract append — sync |
-| REV-6 | 10 | Contract append — async |
-| REV-7 | 11 | Contract append — flattening |
-| REV-8 | 12 | Contract append — accessors |
-| REV-9 | 13 | Release workflow; no hardcoded versions; approval gate actually blocks |
-| REV-10 | 14 | Final consistency review |
-| REV-11 | 15 | Contract append — struct mapping (conditional) |
-| REV-12 | 16 | Contract append — request building (conditional) |
+| ID | Stage | Focus | Status |
+|---|---|---|---|
+| REV-1 | 1 | Stale-identifier sweep — scope: `CLAUDE.md` and `.claude/**` only | **SATISFIED** |
+| REV-2 | 4 | Makefile parameterization, versioning derivation, `/MT` provenance of vendored libs | |
+| REV-3 | 5 | **Export-contract genesis — the most important review in the plan** | |
+| REV-4 | 6 | CI reuses Make targets; matrix symmetry | |
+| REV-5 | 9 | Contract append — sync | |
+| REV-6 | 10 | Contract append — async | |
+| REV-7 | 11 | Contract append — flattening | |
+| REV-8 | 12 | Contract append — accessors | |
+| REV-9 | 13 | Release workflow; no hardcoded versions; approval gate actually blocks | |
+| REV-10 | 14 | Final consistency review | |
+| REV-11 | 15 | Contract append — struct mapping (conditional) | |
+| REV-12 | 16 | Contract append — request building (conditional) | |
 
-### Human — 14 tasks
+### Human — 18 tasks
 
-| ID | Stage | Task |
-|---|---|---|
-| HUM-1 | 1 | Move SDK headers into `include/vendor/capl-dll-sdk/` |
-| HUM-2 | 1 | Fix `.claude/agents/build-pipeline-engineer.md` |
-| HUM-3 | 1 | Fix `.claude/agents/test-engineer.md` |
-| HUM-4 | 1 | Fix `.claude/skills/cpp-testing-conventions/SKILL.md` |
-| HUM-5 | 1 | Update 04-FLOW §6.1, §6.2, §6.3 |
-| HUM-6 | 3 | Install Vector CANoe/CANalyzer |
-| HUM-7 | 3 | Build + load the official Vector sample unchanged in CANoe |
-| HUM-8 | 4 | Commit and push the skeleton |
-| HUM-9 | 5 | Load and call the Hello DLL operation from a real `.can` script |
-| HUM-10 | 9 | Verify sync operations in CANoe |
-| HUM-11 | 10 | Verify async operations in CANoe |
-| HUM-12 | 11 | Verify CAPL associative-field syntax against the official CANoe help |
-| HUM-13 | 13 | Create the release tag |
-| HUM-14 | 13 | Verify the CI artifact in CANoe, then approve the publish |
+| ID | Stage | Task | Status |
+|---|---|---|---|
+| HUM-1 | 1 | Move SDK headers into `include/vendor/capl-dll-sdk/` | **DONE** |
+| HUM-2 | 1 | Fix `.claude/agents/build-pipeline-engineer.md` | **DONE** |
+| HUM-3 | 1 | Fix `.claude/agents/test-engineer.md` body | **DONE** |
+| HUM-4 | 1 | Fix `.claude/skills/cpp-testing-conventions/SKILL.md` | **DONE** |
+| HUM-5 | 1 | Update 04-FLOW §6.1, §6.2, §6.3 | **DONE** |
+| HUM-6 | 1 | Fix `test-engineer.md` frontmatter description (routing metadata) | |
+| HUM-7 | 1 | Fix `cpp-implementer.md` frontmatter description | |
+| HUM-8 | 1 | Optional: `code-reviewer.md` check-5 wording + add `cpp-testing-conventions` skill | |
+| HUM-9 | 1 | Add supersession header to `capl-rest-dll-design-log.md` | |
+| HUM-10 | 3 | Install Vector CANoe/CANalyzer | |
+| HUM-11 | 3 | Build + load the official Vector sample unchanged in CANoe | |
+| HUM-12 | 4 | Commit and push the skeleton | |
+| HUM-13 | 5 | Load and call the Hello DLL operation from a real `.can` script | |
+| HUM-14 | 9 | Verify sync operations in CANoe | |
+| HUM-15 | 10 | Verify async operations in CANoe | |
+| HUM-16 | 11 | Verify CAPL associative-field syntax against the official CANoe help | |
+| HUM-17 | 13 | Create the release tag | |
+| HUM-18 | 13 | Verify the CI artifact in CANoe, then approve the publish | |
 
 ---
 
@@ -387,7 +409,9 @@ Trigger: hand-assembling JSON in CAPL proves genuinely cumbersome in practice. T
 
 **Bitness parity.** CANoe loads only a matching-bitness DLL; a mismatch gives "Requested CAPL DLL is invalid". This risk drops materially because BPE-4 uses one parameterized rule instead of two near-duplicate recipes, and the related `.def` trap is neutralized by the no-`LIBRARY` rule. Environment trap: building x64 from an x86 Native Tools prompt gives misleading linker errors.
 
-**Configuration drift — demonstrated twice, not hypothetical.** v4 declared five stale files; the real number was eight, and `build-pipeline-engineer.md`, `test-engineer.md` and `cpp-testing-conventions` were all still directing agents with previous-iteration names after the "completed" pass. Agents load skills automatically, so a stale skill silently misdirects work on the most safety-critical files in the project. REV-1 exists specifically to close this class of error with a mechanical sweep rather than another manual enumeration. Stage 1 must complete before Stage 5.
+**Configuration drift — mitigated, and the mitigation itself is now scoped.** v4 declared five stale config files; the real number was eight, and three agent/skill files were still directing agents with previous-iteration names after a pass believed complete. All operational files are now clean. REV-1 remains the standing check, but with corrected scope (`CLAUDE.md` and `.claude/**` only, excluding this plan file) — as originally written it swept historical drafts and its own definition, producing noise that obscures real drift. A check that cries wolf gets ignored, which would have been a worse outcome than not having it.
+
+**Agent routing metadata is easy to miss.** HUM-3 corrected `test-engineer.md`'s body but not its frontmatter `description` — the field the orchestrator actually reads when choosing an agent. Body and frontmatter are separate surfaces and both need updating; only the body is visible when reading the file as prose. HUM-6/HUM-7 close this, and any future agent-scope change should check both.
 
 **Vector SDK header redistribution — accepted risk.** The repository is public and the headers are committed; this was an explicit user decision and is not re-litigated here. Practical note only: git history makes it effectively permanent — reversing the position later requires history rewriting, not a delete commit.
 
@@ -399,7 +423,7 @@ Trigger: hand-assembling JSON in CAPL proves genuinely cumbersome in practice. T
 
 **Versioning is new, untested machinery.** `FILEVERSION`/`PRODUCTVERSION` are four 16-bit fields capped at 65535 that **wrap silently**; `/VERSION:` accepts major.minor only; `version.rc` needs working `#ifndef` fallbacks so a bare `rc.exe` doesn't fail. `git describe --tags --always` carries both flags precisely so it works in a repo with no tags — this repo's current state. BPE-5 must test this before a real release depends on it.
 
-**Steps no agent can verify.** All fourteen HUM tasks, particularly the CANoe verifications at Stages 5, 9, 10, 11 and 13. 04-FLOW §5's last checklist item names the previous iteration's habit of leaving these perpetually open: "status: ready to build" ≠ "status: tested and working".
+**Steps no agent can verify.** All eighteen HUM tasks, particularly the CANoe verifications at Stages 5, 9, 10, 11 and 13. 04-FLOW §5's last checklist item names the previous iteration's habit of leaving these perpetually open: "status: ready to build" ≠ "status: tested and working".
 
 **Scope creep toward struct mapping.** Stages 11 and 12 must ship before Stage 15 is reconsidered.
 
@@ -407,6 +431,6 @@ Trigger: hand-assembling JSON in CAPL proves genuinely cumbersome in practice. T
 
 ## 13. Execution order
 
-**1 → 2 → 4 → 5 (hard gate) → 6 → 7 → 8 → 9 → 10 → 11 → 12 → 13 → 14**, with Stage 3 running in parallel with 1–2–4 but completing before Stage 5, and Stages 15–16 only on demonstrated need. Stage 1 must not run in parallel with Stage 5.
+**1 → 2 → 4 → 5 (hard gate) → 6 → 7 → 8 → 9 → 10 → 11 → 12 → 13 → 14**, with Stage 3 running in parallel with 1–2–4 but completing before Stage 5, and Stages 15–16 only on demonstrated need.
 
-**Status:** v5 revision. Stage 1 partially complete (six of eleven items done); Stages 2 onward not started.
+**Status:** v6. Stage 1 complete except HUM-6/HUM-7 (blocking before Stage 5) and HUM-8/HUM-9 (non-blocking). Stage 2 is the next substantive work.
