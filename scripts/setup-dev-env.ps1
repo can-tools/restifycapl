@@ -22,7 +22,10 @@
       3. Resolve vcvarsall.bat; confirm cl/rc/link/dumpbin resolve for both
          x86 and x64, and that each reports the matching architecture.
       4. Detect `make`; install it (MSYS2 / Chocolatey / Scoop) if absent.
-      5. Detect or bootstrap vcpkg; run a manifest-mode install
+      5. Detect or bootstrap vcpkg -- pinning the vcpkg TOOL itself to a
+         known-good release tag ($VcpkgPinnedTag), separate from and in
+         addition to vcpkg.json's own builtin-baseline pin on registry
+         content -- then run a manifest-mode install
          (`vcpkg install --triplet=<T>`) against vcpkg.json at the repo
          root -- the single authoritative pin for curl and gtest versions
          (default curl features pull in SChannel automatically on
@@ -129,12 +132,41 @@ if (-not $VcpkgRoot) {
 
 # vcpkg.json at $RepoRoot is the single authoritative dependency pin (curl,
 # gtest, builtin-baseline) -- see msvc-build-conventions / plan.md BPE-15.
-# Manifest-mode installs land under $RepoRoot\vcpkg_installed\<triplet>\,
-# NOT $VcpkgRoot\installed\<triplet>\ (the latter is classic-mode only) --
+# Manifest-mode installs land under a per-TRIPLET install root, NOT
+# $VcpkgRoot\installed\<triplet>\ (the latter is classic-mode only) --
 # confirmed by running `vcpkg list` with cwd at $RepoRoot and observing it
-# report against the project-local tree instead of the vcpkg checkout's own
-# installed/ directory. .gitignore already excludes vcpkg_installed/.
-$VcpkgInstalledDir = Join-Path $RepoRoot 'vcpkg_installed'
+# report against a project-local tree instead of the vcpkg checkout's own
+# installed/ directory.
+#
+# Each triplet gets its OWN install root ($VcpkgInstalledRootX86,
+# $VcpkgInstalledRootX64) passed explicitly via `--x-install-root`, rather
+# than sharing one $RepoRoot\vcpkg_installed\ for both. This is load-bearing,
+# not cosmetic: confirmed by real execution (HUM-19's first real re-run,
+# 2026-09-18) that running `vcpkg install --triplet=B` against a shared
+# install root that already contains a prior `--triplet=A` install PRINTS
+# "The following packages will be removed: curl:A, gtest:A, zlib:A" and then
+# actually deletes A's triplet subdirectory -- manifest mode treats the
+# installed tree as a closure to synchronize to exactly the currently
+# requested triplet, not a set of independent per-triplet subtrees that
+# happen to coexist under one root, even though the on-disk layout
+# (installed/<triplet>/...) looks like it should support that. Verified with
+# a direct `vcpkg install --triplet=x86-windows-static` followed by a direct
+# `vcpkg install --triplet=x64-windows-static`, both from $RepoRoot with no
+# script involved: the second call's own console output named the first
+# call's packages for removal, and `x86-windows-static\` was gone from disk
+# immediately afterward. Giving each triplet a separate `--x-install-root`
+# eliminates the collision entirely (re-verified: two separate roots, both
+# populated, neither call removed the other's directory).
+# .gitignore excludes vcpkg_installed*/, matching both root names below.
+# Rationale: see docs/development-environment.md#manifest-mode-triplet-installs-need-separate-install-roots
+$VcpkgInstalledRootX86 = Join-Path $RepoRoot 'vcpkg_installed-x86'
+$VcpkgInstalledRootX64 = Join-Path $RepoRoot 'vcpkg_installed-x64'
+
+function Get-VcpkgInstallRoot {
+    param([Parameter(Mandatory)][ValidateSet('x86-windows-static', 'x64-windows-static')][string]$Triplet)
+    if ($Triplet -eq 'x86-windows-static') { return $VcpkgInstalledRootX86 }
+    return $VcpkgInstalledRootX64
+}
 
 # ---------------------------------------------------------------------------
 # Result tracking / output helpers
@@ -458,6 +490,38 @@ automatically. Install one of the following manually, then re-run:
 # both triplets, copy .lib
 # ===========================================================================
 
+# Pins the vcpkg TOOL itself -- not just the registry CONTENT pinned via
+# vcpkg.json's builtin-baseline -- to a specific, known-good release tag.
+# This is separate from, and does not replace, vcpkg.json's baseline pin:
+# the baseline pins WHICH port versions get resolved; this pins WHICH
+# vcpkg.exe (and its command-line behavior, including flags like
+# --x-install-root below) does the resolving in the first place.
+#
+# Why this matters: the triplet-isolation fix above (separate
+# --x-install-root per architecture) depends on a flag vcpkg's own --help
+# marks "(experimental)". An un-pinned `git clone` (previously: always
+# tracking the moving default branch tip) could silently pick up a future
+# vcpkg release that weakens or changes that flag's semantics without
+# renaming or removing it -- which would at least fail loudly. Pinning the
+# tool means a fresh bootstrap months from now reproduces the exact vcpkg
+# build this project has already verified end-to-end, instead of whatever
+# the default branch tip happens to be that day.
+#
+# 2026.07.29 confirmed via `git ls-remote --tags
+# https://github.com/microsoft/vcpkg.git` on 2026-09-18 to be the latest
+# real, tagged upstream release (annotated tag object
+# c76c06644034521fb761a39f8f52d8e87d1103d5, dereferencing to commit
+# 9e593bb18ea69cc5095e012465dcd675a822ed0d) -- not invented. It is also the
+# same release generation already proven working end-to-end by this
+# project's own successful HUM-19 run (that run's `vcpkg version` reported
+# `2026-07-27-...`, i.e. a commit from two days before this tag), so
+# pinning to it does not change behavior on an already-working machine.
+# Re-derive this the same way (`git ls-remote --tags`, pick the newest
+# non-`^{}` entry) if this pin is ever bumped; update this comment's
+# provenance, not just the value.
+# Rationale: see docs/development-environment.md#pinning-the-vcpkg-tool-itself
+$VcpkgPinnedTag = '2026.07.29'
+
 function Get-VcpkgExe {
     param([Parameter(Mandatory)][string]$Root)
     $exe = Join-Path $Root 'vcpkg.exe'
@@ -486,6 +550,12 @@ function Repair-ShallowVcpkgClone {
         resolves (the early-return path in Install-VcpkgIfMissing).
         Self-heals by unshallowing in place -- idempotent: a fast
         `rev-parse` no-op on a checkout that is already full.
+
+        Must run BEFORE Set-VcpkgPinnedVersion (see below), which it does
+        in Install-VcpkgIfMissing's existing-checkout path: checking out a
+        specific historical tag can itself fail with the same "shallow
+        repository" error this function fixes, if that tag's commit isn't
+        reachable from the shallow clone's single fetched commit.
     #>
     param([Parameter(Mandatory)][string]$Root)
 
@@ -510,30 +580,83 @@ function Repair-ShallowVcpkgClone {
     }
 }
 
-function Install-VcpkgIfMissing {
+function Set-VcpkgPinnedVersion {
+    <#
+        Checks out $VcpkgPinnedTag in the vcpkg checkout at $Root, so the
+        vcpkg TOOL itself -- not just the registry content pinned via
+        vcpkg.json's builtin-baseline -- is a specific, known-good version.
+        Runs for BOTH a freshly-cloned checkout and a pre-existing one that
+        might be sitting on an unrelated commit (e.g. a checkout from
+        before this pin existed, or one manually `git pull`ed to the
+        moving default-branch tip) -- idempotent: a fast no-op when HEAD
+        is already on the pinned commit.
+
+        Must run AFTER Repair-ShallowVcpkgClone (existing-checkout path) or
+        after a fresh, full clone (fresh-clone path): checking out a
+        specific historical tag needs that commit reachable in the local
+        object database, which a --depth 1 shallow clone may not have.
+        See Repair-ShallowVcpkgClone's doc comment for the same failure
+        mode applied to manifest installs.
+
+        Returns $true if HEAD actually moved (fresh clone, or an existing
+        checkout that was on the wrong commit) so the caller knows to
+        rebuild vcpkg.exe via Invoke-VcpkgBootstrap -- a vcpkg.exe built
+        from a different commit than what's now checked out could mismatch
+        the now-checked-out toolsrc/ sources. Returns $false when already
+        pinned (no rebuild needed) or when the pin could not be resolved
+        or enforced (caller treats this as best-effort: the existing
+        vcpkg.exe, if any, is still usable, just unpinned).
+    #>
     param([Parameter(Mandatory)][string]$Root)
 
-    $exe = Get-VcpkgExe -Root $Root
-    if ($exe) {
-        Repair-ShallowVcpkgClone -Root $Root
-        return $exe
+    $gitCmd = Get-Command git -ErrorAction SilentlyContinue
+    if (-not $gitCmd) {
+        Add-Result -Step 'vcpkg tool pin' -Status 'WARN' -Message "git not on PATH; cannot verify or enforce the vcpkg tool pin ($VcpkgPinnedTag) at $Root."
+        return $false
     }
 
-    if (-not (Test-Path -LiteralPath $Root)) {
-        Add-Result -Step 'vcpkg bootstrap' -Status 'WARN' -Message "Cloning vcpkg into $Root ..."
-        $gitCmd = Get-Command git -ErrorAction SilentlyContinue
-        if (-not $gitCmd) {
-            Add-Result -Step 'vcpkg bootstrap' -Status 'FAIL' -Message 'git is not on PATH; cannot clone vcpkg. Install git first.'
-            return $null
-        }
-        # Full clone, NOT --depth 1 -- see Repair-ShallowVcpkgClone's
-        # doc comment for why manifest mode requires full history.
-        & git clone https://github.com/microsoft/vcpkg.git $Root 2>&1 | Out-Null
-        if ($LASTEXITCODE -ne 0) {
-            Add-Result -Step 'vcpkg bootstrap' -Status 'FAIL' -Message "git clone of vcpkg failed (exit $LASTEXITCODE)."
-            return $null
-        }
+    $currentCommit = ((& git -C $Root rev-parse HEAD 2>$null) -join '').Trim()
+    $pinnedCommit  = ((& git -C $Root rev-parse "$VcpkgPinnedTag^{commit}" 2>$null) -join '').Trim()
+
+    if (-not $pinnedCommit) {
+        # Tag not resolvable locally yet -- e.g. a checkout cloned before
+        # this pin was introduced. Repair-ShallowVcpkgClone only unshallows,
+        # it doesn't force-refresh tags, so explicitly fetch this one tag by
+        # name rather than assuming it's already present.
+        & git -C $Root fetch origin "refs/tags/${VcpkgPinnedTag}:refs/tags/${VcpkgPinnedTag}" 2>&1 | Out-Null
+        $pinnedCommit = ((& git -C $Root rev-parse "$VcpkgPinnedTag^{commit}" 2>$null) -join '').Trim()
     }
+
+    if (-not $pinnedCommit) {
+        Add-Result -Step 'vcpkg tool pin' -Status 'WARN' -Message "Could not resolve pinned tag $VcpkgPinnedTag to a commit in the vcpkg checkout at $Root, even after fetching it explicitly. Continuing with whatever commit is currently checked out ($currentCommit) -- verify network access and that the tag still exists upstream."
+        return $false
+    }
+
+    if ($currentCommit -eq $pinnedCommit) {
+        Add-Result -Step 'vcpkg tool pin' -Status 'OK' -Message "Already on pinned vcpkg tool version $VcpkgPinnedTag ($pinnedCommit)."
+        return $false
+    }
+
+    & git -C $Root checkout --quiet $VcpkgPinnedTag 2>&1 | Out-Null
+    $afterCommit = ((& git -C $Root rev-parse HEAD 2>$null) -join '').Trim()
+    if ($afterCommit -ne $pinnedCommit) {
+        Add-Result -Step 'vcpkg tool pin' -Status 'WARN' -Message "git checkout $VcpkgPinnedTag did not land on the expected commit ($pinnedCommit); currently at $afterCommit. Continuing with whatever is checked out -- inspect $Root manually (e.g. uncommitted local changes blocking checkout)."
+        return $false
+    }
+
+    Add-Result -Step 'vcpkg tool pin' -Status 'OK' -Message "Checked out pinned vcpkg tool version $VcpkgPinnedTag ($pinnedCommit) -- was $currentCommit."
+    return $true
+}
+
+function Invoke-VcpkgBootstrap {
+    <#
+        Runs bootstrap-vcpkg.bat and returns the resulting vcpkg.exe path
+        (or $null on failure), recording its own Add-Result. Factored out
+        so both Install-VcpkgIfMissing's "no vcpkg.exe yet" path and its
+        "pin moved HEAD on an existing checkout" path share one
+        implementation instead of two copies that could drift.
+    #>
+    param([Parameter(Mandatory)][string]$Root)
 
     $bootstrap = Join-Path $Root 'bootstrap-vcpkg.bat'
     if (-not (Test-Path -LiteralPath $bootstrap)) {
@@ -550,6 +673,60 @@ function Install-VcpkgIfMissing {
 
     Add-Result -Step 'vcpkg bootstrap' -Status 'OK' -Message "Bootstrapped at $Root"
     return $exe
+}
+
+function Install-VcpkgIfMissing {
+    param([Parameter(Mandatory)][string]$Root)
+
+    $exe = Get-VcpkgExe -Root $Root
+    if ($exe) {
+        Repair-ShallowVcpkgClone -Root $Root
+        # Pin check runs even on an existing, already-working checkout: it
+        # may be sitting on an unrelated commit (a checkout that predates
+        # this pin, or one manually updated). If enforcing the pin actually
+        # moves HEAD, vcpkg.exe must be rebuilt from the now-checked-out
+        # commit's own sources -- see Set-VcpkgPinnedVersion's doc comment.
+        if (Set-VcpkgPinnedVersion -Root $Root) {
+            $rebuiltExe = Invoke-VcpkgBootstrap -Root $Root
+            if ($rebuiltExe) {
+                return $rebuiltExe
+            }
+            # Rebuild failed; fall back to the pre-pin vcpkg.exe rather than
+            # returning $null outright -- it's still a usable, just
+            # unpinned, tool, and Invoke-VcpkgBootstrap already recorded
+            # its own FAIL explaining why the rebuild didn't happen.
+            return $exe
+        }
+        return $exe
+    }
+
+    if (-not (Test-Path -LiteralPath $Root)) {
+        Add-Result -Step 'vcpkg bootstrap' -Status 'WARN' -Message "Cloning vcpkg into $Root ..."
+        $gitCmd = Get-Command git -ErrorAction SilentlyContinue
+        if (-not $gitCmd) {
+            Add-Result -Step 'vcpkg bootstrap' -Status 'FAIL' -Message 'git is not on PATH; cannot clone vcpkg. Install git first.'
+            return $null
+        }
+        # Full clone, NOT --depth 1 -- see Repair-ShallowVcpkgClone's
+        # doc comment for why manifest mode requires full history, and
+        # Set-VcpkgPinnedVersion's doc comment for why the tool pin below
+        # also needs full history (the pinned tag's commit must be
+        # reachable, not just whatever the branch tip was at clone time).
+        & git clone https://github.com/microsoft/vcpkg.git $Root 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Add-Result -Step 'vcpkg bootstrap' -Status 'FAIL' -Message "git clone of vcpkg failed (exit $LASTEXITCODE)."
+            return $null
+        }
+    }
+
+    # Pin the vcpkg TOOL itself to a known-good release tag before building
+    # it, so a fresh bootstrap reproduces the exact vcpkg version this
+    # project has verified end-to-end rather than whatever the default
+    # branch tip happens to be. See Set-VcpkgPinnedVersion's doc comment
+    # and docs/development-environment.md for the full rationale.
+    Set-VcpkgPinnedVersion -Root $Root | Out-Null
+
+    return Invoke-VcpkgBootstrap -Root $Root
 }
 
 function Install-ManifestTriplet {
@@ -573,6 +750,12 @@ function Install-ManifestTriplet {
         idempotent no-op verification. $StepLabel lets each call site keep
         its own step name in the results table.
 
+        $InstallRoot is passed as `--x-install-root` and MUST be a
+        triplet-exclusive directory (see Get-VcpkgInstallRoot / the comment
+        above $VcpkgInstalledRootX86 for why: a shared install root causes
+        one triplet's install to delete the other's, confirmed by real
+        execution, not by inspection).
+
         No explicit "schannel" feature: the current vcpkg curl port has no
         such feature, and SChannel is already wired in automatically via
         curl's default "ssl" feature on Windows.
@@ -581,13 +764,14 @@ function Install-ManifestTriplet {
     param(
         [Parameter(Mandatory)][string]$VcpkgExe,
         [Parameter(Mandatory)][ValidateSet('x86-windows-static', 'x64-windows-static')][string]$Triplet,
+        [Parameter(Mandatory)][string]$InstallRoot,
         [Parameter(Mandatory)][string]$StepLabel
     )
 
     # Capture vcpkg's own stdout+stderr instead of discarding it, so a FAIL
     # here shows the real underlying error (missing feature, compiler
     # detection failure, network error, etc.) instead of just an exit code.
-    $vcpkgOutput = & $VcpkgExe install "--triplet=$Triplet" 2>&1
+    $vcpkgOutput = & $VcpkgExe install "--triplet=$Triplet" "--x-install-root=$InstallRoot" 2>&1
     # $vcpkgOutput collapses to $null (not @()) when the pipeline emits zero
     # objects -- e.g. an early process-spawn failure that exits non-zero
     # before printing anything. Piping $null straight into
@@ -617,20 +801,61 @@ $tailText
 "@
         return $false
     }
-    Add-Result -Step $StepLabel -Status 'OK' -Message "Manifest dependencies for $Triplet installed (or already up to date) per vcpkg.json: curl, gtest."
+
+    # A zero exit code is necessary but not sufficient: it only says this
+    # ONE invocation's own plan completed, not that the triplet's artifacts
+    # are actually sitting on disk afterward. This closes exactly the gap
+    # HUM-19's real re-run exposed -- the previous version of this function
+    # declared OK purely from $LASTEXITCODE, and that OK later turned out to
+    # be meaningless once a subsequent call (for the other triplet, against
+    # a then-shared install root) deleted what this one had just produced.
+    # Separate per-triplet install roots (see $VcpkgInstalledRootX86 /
+    # $VcpkgInstalledRootX64 above) remove that specific failure mode
+    # structurally, but this check stays as a direct, defence-in-depth
+    # verification that OK means "the lib directory genuinely exists", not
+    # just "the subprocess exited zero".
+    $tripletLibDir = Join-Path $InstallRoot "$Triplet\lib"
+    if (-not (Test-Path -LiteralPath $tripletLibDir)) {
+        Add-Result -Step $StepLabel -Status 'FAIL' -Message "``vcpkg install`` exited 0, but the expected lib directory does not exist afterward: $tripletLibDir -- treat this as a real failure, not a pass; do not trust exit code alone."
+        return $false
+    }
+
+    Add-Result -Step $StepLabel -Status 'OK' -Message "Manifest dependencies for $Triplet installed (or already up to date) per vcpkg.json: curl, gtest. Verified $tripletLibDir exists."
     return $true
 }
 
 function Copy-TripletLibs {
+    <#
+        Copies ONLY the product-linked dependency files (libcurl.lib,
+        zs.lib) into lib/<arch>/, which the Makefile's LIBS variable links
+        directly into the shipped DLL -- deliberately NOT a blanket
+        "copy everything in lib/" like the earlier version of this function.
+
+        Under manifest mode, curl/zlib AND gtest/gmock are all listed in one
+        vcpkg.json and land together in the same triplet lib/ directory
+        (confirmed by real execution, HUM-19's re-run: the unfiltered
+        version of this function copied gmock.lib and gtest.lib into
+        lib/x64/ alongside libcurl.lib and zs.lib). gtest.lib/gmock.lib
+        reaching lib/<arch>/ is not a linker-safety bug today -- the
+        Makefile's LIBS names only libcurl.lib and zs.lib explicitly, so
+        link.exe never pulls the extras in via /LIBPATH alone -- but it is
+        unnecessary copy noise in the product-linked directory and violates
+        the product-linked-vs-test-only split this project maintains
+        elsewhere (see msvc-build-conventions). gmock specifically is not
+        used by this project at all (TEST_LIBS only ever names gtest.lib
+        gtest_main.lib), so it has no legitimate destination, product or
+        test-only.
+        Rationale: see docs/development-environment.md#manifest-mode-triplet-installs-need-separate-install-roots
+    #>
     param(
         [Parameter(Mandatory)][string]$InstalledRoot,
         [Parameter(Mandatory)][string]$Triplet,
         [Parameter(Mandatory)][string]$DestDir
     )
 
-    # $InstalledRoot is $VcpkgInstalledDir ($RepoRoot\vcpkg_installed), the
-    # manifest-mode installed tree -- NOT $VcpkgRoot\installed\, which is
-    # where classic mode would have put this.
+    # $InstalledRoot is the triplet-exclusive install root (see
+    # $VcpkgInstalledRootX86 / $VcpkgInstalledRootX64), NOT
+    # $VcpkgRoot\installed\, which is where classic mode would have put this.
     $srcLibDir = Join-Path $InstalledRoot "$Triplet\lib"
     if (-not (Test-Path -LiteralPath $srcLibDir)) {
         Add-Result -Step "lib copy ($Triplet)" -Status 'FAIL' -Message "Expected lib directory not found: $srcLibDir"
@@ -638,27 +863,38 @@ function Copy-TripletLibs {
     }
 
     New-Item -ItemType Directory -Force -Path $DestDir | Out-Null
-    $libs = Get-ChildItem -LiteralPath $srcLibDir -Filter '*.lib' -File
+
+    $productLibNames = 'libcurl.lib', 'zs.lib'
+    $libs = @(Get-ChildItem -LiteralPath $srcLibDir -File | Where-Object { $_.Name -in $productLibNames })
     if ($libs.Count -eq 0) {
-        Add-Result -Step "lib copy ($Triplet)" -Status 'FAIL' -Message "No .lib files found under $srcLibDir"
+        Add-Result -Step "lib copy ($Triplet)" -Status 'FAIL' -Message "None of the expected product-linked files ($($productLibNames -join ', ')) found under $srcLibDir"
         return
     }
 
     foreach ($lib in $libs) {
         Copy-Item -LiteralPath $lib.FullName -Destination $DestDir -Force
     }
+
+    $missing = $productLibNames | Where-Object { $_ -notin $libs.Name }
+    if ($missing.Count -gt 0) {
+        Add-Result -Step "lib copy ($Triplet)" -Status 'WARN' -Message "Copied $($libs.Count) file(s) to $DestDir : $(($libs.Name) -join ', ') -- but expected file(s) not found: $($missing -join ', ')."
+        return
+    }
+
     Add-Result -Step "lib copy ($Triplet)" -Status 'OK' -Message "Copied $($libs.Count) .lib file(s) to $DestDir : $(($libs.Name) -join ', ')"
 }
 
 function Get-InstalledCurlVersion {
     param(
         [Parameter(Mandatory)][string]$VcpkgExe,
-        [Parameter(Mandatory)][string]$Triplet
+        [Parameter(Mandatory)][string]$Triplet,
+        [Parameter(Mandatory)][string]$InstallRoot
     )
-    # Relies on the ambient manifest-mode context (cwd at $RepoRoot, set via
-    # Push-Location near the top of this script) so this resolves against
-    # $VcpkgInstalledDir rather than $VcpkgRoot\installed\.
-    $line = & $VcpkgExe list "curl:$Triplet" 2>$null | Select-Object -First 1
+    # --x-install-root must match the root that Triplet was actually
+    # installed into (see $VcpkgInstalledRootX86 / $VcpkgInstalledRootX64);
+    # without it, `vcpkg list` resolves against its own default install
+    # root, which no longer matches once triplets use separate roots.
+    $line = & $VcpkgExe list "curl:$Triplet" "--x-install-root=$InstallRoot" 2>$null | Select-Object -First 1
     if ($line -match '\S+\s+(\S+)') {
         return $Matches[1]
     }
@@ -681,19 +917,19 @@ Invoke-Step -Name 'vcpkg / curl' -Body {
     }
     Add-Result -Step 'vcpkg' -Status 'OK' -Message "Using vcpkg at: $vcpkgExe"
 
-    $okX86 = Install-ManifestTriplet -VcpkgExe $vcpkgExe -Triplet 'x86-windows-static' -StepLabel 'vcpkg install (x86-windows-static)'
-    $okX64 = Install-ManifestTriplet -VcpkgExe $vcpkgExe -Triplet 'x64-windows-static' -StepLabel 'vcpkg install (x64-windows-static)'
+    $okX86 = Install-ManifestTriplet -VcpkgExe $vcpkgExe -Triplet 'x86-windows-static' -InstallRoot $VcpkgInstalledRootX86 -StepLabel 'vcpkg install (x86-windows-static)'
+    $okX64 = Install-ManifestTriplet -VcpkgExe $vcpkgExe -Triplet 'x64-windows-static' -InstallRoot $VcpkgInstalledRootX64 -StepLabel 'vcpkg install (x64-windows-static)'
 
     if ($okX86) {
-        Copy-TripletLibs -InstalledRoot $VcpkgInstalledDir -Triplet 'x86-windows-static' -DestDir $LibX86Dir
-        $script:CurlVersionX86ForReadme = Get-InstalledCurlVersion -VcpkgExe $vcpkgExe -Triplet 'x86-windows-static'
+        Copy-TripletLibs -InstalledRoot $VcpkgInstalledRootX86 -Triplet 'x86-windows-static' -DestDir $LibX86Dir
+        $script:CurlVersionX86ForReadme = Get-InstalledCurlVersion -VcpkgExe $vcpkgExe -Triplet 'x86-windows-static' -InstallRoot $VcpkgInstalledRootX86
     } else {
         Add-Result -Step 'lib copy (x86-windows-static)' -Status 'SKIP' -Message 'Skipped: manifest install for this triplet failed.'
     }
 
     if ($okX64) {
-        Copy-TripletLibs -InstalledRoot $VcpkgInstalledDir -Triplet 'x64-windows-static' -DestDir $LibX64Dir
-        $script:CurlVersionX64ForReadme = Get-InstalledCurlVersion -VcpkgExe $vcpkgExe -Triplet 'x64-windows-static'
+        Copy-TripletLibs -InstalledRoot $VcpkgInstalledRootX64 -Triplet 'x64-windows-static' -DestDir $LibX64Dir
+        $script:CurlVersionX64ForReadme = Get-InstalledCurlVersion -VcpkgExe $vcpkgExe -Triplet 'x64-windows-static' -InstallRoot $VcpkgInstalledRootX64
     } else {
         Add-Result -Step 'lib copy (x64-windows-static)' -Status 'SKIP' -Message 'Skipped: manifest install for this triplet failed.'
     }
@@ -747,9 +983,10 @@ function Copy-GTestTripletLibs {
         [Parameter(Mandatory)][string]$DestDir
     )
 
-    # $InstalledRoot is $VcpkgInstalledDir ($RepoRoot\vcpkg_installed), the
-    # manifest-mode installed tree -- NOT $VcpkgRoot\installed\, which is
-    # where classic mode would have put this (see Copy-TripletLibs).
+    # $InstalledRoot is the triplet-exclusive install root (see
+    # $VcpkgInstalledRootX86 / $VcpkgInstalledRootX64), NOT
+    # $VcpkgRoot\installed\, which is where classic mode would have put this
+    # (see Copy-TripletLibs).
     $srcLibDir        = Join-Path $InstalledRoot "$Triplet\lib"
     $srcManualLinkDir = Join-Path $srcLibDir 'manual-link'
 
@@ -801,9 +1038,10 @@ function Copy-GTestHeaders {
         [Parameter(Mandatory)][string]$DestDir
     )
 
-    # $InstalledRoot is $VcpkgInstalledDir ($RepoRoot\vcpkg_installed), the
-    # manifest-mode installed tree -- NOT $VcpkgRoot\installed\, which is
-    # where classic mode would have put this (see Copy-TripletLibs).
+    # $InstalledRoot is the triplet-exclusive install root (see
+    # $VcpkgInstalledRootX86 / $VcpkgInstalledRootX64), NOT
+    # $VcpkgRoot\installed\, which is where classic mode would have put this
+    # (see Copy-TripletLibs).
     $srcIncludeDir = Join-Path $InstalledRoot "$Triplet\include\gtest"
     if (-not (Test-Path -LiteralPath $srcIncludeDir)) {
         Add-Result -Step 'gtest headers' -Status 'FAIL' -Message "Expected header directory not found: $srcIncludeDir"
@@ -820,17 +1058,14 @@ function Copy-GTestHeaders {
 function Get-InstalledGTestVersion {
     param(
         [Parameter(Mandatory)][string]$VcpkgExe,
-        [Parameter(Mandatory)][string]$Triplet
+        [Parameter(Mandatory)][string]$Triplet,
+        [Parameter(Mandatory)][string]$InstallRoot
     )
-    # Same reasoning as Get-InstalledCurlVersion: relies on the ambient
-    # manifest-mode context (cwd at $RepoRoot, set via Push-Location near
-    # the top of this script) so `vcpkg list` resolves against
-    # $VcpkgInstalledDir rather than $VcpkgRoot\installed\. No explicit
-    # -InstalledRoot parameter is threaded through here (unlike the Copy-*
-    # functions) -- this function doesn't touch the filesystem directly,
-    # it only shells out to `vcpkg list`, and that command picks up the
-    # manifest root the same way `vcpkg install` does, from cwd.
-    $line = & $VcpkgExe list "gtest:$Triplet" 2>$null | Select-Object -First 1
+    # Same reasoning as Get-InstalledCurlVersion: --x-install-root must
+    # match the root Triplet was actually installed into (see
+    # $VcpkgInstalledRootX86 / $VcpkgInstalledRootX64), or `vcpkg list`
+    # resolves against its own default install root instead.
+    $line = & $VcpkgExe list "gtest:$Triplet" "--x-install-root=$InstallRoot" 2>$null | Select-Object -First 1
     if ($line -match '\S+\s+(\S+)') {
         return $Matches[1]
     }
@@ -861,26 +1096,26 @@ Invoke-Step -Name 'vcpkg / gtest' -Body {
     # idempotent no-op if that step already ran; kept here too so this step
     # is still correct standalone (e.g. -SkipVcpkg not set but the curl
     # step somehow didn't run first).
-    $okX86 = Install-ManifestTriplet -VcpkgExe $vcpkgExe -Triplet 'x86-windows-static' -StepLabel 'vcpkg install (x86-windows-static, gtest)'
-    $okX64 = Install-ManifestTriplet -VcpkgExe $vcpkgExe -Triplet 'x64-windows-static' -StepLabel 'vcpkg install (x64-windows-static, gtest)'
+    $okX86 = Install-ManifestTriplet -VcpkgExe $vcpkgExe -Triplet 'x86-windows-static' -InstallRoot $VcpkgInstalledRootX86 -StepLabel 'vcpkg install (x86-windows-static, gtest)'
+    $okX64 = Install-ManifestTriplet -VcpkgExe $vcpkgExe -Triplet 'x64-windows-static' -InstallRoot $VcpkgInstalledRootX64 -StepLabel 'vcpkg install (x64-windows-static, gtest)'
 
     $headersCopied = $false
 
     if ($okX86) {
-        Copy-GTestTripletLibs -InstalledRoot $VcpkgInstalledDir -Triplet 'x86-windows-static' -DestDir $LibGtestX86Dir
-        $script:GTestVersionX86ForReadme = Get-InstalledGTestVersion -VcpkgExe $vcpkgExe -Triplet 'x86-windows-static'
+        Copy-GTestTripletLibs -InstalledRoot $VcpkgInstalledRootX86 -Triplet 'x86-windows-static' -DestDir $LibGtestX86Dir
+        $script:GTestVersionX86ForReadme = Get-InstalledGTestVersion -VcpkgExe $vcpkgExe -Triplet 'x86-windows-static' -InstallRoot $VcpkgInstalledRootX86
         if (-not $headersCopied) {
-            $headersCopied = Copy-GTestHeaders -InstalledRoot $VcpkgInstalledDir -Triplet 'x86-windows-static' -DestDir $GtestVendorDir
+            $headersCopied = Copy-GTestHeaders -InstalledRoot $VcpkgInstalledRootX86 -Triplet 'x86-windows-static' -DestDir $GtestVendorDir
         }
     } else {
         Add-Result -Step 'gtest lib copy (x86-windows-static)' -Status 'SKIP' -Message 'Skipped: manifest install for this triplet failed.'
     }
 
     if ($okX64) {
-        Copy-GTestTripletLibs -InstalledRoot $VcpkgInstalledDir -Triplet 'x64-windows-static' -DestDir $LibGtestX64Dir
-        $script:GTestVersionX64ForReadme = Get-InstalledGTestVersion -VcpkgExe $vcpkgExe -Triplet 'x64-windows-static'
+        Copy-GTestTripletLibs -InstalledRoot $VcpkgInstalledRootX64 -Triplet 'x64-windows-static' -DestDir $LibGtestX64Dir
+        $script:GTestVersionX64ForReadme = Get-InstalledGTestVersion -VcpkgExe $vcpkgExe -Triplet 'x64-windows-static' -InstallRoot $VcpkgInstalledRootX64
         if (-not $headersCopied) {
-            $headersCopied = Copy-GTestHeaders -InstalledRoot $VcpkgInstalledDir -Triplet 'x64-windows-static' -DestDir $GtestVendorDir
+            $headersCopied = Copy-GTestHeaders -InstalledRoot $VcpkgInstalledRootX64 -Triplet 'x64-windows-static' -DestDir $GtestVendorDir
         }
     } else {
         Add-Result -Step 'gtest lib copy (x64-windows-static)' -Status 'SKIP' -Message 'Skipped: manifest install for this triplet failed.'

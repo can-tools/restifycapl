@@ -74,8 +74,13 @@ compile_commands.json
 *.bak
 *.swp
 
-# vcpkg
-vcpkg_installed/
+# vcpkg -- each architecture's manifest-mode install gets its own install
+# root (vcpkg_installed-x86/, vcpkg_installed-x64/) rather than sharing one
+# vcpkg_installed/, because a shared root causes one triplet's install to
+# delete the other's (see docs/development-environment.md#manifest-mode-triplet-installs-need-separate-install-roots).
+# The wildcard also still catches a lone vcpkg_installed/ from a manual,
+# unscripted `vcpkg install` run.
+vcpkg_installed*/
 
 # debug information files
 *.dwo

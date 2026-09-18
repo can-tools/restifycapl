@@ -1,6 +1,6 @@
-# Plan (v11): Build the CAPL REST DLL (restifycapl) from zero
+# Plan (v12): Build the CAPL REST DLL (restifycapl) from zero
 
-Revision of v10. Stage 4 is now complete: `.gitignore` revised, `lib/README` template re-specified, the `vcpkg.json` manifest adopted, and the tracked binaries un-committed. The bootstrap script's migration remains unverified by a real run.
+Revision of v11. **Stage 4 is fully complete and execution-verified.** The bootstrap script's manifest migration was re-run for real at 19 OK / 0 WARN / 0 FAIL on both architectures after two genuine bugs were found and fixed. Stage 3 is now the sole remaining blocker before Stage 5.
 
 ---
 
@@ -18,17 +18,17 @@ A developer machine and a CI runner are independent environments. Each provision
 
 | Shared (committed) | Not shared (provisioned per environment) |
 |---|---|
-| `vcpkg.json` — the authoritative pin | `lib/x86/*.lib`, `lib/x64/*.lib` (libcurl, zlib) |
+| `vcpkg.json` — the authoritative content pin | `lib/x86/*.lib`, `lib/x64/*.lib` (libcurl, zlib) |
 | `include/vendor/json.hpp` — pinned source header, SHA-256 verified | `lib/gtest/x86/*.lib`, `lib/gtest/x64/*.lib` |
 | `include/vendor/capl-dll-sdk/` — source headers, no package-manager path exists | `include/vendor/gtest/` — headers ship with the gtest libs and must stay version-matched to them |
 
-**Why this matters more than the ABI question it replaces.** v8 and v9 committed compiled `.lib` files and proposed managing the resulting toolchain-drift risk — cataloguing the failure mode, noting it surfaces loudly as `LNK2038`, and pre-designing an escape hatch. That was risk *management* where risk *elimination* was available at no cost. Under this architecture CI never links a binary that some laptop produced, so MSVC's cross-toolset compatibility guarantee is never put under test in the first place. A structural fix beats a monitored one.
+**Why this matters more than the ABI question it replaces.** v8 and v9 committed compiled `.lib` files and proposed managing the resulting toolchain-drift risk — cataloguing the failure mode, noting it surfaces loudly as `LNK2038`, and pre-designing an escape hatch. That was risk *management* where risk *elimination* was available at no cost. Under this architecture CI never links a binary that some laptop produced, so MSVC's cross-toolset compatibility guarantee is never put under test in the first place.
 
-**Scope of the reversal.** This reversed the "commit the vendored binaries" position for **libcurl and zlib as well as GoogleTest**. The earlier justification distinguished them on ABI fragility (C boundary versus C++ boundary), but that is an argument about how likely one is to *get away with* sharing an artifact, not about whether sharing is sound.
+**Two pins, not one.** `vcpkg.json`'s `builtin-baseline` pins the registry *content* (which port versions). It does not pin the vcpkg *tool*. Since triplet isolation now depends on `--x-install-root`, a flag vcpkg's own `--help` marks `(experimental)`, the tool binary is pinned too — see §5 and BPE-15.
 
-**What does not change:** vendored *source* stays committed. `json.hpp` is a single pinned, checksummed source file — no compilation, no ABI, no environment coupling. The Vector SDK headers are source for which no package-manager path exists, and the decision to commit them to a public repository stands on its own separately-accepted grounds.
+**The pin is `vcpkg.json`, and only the pin.** The manifest's `"version-string": "0.0.0"` is required boilerplate describing *this project as a vcpkg package*. It feeds nothing: not `version.rc`, not the Makefile's `VER_*`, not `/VERSION:`. The product version remains derived solely from the Git tag. Worth stating explicitly because a hardcoded `0.0.0` in a tracked file looks exactly like the second version source that `msvc-build-conventions` forbids. See BPE-16.
 
-**The pin is `vcpkg.json`, and only the pin.** Note that the manifest's `"version-string": "0.0.0"` is required manifest boilerplate describing *this project as a vcpkg package*. It feeds nothing: not `version.rc`, not the Makefile's `VER_*`, not `/VERSION:`. The product version remains derived solely from the Git tag. This is worth stating explicitly because a hardcoded `0.0.0` sitting in a tracked file looks exactly like the second version source that `msvc-build-conventions` forbids. See BPE-16.
+**What does not change:** vendored *source* stays committed. `json.hpp` is a single pinned, checksummed source file. The Vector SDK headers are source for which no package-manager path exists, and the decision to commit them to a public repository stands on separately-accepted grounds.
 
 ---
 
@@ -36,18 +36,15 @@ A developer machine and a CI runner are independent environments. Each provision
 
 **Stage 1 — complete and verified.**
 
-**Stage 2 — complete, but the manifest migration is unverified by a real run.** `scripts/setup-dev-env.ps1` last produced 19 OK / 0 WARN / 0 FAIL, but that result predates BPE-15's migration to manifest mode. **A prior clean result does not transfer to modified code** — this is the project's most consistently validated lesson, and it applies to the script that proved it.
+**Stage 2 — COMPLETE AND EXECUTION-VERIFIED.** `scripts/setup-dev-env.ps1` ran end to end at **19 OK / 0 WARN / 0 FAIL on both architectures**, after two real bugs were found and fixed (see BPE-15). This closes HUM-19.
 
-**Stage 3 — UNCONFIRMED, and the critical path.** Neither HUM-10 (install CANoe) nor HUM-11 (build and load the official Vector sample) is observable from the repository. Stage 3 hard-blocks Stage 5.
+**Stage 3 — UNCONFIRMED. The sole remaining blocker before Stage 5.** Neither HUM-10 (install CANoe) nor HUM-11 (build and load the official Vector sample) is observable from the repository. Nothing in the dependency-architecture work blocks anything any more.
 
-**Stage 4 — COMPLETE.** All of BPE-2 through BPE-7 plus BPE-15 and TEST-1 are done and independently verified:
+**Stage 4 — COMPLETE.**
 
-- `vcpkg.json` exists with a real `builtin-baseline` (`386d7c47…`, confirmed against the actual local vcpkg checkout as a genuine dated commit and an exact `HEAD` match) and a `curl` override of `8.22.0` matching the real port file at that baseline.
-- `.gitignore` carries `*.lib` plus the four scoped ignores (`lib/x86/`, `lib/x64/`, `lib/gtest/`, `include/vendor/gtest/`), with `lib/README` correctly left tracked.
-- The `lib/README` template inside the script (~lines 986–1062) contains every required element: provisioned/uncommitted framing, exact filenames including the unguessable `zs.lib`, the product-linked versus test-only distinction, the `manual-link` split rationale, and "the authoritative pin is `vcpkg.json`". It also distinguishes `json.hpp` as committed *source* rather than a provisioned binary — beyond what was specified, and correct.
-- The previously-tracked `lib/x86/*.lib` and `lib/x64/*.lib` are removed from the index while remaining on disk. A stray untracked `nul` file (a shell-redirection artifact) was deleted.
+**One local-hygiene item outstanding (BPE-17).** `lib/x64/` currently holds four `.lib` files — `libcurl.lib`, `zs.lib`, plus stale `gmock.lib` and `gtest.lib` left over from a pre-fix run. `lib/x86/` holds exactly the correct two. This is residue, not a regression: `Copy-TripletLibs` is additive and never prunes its destination. Details and consequences in BPE-17.
 
-**Next:** re-run the script for real (BPE-15 verification); confirm Stage 3; then Stage 5.
+**Next:** confirm Stage 3, then Stage 5.
 
 ---
 
@@ -71,6 +68,7 @@ Documentation practice is deliberately not a numbered stage — see §6a.
 ## 5. Standing constraints
 
 - **Compiled dependency binaries are never committed and never shared between environments** (§2). Each environment provisions its own from `vcpkg.json`.
+- **Both the vcpkg registry content and the vcpkg tool binary are pinned.** `builtin-baseline` pins port versions; `$VcpkgPinnedTag` (currently `2026.07.29`, commit `9e593bb18ea69cc5095e012465dcd675a822ed0d`) pins the tool. The tool pin exists because triplet isolation depends on `--x-install-root`, which vcpkg marks `(experimental)`. Pin-enforcement failure is **WARN, not FAIL** — it is defence in depth over an already-solid content pin, and aborting an otherwise-working provisioning run over a speculative future flag change would be the wrong trade. WARN is not silent here, because the project's success bar is 0 WARN.
 - **`/MT` static CRT** for the DLL and every static dependency. Never mix `/MT` and `/MD` in one link. Verify with `dumpbin /directives` — expect `/DEFAULTLIB:LIBCMT`, never `MSVCRT`.
 - **Bitness parity.** x86 and x64 must both build and behave identically — same sources, same flags (`/std:c++17`, `/EHsc`, `/MT`), same export table. Only `/MACHINE:` and library path differ; the Makefile enforces this structurally via one parameterized rule.
 - **Export contract.** The `CAPL_DLL_INFO_LIST`/`CAPL_DLL_INFO4` table in `src/module/exports.cpp` is the real API. Append-only; never rename, reorder, or remove. Reserved first entry (`CDLL_VERSION_NAME`/`CDLL_VERSION`) always present. Exported functions `extern "C"`.
@@ -94,19 +92,29 @@ All nine items (HUM-1 … HUM-9) applied and verified. **REV-1 — SATISFIED**, 
 
 Three permanent rules stand: only `CLAUDE.md` and `.claude/**` are operationally loaded and must be swept; `docs/.locals/**` is exempt as historical record (the v1–v3 drafts carry the user's inline answers, intelligible only alongside the questions they answered); the sweep is self-matching and excludes this plan file. `Grep` honours `.gitignore` and produces the correct scope naturally; Bash `grep -r` / `rg --no-ignore` do not.
 
-### Stage 2 — Local development-environment bootstrap — COMPLETE, RE-VERIFICATION OUTSTANDING
+### Stage 2 — Local development-environment bootstrap — COMPLETE, EXECUTION-VERIFIED
 
-**BPE-1 — DONE, but its proof is now stale.** The script provisions toolchain, dependencies and headers on the developer's machine, built by the developer's own MSVC. Its 19 OK / 0 WARN / 0 FAIL run predates BPE-15's manifest-mode migration.
+**BPE-1 / BPE-15 / HUM-19 — DONE.** `scripts/setup-dev-env.ps1` provisions the toolchain, dependencies and headers on the developer's machine from `vcpkg.json`, built by the developer's own MSVC. **Final real run: 19 OK / 0 WARN / 0 FAIL on both architectures.**
 
-Two of its four original bugs were invisible to static review — a Polish-localized `cl.exe` banner defeating an English-only architecture check, and a `curl[schannel]` vcpkg feature name that no longer exists. The `VSCMD_ARG_TGT_ARCH` delayed-expansion fix was additionally verified to still fail correctly on a genuinely wrong architecture. The GoogleTest step surfaced a non-obvious vcpkg layout fact found by reading the port files: the port's own patch relocates `gtest_main.lib` to `lib/manual-link/`, separate from `gtest.lib` in plain `lib/`, so the copy logic handles both source directories.
+This is direct evidence, not testimony — the same standard applied to BPE-5's `.res` decode.
 
-**Outstanding: a real re-run.** The migration passes static review (fresh AST parse, 0 errors; a full grep for classic-mode residue — `Install-CurlTriplet`, `Install-GTestTriplet`, `VcpkgRootPath`, old `installed\$Triplet` paths — found only comments contrasting old against new for future readers). None of that is execution. Until a human runs it, BPE-15 is unverified.
+**Two real bugs found during that verification, neither visible to static review:**
 
-**Known precondition for that run.** The local vcpkg checkout at `%LOCALAPPDATA%\vcpkg` is **confirmed shallow right now** — not a hypothetical. Manifest mode with a `builtin-baseline` needs the registry history at that commit, so the run must either exercise the script's `Repair-ShallowVcpkgClone` self-heal (present and correctly placed) or be preceded by a manual `git fetch --unshallow`. This makes the re-run a genuine test of the self-heal rather than a formality.
+**1. Shared install root destroying the other triplet.** Manifest mode defaults both triplets into one `vcpkg_installed/`. Installing x86 then x64 caused vcpkg to *remove* x86's already-installed packages — its own console output announced this — so x86's lib directory was gone by the time its copy step ran. The symptom was three x86 steps failing with "Expected lib directory not found" **while the preceding `vcpkg install (x86-windows-static)` step reported `[OK]`**, which is exactly the kind of misleading adjacency that makes a bug expensive: the failing step and the causing step were different steps. Fixed with separate `--x-install-root` values per triplet (`vcpkg_installed-x86/`, `vcpkg_installed-x64/`). Reproduced and re-verified against real vcpkg.
+
+**2. Unfiltered lib copy.** `Copy-TripletLibs` did a blanket `*.lib` copy into the product-linked `lib/<arch>/`. Because manifest mode places every package for a triplet in one shared `lib/`, this dragged `gmock.lib` and `gtest.lib` in alongside `libcurl.lib` and `zs.lib`. Checked against the Makefile (`LIBS := libcurl.lib zs.lib $(SYSLIBS)` — explicit names, no glob) and confirmed to be **copy noise violating the documented product-versus-test-only separation, never link-time contamination** and never a `/MT`/ABI issue. Fixed by allow-listing exact filenames.
+
+**`code-reviewer` independently reproduced both** the root cause and the fix, running its own `vcpkg install` calls with fresh install roots rather than inspecting the fixing agent's leftovers.
+
+**3. vcpkg tool pin added** — a finding from that review, not from the fixing agent. `Install-VcpkgIfMissing` did a plain `git clone` with no checkout, so only registry *content* was pinned. Since triplet isolation now rests on `--x-install-root`, flagged `(experimental)` by vcpkg itself, a silent future semantic change would have had no pin protecting against it. Fixed with a `Set-VcpkgPinnedVersion` / `Invoke-VcpkgBootstrap` pair wired after clone-or-repair on both code paths, pinning tag `2026.07.29`. The tag was independently verified against the real upstream via `git ls-remote --tags` as genuinely current, not fabricated. Severity is WARN rather than FAIL by deliberate choice (see §5).
+
+The reviewer explicitly **rejected** per-architecture manifest files as the alternative to `--x-install-root`, on the grounds that they would reintroduce the second-pin-source antipattern this project has already flagged elsewhere. Recording the rejected option matters as much as the chosen one.
+
+**Earlier bugs, for the record:** a Polish-localized `cl.exe` banner defeating an English-only architecture check; a `curl[schannel]` vcpkg feature name that no longer exists; `%VSCMD_ARG_TGT_ARCH%` returning its own literal text. The `VSCMD_ARG_TGT_ARCH` fix was verified to still fail correctly on a genuinely wrong architecture. The GoogleTest step surfaced a non-obvious vcpkg layout fact found by reading the port files: the port's own patch relocates `gtest_main.lib` to `lib/manual-link/`, separate from `gtest.lib` in plain `lib/`.
 
 **Clarification of the script's role.** `setup-dev-env.ps1` is the **local** provisioning path only. CI must never run it — it installs VS Build Tools, `make` and vcpkg itself. The two paths share the *pin*, never the *mechanism* and never the *output*.
 
-### Stage 3 — Manual toolchain setup (human only) — UNCONFIRMED, GATES STAGE 5
+### Stage 3 — Manual toolchain setup (human only) — UNCONFIRMED, SOLE REMAINING BLOCKER
 
 No automation path exists for either item — a licensing constraint, not a technical one, and neither is observable from the repository.
 
@@ -114,11 +122,11 @@ No automation path exists for either item — a licensing constraint, not a tech
 
 **HUM-11 — Build and load the official "Example of a Windows DLL for CAPL" sample, unchanged, in CANoe.** Worth doing before writing a line of `exports.cpp`: if the official sample does not load, that is an environment problem, and discovering it while simultaneously debugging a first hand-written export table is the compounded-unknowns situation 04-FLOW warns against.
 
-**This is the critical path.** Stage 4 is finished, so Stage 3 is what stands between the project and the Stage 5 hard gate.
+**With Stage 4 closed, this is the only thing standing between the project and the Stage 5 hard gate.**
 
 ### Stage 4 — Repo skeleton, Makefile, versioning, dependency pinning — COMPLETE
 
-**BPE-2 — DONE, verified.** `.gitignore` now ignores `*.lib` on purpose, with scoped exclusions for `lib/x86/`, `lib/x64/`, `lib/gtest/` and `include/vendor/gtest/`. Scoping to subdirectories rather than `lib/` keeps `lib/README` tracked. The `# Makefile` annotation is untouched; that reasoning was always independent.
+**BPE-2 — DONE.** `.gitignore` ignores `*.lib` on purpose, with scoped exclusions for `lib/x86/`, `lib/x64/`, `lib/gtest/` and `include/vendor/gtest/`. Scoping to subdirectories rather than `lib/` keeps `lib/README` tracked.
 
 **BPE-3 — DONE.** Skeleton present.
 
@@ -128,13 +136,13 @@ No automation path exists for either item — a licensing constraint, not a tech
 
 The `VER_STRING` quoting was contested across two reviews — one reproduction produced RC2237 and looked like a real defect. It was settled by running the actual Make binary against the actual Makefile rather than an approximated shell invocation, then decoding the compiled `.res`'s UTF-16LE `FileVersion`/`ProductVersion` fields: both correct and unmangled. **The RC2237 was an artifact of the reproduction, not the build.** When a hand-reconstructed invocation and the real build disagree, the build wins.
 
-**BPE-6 — DONE, verified.** The `lib/README` template inside the script (~lines 986–1062) carries the provisioned/uncommitted framing, the exact filenames (`libcurl.lib`, `zs.lib`, `gtest.lib`, `gtest_main.lib`, with an explicit note that `zs.lib` is not the name anyone would guess), the product-linked versus test-only distinction, the `manual-link` split rationale, per-environment `/MT` verification, and "the authoritative pin is `vcpkg.json`". It additionally distinguishes `json.hpp` as committed source rather than a provisioned binary — beyond specification and correct.
+**BPE-6 — DONE.** The `lib/README` template inside the script carries the provisioned/uncommitted framing, exact filenames (including an explicit note that `zs.lib` is not the name anyone would guess), the product-linked versus test-only distinction, the `manual-link` split rationale, per-environment `/MT` verification, and "the authoritative pin is `vcpkg.json`". It additionally distinguishes `json.hpp` as committed source rather than a provisioned binary — beyond specification and correct.
 
-Editing the template rather than the generated file was the right call: `lib/README` is script-generated and a hand edit would have silently reverted on the next run.
+Editing the template rather than the generated file was the right call: `lib/README` is script-generated and a hand edit would have silently reverted.
 
-**BPE-7 — DONE.** GoogleTest via vcpkg into `lib/gtest/<arch>/`. The separation is real in the link line, not just in folder naming: the Makefile's `LIBS` (product) contains only `libcurl.lib zs.lib` plus the seven system libs, while `TEST_LIBS` adds `gtest.lib gtest_main.lib` with a separate `/LIBPATH:$(GTESTDIR)` used solely by the test recipe.
+**BPE-7 — DONE.** GoogleTest via vcpkg into `lib/gtest/<arch>/`. The separation is real in the link line, not just in folder naming: the Makefile's `LIBS` contains only `libcurl.lib zs.lib` plus the seven system libs, while `TEST_LIBS` adds `gtest.lib gtest_main.lib` with a separate `/LIBPATH:$(GTESTDIR)` used solely by the test recipe.
 
-**BPE-15 — DONE (code), UNVERIFIED (execution).** `vcpkg.json` is the single authoritative pin:
+**BPE-15 — DONE AND VERIFIED.** `vcpkg.json` is the authoritative content pin:
 
 ```json
 {
@@ -148,23 +156,33 @@ Editing the template rather than the generated file was the right call: `lib/REA
 }
 ```
 
-The baseline resolves to a genuine dated commit in the real vcpkg registry and is an exact `HEAD` match; the `curl` override matches the port file at that exact baseline. The script is migrated to manifest mode with a `Repair-ShallowVcpkgClone` self-heal. **Execution verification is outstanding — see Stage 2.**
+The baseline resolves to a genuine dated commit in the real registry and is an exact `HEAD` match; the `curl` override matches the port file at that baseline. The script runs in manifest mode with per-triplet `--x-install-root`, an allow-listed lib copy, a `Repair-ShallowVcpkgClone` self-heal, and a pinned tool binary. Verified by a real 19/0/0 run on both architectures.
 
-**Un-commit — DONE.** `lib/x86/*.lib` and `lib/x64/*.lib` removed from the index, files retained on disk (confirmed present). `lib/gtest/**/*.lib` and `include/vendor/gtest/` were never staged. Blobs remain in history; no rewrite proposed.
+**BPE-16 — Preempt the `version-string` confusion.** Add one line stating that `vcpkg.json`'s `"version-string": "0.0.0"` is manifest boilerplate, not a product version source. Best home is `msvc-build-conventions`' Versioning section — where someone checks "is this a version source?", and which currently says no version is ever hand-edited, making a tracked literal `0.0.0` read as a counterexample. The `lib/README` template is a reasonable second home. Non-blocking.
 
-**BPE-16 — NEW, small. Preempt the `version-string` confusion.** Add one line stating that `vcpkg.json`'s `"version-string": "0.0.0"` is manifest boilerplate and is not a product version source. Best home is `msvc-build-conventions`' Versioning section, which is where someone checks "is this a version source?" and which currently says no version is ever hand-edited — a hardcoded `0.0.0` in a tracked file reads as a counterexample. A line in the `lib/README` template is a reasonable second home, since it already discusses `vcpkg.json`. Non-blocking.
+**BPE-17 — NEW. Make the lib copy synchronising, and clear the existing residue.**
+
+`lib/x64/` currently contains **four** `.lib` files: `libcurl.lib`, `zs.lib`, and stale `gmock.lib` and `gtest.lib`. `lib/x86/` contains exactly the correct two.
+
+This is **not a regression** — the allow-list fix works, demonstrably so, and the run's "Copied 2 .lib file(s)" message is accurate. `Copy-TripletLibs` is purely additive: it filters what it copies but never prunes its destination. The two stale files predate the fix and simply were never removed.
+
+The asymmetry has a neat cause: **the very bug that broke x86 also protected it.** Because the shared-install-root bug destroyed x86's source directory, x86's copy step failed rather than running, so `lib/x86/` was never contaminated in the first place. x64 succeeded throughout and accumulated the residue.
+
+Consequences today: **none for the build** — the Makefile names product libs explicitly, so there is no link-time contamination — and **none for the repository**, since `lib/x64/` is gitignored. What it does violate is the documented product-versus-test-only separation as it actually exists on disk, which is the kind of gap that misleads the next person to inspect that directory.
+
+Two options: have `Copy-TripletLibs` remove non-allow-listed `.lib` files from the destination before copying (making the step synchronising rather than additive, and self-healing on any future change to the allow-list), or simply delete the two files by hand. The first is better — it makes the invariant hold for anyone who ever ran an older version of the script — but the second is sufficient for this machine. Non-blocking either way.
 
 **TEST-1 — DONE.** `tests/core/sanity-test.cpp` plus a real linked `build/test/x64/restifycapl-tests.exe`.
 
 This surfaced a real latent bug that could not manifest until a real `main()`-providing static library existed to link against: **`link.exe` infers the subsystem and entry point only from `main`/`WinMain` in `.obj` files passed directly on the command line, never transitively from a `.lib`.** With `main()` coming solely from `gtest_main.lib`, the link failed `LNK1561`. Root-caused with `/VERBOSE` and `dumpbin /symbols`, fixed with `/SUBSYSTEM:CONSOLE` on the test recipe only, and independently re-verified by a separate reviewer running its own `dumpbin` and `make test`.
 
-**What `make test` currently proves.** All of `src/core`, `src/http`, `src/registry`, `src/mapping` contain only `.gitkeep`, so the suite compiles exactly one file. Green proves **the harness** — flags, include paths, GoogleTest linkage, subsystem, runner — and no project logic. That is what TEST-1 was for.
+**What `make test` currently proves.** All of `src/core`, `src/http`, `src/registry`, `src/mapping` contain only `.gitkeep`, so the suite compiles exactly one file. Green proves **the harness** — flags, include paths, GoogleTest linkage, subsystem, runner — and no project logic.
 
 **x86 evidence gap.** Only `build/test/x64/` artifacts exist. The Makefile fully parameterizes the test tree, so `make test ARCH=x86` is supported by construction, but an x86 run is not evidenced. Stage 6's CI should run tests on both architectures so this stops depending on anyone remembering.
 
-**REV-2 — CLEAN, pending the re-run.** The full review passed with one Must-fix — the still-tracked `.lib` files — which has since been closed. The `/MT` provenance check (`dumpbin /directives`, expecting `/DEFAULTLIB:LIBCMT`) is now a **per-environment** check: it validates local provisioning, and CI must run the equivalent against its own copies.
+**REV-2 — CLEAN, CONFIRMED.** The full review passed; its one Must-fix (still-tracked `.lib` files) was closed; the follow-up findings (transcript inversion in `docs/development-environment.md`, missing tool pin) were closed and independently re-verified, including an independent AST parse at 0 errors and upstream confirmation of the pinned tag. The `/MT` provenance check is a **per-environment** check: it validates local provisioning, and CI must run the equivalent against its own copies.
 
-**HUM-12 — Commit and push.**
+**HUM-12 — Commit and push.** The Stage 4 work is complete and uncommitted.
 
 ---
 
@@ -176,7 +194,9 @@ This surfaced a real latent bug that could not manifest until a real `main()`-pr
 
 **README impact of §2.** The Development setup section must state plainly that provisioning is **required**, not a convenience: a fresh clone cannot build or test until `scripts/setup-dev-env.ps1` has run, because no compiled dependency is committed.
 
-**Drift watch.** Rationale living in `docs/development-environment.md` rather than inline keeps the script readable but creates two artifacts that must move together. The Makefile deliberately takes the opposite approach for its two hardest-won findings — the `/SUBSYSTEM:CONSOLE` requirement and the `make -n` quirk are long inline comments, because both are traps a future reader hits *while editing that exact recipe*. Rationale belongs where it will be read at the moment it is needed; that is a judgement per case, not a uniform rule.
+**Drift watch — and a demonstrated instance.** Rationale living in `docs/development-environment.md` rather than inline keeps the script readable but creates two artifacts that must move together. This risk materialised during Stage 4: the worked bug-reproduction transcript in that document had the wrong triplet's packages being removed in the wrong order, and was corrected to match reality. A transcript that plausibly resembles the truth is worse than no transcript, because it will be trusted. Any script change invalidating a documented rationale must update the document in the same change.
+
+The Makefile deliberately takes the opposite approach for its two hardest-won findings — the `/SUBSYSTEM:CONSOLE` requirement and the `make -n` quirk are long inline comments, because both are traps a future reader hits *while editing that exact recipe*. Rationale belongs where it will be read at the moment it is needed; that is a judgement per case, not a uniform rule.
 
 ---
 
@@ -184,7 +204,7 @@ This surfaced a real latent bug that could not manifest until a real `main()`-pr
 
 ### Stage 5 — "Hello DLL": one operation, verified in CANoe — HARD GATE
 
-**Blocked on Stage 3.**
+**Blocked on Stage 3 only.**
 
 **CPP-1 — Write `src/module/exports.cpp` and `exports.def`.** Exactly **one** trivial operation (e.g. return a fixed version string into a caller-supplied buffer). `exports.def` contains `EXPORTS` and nothing else. Apply both post-mortem rules from §5. **This stage permanently fixes the CAPL-visible naming convention** for every operation the project will ever expose — the never-rename rule means it cannot be revised later without a major-version break. Decide it deliberately and write it down.
 
@@ -205,16 +225,22 @@ The Makefile already references `src/module/exports.def` as a prerequisite of th
 **CI provisioning step — the structural core of §2.** Before Make, CI runs its own vcpkg install from `vcpkg.json`, on the runner, producing binaries built by the runner's own toolchain:
 
 - CI **must not** run `scripts/setup-dev-env.ps1`.
-- The provisioning step places libs where the Makefile expects them (`lib/<arch>/`, `lib/gtest/<arch>/`), so the Makefile needs no CI-specific branch.
+- The provisioning step places libs where the Makefile expects them (`lib/<arch>/`, `lib/gtest/<arch>/`).
 - CI runs its own `dumpbin /directives` `/MT` check — the CI-side equivalent of REV-2.
 
-**Carry-over trap for whoever writes this — identified by REV-4's readiness pre-check.** The shallow-clone failure is a property of **how vcpkg gets bootstrapped**, not of the manifest. A naive shallow clone of the vcpkg registry on a runner hits the identical failure the local machine is hitting right now. BPE-9 must therefore either do a full clone or replicate the unshallow self-heal. This is the clearest example of the §13 provisioning-drift risk: two mechanisms honouring one pin can still fail differently at the bootstrap layer beneath it.
+**Three carry-over traps for whoever writes this, all learned the hard way locally:**
 
-**Caching — purely a performance concern, never a correctness one.** Because no committed binary is involved, caching can be added, tuned or removed without affecting whether the build is correct. Recommended: `actions/cache` over the vcpkg binary cache or `vcpkg_installed/`, keyed on a hash of `vcpkg.json` **plus the triplet plus the runner image version**. Including the image version is the important detail: when GitHub bumps the runner's toolset, the key changes, the cache misses, and dependencies rebuild against the new compiler automatically. The cache stays correct by construction rather than by anyone remembering to invalidate it.
+1. **Shallow clone.** The failure is a property of *how vcpkg gets bootstrapped*, not of the manifest. A naive shallow clone of the registry on a runner hits the identical failure the local machine hit. Use a full clone or replicate the unshallow self-heal.
+2. **Per-triplet install roots.** Both triplets sharing one `vcpkg_installed/` causes the second install to *remove* the first's packages. CI must pass distinct `--x-install-root` values exactly as the local script does.
+3. **Tool pin.** CI should honour the same `$VcpkgPinnedTag`, for the same reason the local path does — `--x-install-root` is experimental, and an unpinned runner tool is an unpinned dependency.
+
+All three sit **beneath** the manifest, in how vcpkg itself is obtained and invoked, where the shared content pin gives no protection at all.
+
+**Caching — purely a performance concern, never a correctness one.** Because no committed binary is involved, caching can be added, tuned or removed without affecting correctness. Recommended: `actions/cache` over the vcpkg binary cache or the install roots, keyed on a hash of `vcpkg.json` **plus the triplet plus the runner image version**. Including the image version is the important detail: when GitHub bumps the runner's toolset, the key changes, the cache misses, and dependencies rebuild against the new compiler automatically — correct by construction rather than by anyone remembering to invalidate it.
 
 GitHub evicts cache entries after 7 days without access and this project pushes in bursts, so cold builds will be common — a cost measured in minutes, not a correctness risk.
 
-**REV-4 — NOT STARTED.** Only a readiness pre-check exists, run before `.github/workflows/` exists. It found the design sound — the manifest is self-sufficient as a CI-readable pin, and nothing in the script's local-machine-only structure blocks CI from having its own simpler provisioning step — and produced the shallow-clone carry-over above. The real REV-4 waits on BPE-9.
+**REV-4 — NOT STARTED.** Only a readiness pre-check exists, run before `.github/workflows/` existed. It found the design sound — the manifest is self-sufficient as a CI-readable pin, and nothing in the script's local-machine-only structure blocks CI from having its own simpler provisioning step — and produced trap 1 above. Traps 2 and 3 were discovered subsequently during HUM-19.
 
 **Human approval gate: YES.**
 
@@ -263,7 +289,7 @@ These are the first files to land in `src/`; the Makefile's `$(wildcard …)` pi
 
 ### Stage 13 — Tag-driven release with an approval gate
 
-**BPE-11 — Write `.github/workflows/release.yml`.** Triggered by a `vX.Y.Z` tag push. Extracts `X.Y.Z` from `github.ref_name`, overriding `VER_MAJOR`/`VER_MINOR`/`VER_BUILD`/`VER_REV` — the Makefile declares these with `?=` specifically so CI can override without edits. Uses the same independent provisioning step as Stage 6, including the shallow-clone precaution. Builds both architectures, runs tests, then **halts at a manual approval gate** (a GitHub Environment with required reviewers), publishing only after approval.
+**BPE-11 — Write `.github/workflows/release.yml`.** Triggered by a `vX.Y.Z` tag push. Extracts `X.Y.Z` from `github.ref_name`, overriding `VER_MAJOR`/`VER_MINOR`/`VER_BUILD`/`VER_REV` — the Makefile declares these with `?=` specifically so CI can override without edits. Uses the same independent provisioning step as Stage 6, including all three carry-over traps. Builds both architectures, runs tests, then **halts at a manual approval gate** (a GitHub Environment with required reviewers), publishing only after approval.
 
 **BPE-12 — Generate the exposed-operation list from the export table at build time.**
 **BPE-14 — Convert `CHANGELOG.md`'s `[Unreleased]` into a released section.**
@@ -276,7 +302,7 @@ These are the first files to land in `src/`; the Makefile's `$(wildcard …)` pi
 ## 10. Phase 5 — Hardening
 
 ### Stage 14 — Cleanup and consistency pass
-**BPE-13** — One `Makefile`, no historical variants; `clean` removes every intermediate; no build artifacts tracked; version and operation list each maintained in exactly one place. Confirm no compiled dependency has crept back into tracking.
+**BPE-13** — One `Makefile`, no historical variants; `clean` removes every intermediate; no build artifacts tracked; version and operation list each maintained in exactly one place. Confirm no compiled dependency has crept back into tracking, and that `lib/<arch>/` contains only product libs.
 **TEST-9** — Coverage audit across `src/`.
 **REV-10** — Final review including a `project-docs` consistency check. Anything removed as dead code must be removed **in full** (export-table entry + implementation + documentation) in a single commit.
 **Human approval: no**, unless it touches the export table.
@@ -295,21 +321,22 @@ Trigger: hand-assembling JSON in CAPL proves genuinely cumbersome. Dead code las
 
 ## 12. Task index by agent
 
-### `build-pipeline-engineer` — 16 tasks
+### `build-pipeline-engineer` — 17 tasks
 
 | ID | Stage | Task | Status |
 |---|---|---|---|
-| BPE-1 | 2 | `scripts/setup-dev-env.ps1` — local provisioning | **DONE — proof stale after BPE-15** |
+| BPE-1 | 2 | `scripts/setup-dev-env.ps1` — local provisioning | **DONE — 19/0/0 both arches** |
 | BPE-2 | 4 | `.gitignore` — excludes provisioned binaries, keeps `lib/README` | **DONE** |
 | BPE-3 | 4 | Directory skeleton | **DONE** |
 | BPE-4 | 4 | `Makefile`, one parameterized rule | **DONE — run with real GNU Make** |
 | BPE-5 | 4 | Git-tag versioning wiring | **DONE — `.res` fields decoded and verified** |
 | BPE-6 | 4 | `lib/README` template — provisioned framing + exact filenames | **DONE** |
 | BPE-7 | 4 | GoogleTest via vcpkg into `lib/gtest/<arch>/` | **DONE** |
-| BPE-15 | 4 | `vcpkg.json` manifest + script migration to manifest mode | **DONE (code) — real re-run OUTSTANDING** |
-| BPE-16 | 4 | One-line note that `vcpkg.json`'s `version-string` is not a version source | **NEW, non-blocking** |
+| BPE-15 | 4 | `vcpkg.json` manifest, manifest-mode migration, per-triplet install roots, lib allow-list, tool pin | **DONE — EXECUTION-VERIFIED** |
+| BPE-16 | 4 | One-line note that `vcpkg.json`'s `version-string` is not a version source | **Non-blocking** |
+| BPE-17 | 4 | Make `Copy-TripletLibs` synchronising; clear stale `lib/x64/` residue | **NEW, non-blocking** |
 | BPE-8 | 5 | Link/resource wiring for both DLLs; `dumpbin /exports` | |
-| BPE-9 | 6 | CI: independent provisioning (full clone or unshallow self-heal) + build + `make test` both arches + artifacts + caching | |
+| BPE-9 | 6 | CI: independent provisioning (full clone, per-triplet roots, tool pin) + build + `make test` both arches + artifacts + caching | |
 | BPE-10 | 8 | Link `libcurl.lib`, `zs.lib` and the seven system libs | |
 | BPE-11 | 13 | Release workflow — provisioning, tag extraction, approval gate, publish | |
 | BPE-12 | 13 | Generate the operation list from the export table | |
@@ -357,7 +384,7 @@ Trigger: hand-assembling JSON in CAPL proves genuinely cumbersome. Dead code las
 | ID | Stage | Focus | Status |
 |---|---|---|---|
 | REV-1 | 1 | Stale-identifier sweep — `CLAUDE.md` and `.claude/**` only | **SATISFIED** |
-| REV-2 | 4 | Makefile, versioning, `/MT` provenance, tracking hygiene | **CLEAN — its one Must-fix closed; re-run still owed** |
+| REV-2 | 4 | Makefile, versioning, `/MT` provenance, tracking hygiene, provisioning correctness | **CLEAN — CONFIRMED** |
 | REV-3 | 5 | **Export-contract genesis — the most important review in the plan** | |
 | REV-4 | 6 | CI reuses Make targets; matrix symmetry; provisions independently | **NOT STARTED — readiness pre-check only** |
 | REV-5 | 9 | Contract append — sync | |
@@ -369,15 +396,15 @@ Trigger: hand-assembling JSON in CAPL proves genuinely cumbersome. Dead code las
 | REV-11 | 15 | Contract append — struct mapping (conditional) | |
 | REV-12 | 16 | Contract append — request building (conditional) | |
 
-### Human — 18 tasks
+### Human — 19 tasks
 
 | ID | Stage | Task | Status |
 |---|---|---|---|
 | HUM-1 … HUM-9 | 1 | Configuration reconciliation (nine items) | **ALL DONE** |
-| HUM-10 | 3 | Install Vector CANoe/CANalyzer | **UNCONFIRMED — gates Stage 5** |
-| HUM-11 | 3 | Build + load the official Vector sample unchanged in CANoe | **UNCONFIRMED — gates Stage 5** |
+| HUM-19 | 2 | Re-run `setup-dev-env.ps1` for real to verify BPE-15 | **DONE — 19/0/0 both arches** |
+| HUM-10 | 3 | Install Vector CANoe/CANalyzer | **UNCONFIRMED — sole blocker on Stage 5** |
+| HUM-11 | 3 | Build + load the official Vector sample unchanged in CANoe | **UNCONFIRMED — sole blocker on Stage 5** |
 | HUM-12 | 4 | Commit and push | |
-| HUM-19 | 2 | Re-run `setup-dev-env.ps1` for real to verify BPE-15 | **OUTSTANDING** |
 | HUM-13 | 5 | Load and call the Hello DLL operation from a real `.can` script | |
 | HUM-14 | 9 | Verify sync operations in CANoe | |
 | HUM-15 | 10 | Verify async operations in CANoe | |
@@ -389,27 +416,35 @@ Trigger: hand-assembling JSON in CAPL proves genuinely cumbersome. Dead code las
 
 ## 13. Risks
 
-**Static review does not substitute for execution — five instances, the project's most reliable predictor of defects.** (1) Polish-localized `cl.exe` banner defeating an English-only architecture check; (2) a `curl[schannel]` vcpkg feature name that no longer exists; (3) `%VSCMD_ARG_TGT_ARCH%` returning its own literal text; (4) `LNK1561` from `link.exe` refusing to infer an entry point from a `.lib`; (5) the `make -n` `CreateProcess` artifact. Item 4 was unpredictable in principle — it could not manifest until a real `main()`-providing `.lib` existed. The RC2237 scare showed the inverse failure: a hand-reconstructed invocation produced a defect the real build did not have.
+**Static review does not substitute for execution — now seven instances, the project's most reliable predictor of defects.** (1) Polish-localized `cl.exe` banner defeating an English-only architecture check; (2) a `curl[schannel]` vcpkg feature name that no longer exists; (3) `%VSCMD_ARG_TGT_ARCH%` returning its own literal text; (4) `LNK1561` from `link.exe` refusing to infer an entry point from a `.lib`; (5) the `make -n` `CreateProcess` artifact; (6) the shared-install-root triplet collision; (7) the unfiltered lib copy. Items 6 and 7 both passed a clean static review of the migrated script and were found only by running it.
 
-**This risk is live right now.** BPE-15 has passed a thorough static review — AST parse, residue grep, baseline SHA resolved against the real registry — and none of that is execution. The migration is unverified until HUM-19 runs it, and the known-shallow local vcpkg clone means the first run genuinely exercises the self-heal rather than skipping past it.
+Item 6 carries an extra lesson: **the failing step and the causing step were different steps.** Three x86 steps reported "Expected lib directory not found" while the `vcpkg install (x86-windows-static)` step immediately above them said `[OK]`. Both reports were accurate. Diagnosing it required running vcpkg directly and reading its own output about removing packages — the script's own log could not have revealed it.
 
-**Sharing compiled artifacts between environments — the anti-pattern this architecture removes.** v8 and v9 committed `.lib` files, making CI link binaries produced on a developer's machine, and proposed monitoring for toolchain drift with a pre-planned escape hatch. That was risk management substituting for an available structural fix. The general lesson: when a failure class can be *designed out* at comparable cost, designing it out beats detecting it — and a proposal that ships with a pre-planned fallback to a *different architecture* is a signal the fallback may be the right primary.
+The RC2237 scare showed the inverse failure: a hand-reconstructed invocation produced a defect the real build did not have.
 
-**Provisioning drift between local and CI — and beneath the pin.** Two mechanisms (`setup-dev-env.ps1` and the CI step) read one manifest, and can still diverge in *where they place* libraries or *which triplet* they select. The shallow-clone trap is the sharper form: it sits **below** the manifest, in how vcpkg itself is obtained, where the shared pin gives no protection at all. A runner doing a naive shallow clone fails exactly as the local machine currently does. REV-4 checks placement and triplet; BPE-9 must handle the bootstrap layer explicitly.
+**Verifying the operation is not verifying the resulting state.** BPE-17's residue is the clean example: the copy step correctly reports "Copied 2 .lib file(s)", every review confirmed the code and the run output, and `lib/x64/` still contains four. A step that is additive rather than synchronising can be perfectly correct about what it did and still leave a directory that violates the invariant. Check destination state, not just the operation's own report.
+
+**Pins beneath the pin.** `vcpkg.json` pins registry content; it does not pin how vcpkg is obtained or invoked. All three of Stage 6's carry-over traps — shallow clone, shared install root, unpinned tool — live in that layer, where the shared content pin offers no protection. The tool pin (§5) closes the third; the other two must be handled explicitly in BPE-9.
+
+**Experimental flags as load-bearing structure.** Triplet isolation depends on `--x-install-root`, which vcpkg's own `--help` marks `(experimental)`. The tool pin makes this safe *for now* by freezing the tool alongside the content. If that flag is ever stabilised or renamed, the pin buys time to migrate deliberately rather than discovering it through a broken run. Recorded so a future reader does not have to re-derive why the tool is pinned at all.
+
+**Sharing compiled artifacts between environments — the anti-pattern this architecture removes.** v8 and v9 committed `.lib` files, making CI link binaries produced on a developer's machine, and proposed monitoring for toolchain drift with a pre-planned escape hatch. That was risk management substituting for an available structural fix. When a failure class can be *designed out* at comparable cost, designing it out beats detecting it — and a proposal shipping with a pre-planned fallback to a *different architecture* is a signal the fallback may be the right primary.
+
+**Provisioning drift between local and CI.** Two mechanisms read one manifest and can still diverge in placement, triplet selection, or bootstrap. REV-4 checks placement and triplet; BPE-9 must handle bootstrap explicitly.
 
 **Export contract.** Stage 5 is irreversible in practice: the naming convention and version-entry layout chosen there bind every later append. Stages 9–12 and 15–16 each append.
 
 **ABI failure modes that hide *all* operations, not just the new one.** Raw text pointer instead of the caller-supplied buffer; incorrect 1-byte alignment coverage through the terminating pointer.
 
-**`/MT` contamination.** Now a per-environment check rather than a property of a committed artifact. If a dependency is only available as `/MD`, **stop and ask**.
+**`/MT` contamination.** A per-environment check rather than a property of a committed artifact. If a dependency is only available as `/MD`, **stop and ask**.
 
-**Bitness parity — structurally enforced for the build, not yet continuously verified for tests.** The single parameterized Make rule makes flag drift impossible by construction, but only x64 test artifacts are evidenced. Stage 6's CI should run tests on both architectures.
+**Bitness parity — structurally enforced for the build, not yet continuously verified for tests.** Only x64 test artifacts are evidenced. Stage 6's CI should run tests on both architectures.
 
-**Apparent second version sources.** `vcpkg.json`'s `version-string` feeds nothing, but reads as a counterexample to "no version number is ever hand-edited". BPE-16 preempts it. The general shape — a tracked file containing a literal version that is not *the* version — will recur; label them where they appear.
+**Documentation that plausibly resembles the truth.** The inverted transcript in `docs/development-environment.md` was corrected during Stage 4. A worked example that looks right and is wrong is worse than none, because it will be trusted rather than checked.
 
-**Generated files silently reverting hand edits.** `lib/README` is produced by `setup-dev-env.ps1`; editing the artifact instead of the template appears to work and vanishes on the next run. BPE-6 was handled correctly on exactly this basis.
+**Apparent second version sources.** `vcpkg.json`'s `version-string` feeds nothing but reads as a counterexample to "no version number is ever hand-edited". BPE-16 preempts it. The shape will recur; label them where they appear.
 
-**Documentation drift between the script and `docs/development-environment.md`.** Two artifacts that must move together.
+**Generated files silently reverting hand edits.** `lib/README` is produced by `setup-dev-env.ps1`; editing the artifact instead of the template appears to work and vanishes on the next run.
 
 **Configuration drift — closed, with a scoped standing check.** REV-1's corrected scope excludes historical drafts and its own definition.
 
@@ -419,7 +454,7 @@ Trigger: hand-assembling JSON in CAPL proves genuinely cumbersome. Dead code las
 
 **Versioning.** `FILEVERSION`/`PRODUCTVERSION` are four 16-bit fields that **wrap silently** above 65535; `/VERSION:` accepts major.minor only. Verified end to end on a zero-tag repository; the untested path is the **release** path where CI overrides `VER_*` from a real tag, first exercised at Stage 13.
 
-**Steps no agent can verify.** The ten remaining HUM tasks, of which HUM-19 (script re-run) and HUM-10/HUM-11 (CANoe) are the near-term ones.
+**Steps no agent can verify.** The remaining HUM tasks, of which HUM-10 and HUM-11 are now the only near-term ones.
 
 **Scope creep toward struct mapping.** Stages 11 and 12 must ship before Stage 15 is reconsidered.
 
@@ -427,15 +462,16 @@ Trigger: hand-assembling JSON in CAPL proves genuinely cumbersome. Dead code las
 
 ## 14. Operational loose ends
 
-1. **The README execution-policy/switches expansion** has still not been through `code-reviewer`. Prose, not executable logic; let it ride along with the next review.
-2. **Commit hygiene.** Confirm nothing is half-staged before committing.
+1. **The Stage 4 work is uncommitted.** Because nothing is committed yet, the final review could not prove "only these two changes" via a clean diff boundary and verified by content-reading instead. Committing restores that boundary for future reviews.
+2. **`lib/x64/` residue** — see BPE-17. Gitignored, so it will not enter the commit.
+3. **The README execution-policy/switches expansion** has still not been through `code-reviewer`. Prose, not executable logic; let it ride along with the next review.
 
 ---
 
 ## 15. Execution order
 
-**1 (done) → 2 (done, HUM-19 re-run outstanding) → 4 (done) → 3 (UNCONFIRMED — critical path) → 5 (hard gate) → 6 → 7 → 8 → 9 → 10 → 11 → 12 → 13 → 14**, with Stages 15–16 only on demonstrated need.
+**1 (done) → 2 (done, verified) → 4 (done) → 3 (UNCONFIRMED — sole blocker) → 5 (hard gate) → 6 → 7 → 8 → 9 → 10 → 11 → 12 → 13 → 14**, with Stages 15–16 only on demonstrated need.
 
-Immediate, none blocking each other: **HUM-19** — re-run the script for real, resolving the shallow vcpkg clone; **HUM-10 / HUM-11** — confirm Stage 3, the gate on everything downstream; **BPE-16** — the one-line `version-string` note.
+**Stage 3 is now the only thing between the project and the Stage 5 hard gate.** HUM-10 and HUM-11 are human-only and unblocked. BPE-16 and BPE-17 are non-blocking cleanups that can happen at any time.
 
-**Status:** v11. Stage 4 complete. Stage 2 complete in code, unverified in execution. Stage 3 remains the gate on everything downstream.
+**Status:** v12. Stages 1, 2 and 4 complete, all execution-verified. Stage 3 unconfirmed and now the sole remaining blocker.
