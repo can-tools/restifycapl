@@ -105,8 +105,17 @@ INCLUDES := /I include /I include/vendor /I include/vendor/capl-dll-sdk
 CXXFLAGS := /nologo /c /std:c++17 /EHsc /MT /W4 $(INCLUDES)
 
 # Windows system libs required transitively by libcurl -- link all of them,
-# always (see msvc-build-conventions, Dependency acquisition).
-SYSLIBS := crypt32.lib bcrypt.lib secur32.lib ws2_32.lib normaliz.lib wldap32.lib advapi32.lib
+# always (see msvc-build-conventions, Dependency acquisition). version.lib
+# is required by src/module/exports.cpp (GetFileVersionInfoA/VerQueryValueA,
+# used to read this DLL's own embedded VERSIONINFO resource) -- exports.cpp
+# already pulls it in via `#pragma comment(lib, "version.lib")`, which is
+# sufficient on its own (verified: BPE-8 real link succeeded without this
+# line present). It is listed here too, explicitly, so the product's full
+# external-import-lib set stays visible in one place instead of depending on
+# a reader noticing a pragma buried in a single .cpp file -- same standard
+# Windows SDK import lib class as the other entries in this list, no /MT or
+# third-party concern.
+SYSLIBS := crypt32.lib bcrypt.lib secur32.lib ws2_32.lib normaliz.lib wldap32.lib advapi32.lib version.lib
 LIBS    := libcurl.lib zs.lib $(SYSLIBS)
 
 VERSION_RC  := src/module/version.rc

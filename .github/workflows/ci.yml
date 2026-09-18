@@ -1,0 +1,334 @@
+# ==============================================================================
+# ci.yml -- CI baseline for restifycapl (CAPL REST DLL)
+#
+# Stage 6 (BPE-9) of docs/work/capl-rest-dll-rebuild/plans/plan.md.
+#
+# What this does, and does not, do:
+#   - Matrix over x86/x64 on windows-latest. Each leg activates the matching
+#     MSVC developer environment, provisions dependencies INDEPENDENTLY (its
+#     own vcpkg install, on the runner, from vcpkg.json -- see plan.md
+#     section 2), places the resulting libs exactly where the Makefile
+#     expects them, runs the CI-side /MT provenance check (the continuous
+#     equivalent of REV-2), then calls the SAME `make build-x86`/`build-x64`
+#     and `make test` targets used locally. It never duplicates a
+#     cl.exe/rc.exe/link.exe invocation here.
+#   - It must NEVER call scripts/setup-dev-env.ps1: that script installs VS
+#     Build Tools, `make` and vcpkg itself, none of which apply to a
+#     GitHub-hosted runner (MSVC is already preinstalled; `make` and vcpkg
+#     are provisioned directly below, CI-native, not via that script).
+#   - This is build+test only. Release/publish (tag-driven, approval-gated)
+#     is Stage 13 (BPE-11) and lives in a separate release.yml, not here.
+#
+# Three carry-over traps replicated from scripts/setup-dev-env.ps1 (see that
+# script's Repair-ShallowVcpkgClone / $VcpkgInstalledRootX86+X64 /
+# $VcpkgPinnedTag for the original, locally-discovered bugs):
+#   1. Shallow clone of the vcpkg registry breaks manifest-mode version
+#      resolution ("vcpkg was cloned as a shallow repository"). Fixed here by
+#      a full `git clone` (no --depth) of microsoft/vcpkg.
+#   2. Sharing one install root between triplets causes the second
+#      `vcpkg install` to DELETE the first triplet's packages. Fixed here by
+#      a distinct `--x-install-root` per triplet, named
+#      vcpkg_installed-x86/ and vcpkg_installed-x64/ -- the exact convention
+#      scripts/setup-dev-env.ps1 uses (and .gitignore's `vcpkg_installed*/`
+#      already covers).
+#   3. `--x-install-root` is flagged (experimental) by vcpkg's own --help, so
+#      the vcpkg TOOL binary itself is pinned to the same tag the local
+#      script pins ($VcpkgPinnedTag = 2026.07.29,
+#      commit 9e593bb18ea69cc5095e012465dcd675a822ed0d), not just the
+#      registry content pinned by vcpkg.json's builtin-baseline.
+#
+# Caching is purely a performance concern here (plan.md, Stage 6): nothing
+# about correctness depends on a cache hit, since every provisioned binary
+# is rebuilt from the same vcpkg.json + pinned tool tag regardless. The
+# install-root cache key includes the runner image version
+# ($env:ImageVersion, captured into GITHUB_ENV early since GitHub's default
+# runner-image env vars are not exposed through the `env` expression context
+# until written there explicitly) precisely so a GitHub-side toolset bump on
+# windows-latest misses the cache and rebuilds against the new compiler
+# automatically, rather than depending on anyone hand-invalidating a key.
+# ==============================================================================
+
+name: CI
+
+on:
+  push:
+  pull_request:
+
+# Cancel superseded runs on the same ref to avoid burning matrix minutes on
+# stale pushes -- a performance nicety, not a correctness requirement.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: build + test (${{ matrix.arch }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86
+            triplet: x86-windows-static
+            msvc_arch: x86
+          - arch: x64
+            triplet: x64-windows-static
+            msvc_arch: x64
+
+    env:
+      # Vcpkg TOOL checkout -- separate from the repo checkout, and separate
+      # from the per-triplet install roots below. A short, fixed path avoids
+      # MAX_PATH problems vcpkg is known to hit on Windows CI runners.
+      VCPKG_ROOT: C:\vcpkg
+      # Pins the vcpkg TOOL itself (trap 3). Must match
+      # scripts/setup-dev-env.ps1's $VcpkgPinnedTag exactly -- re-derive both
+      # together (`git ls-remote --tags https://github.com/microsoft/vcpkg.git`)
+      # if this is ever bumped; do not let CI and the local script drift.
+      VCPKG_PINNED_TAG: '2026.07.29'
+      # Per-triplet install root (trap 2). Matches
+      # scripts/setup-dev-env.ps1's $VcpkgInstalledRootX86/$VcpkgInstalledRootX64
+      # naming convention exactly, and .gitignore's `vcpkg_installed*/` glob.
+      VCPKG_INSTALL_ROOT: ${{ github.workspace }}\vcpkg_installed-${{ matrix.arch }}
+
+    steps:
+      # Full clone of the repo itself -- not load-bearing the way the vcpkg
+      # registry clone below is (nothing here needs deep history), but
+      # deliberate rather than accidental: fetch-depth: 0 so a shallow clone
+      # is never silently in play for anything this job later inspects (e.g.
+      # `git describe` inside the Makefile's versioning block).
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # windows-latest ships MSVC preinstalled; this activates cl/rc/link/
+      # dumpbin for the matrix leg's architecture on PATH for all later
+      # steps in this job -- the CI-native equivalent of running an "x86/x64
+      # Native Tools Command Prompt" locally before `make build-x86`/
+      # `build-x64` (see Makefile's header comment).
+      - name: Activate MSVC developer environment (${{ matrix.msvc_arch }})
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.msvc_arch }}
+
+      # GitHub's default runner-image env vars (ImageOS, ImageVersion) are
+      # only visible to running shells, not to the `env` expression context,
+      # until explicitly written to GITHUB_ENV. Captured here so a later
+      # cache key can include it (see the file header comment on caching).
+      - name: Expose runner image version for cache keying
+        shell: pwsh
+        run: echo "IMAGE_VERSION=$env:ImageVersion" >> $env:GITHUB_ENV
+
+      - name: Ensure make is available
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not (Get-Command make -ErrorAction SilentlyContinue)) {
+            choco install make -y --no-progress
+          }
+          make --version
+
+      # Cache 1/2: the bootstrapped vcpkg TOOL checkout. Keyed only on the
+      # pinned tag (plus OS/image), since the tool's own behavior is fully
+      # determined by that pin -- vcpkg.json content changes do not require
+      # re-bootstrapping the tool. Deliberately NOT keyed on matrix.triplet:
+      # the vcpkg.exe binary isn't triplet-specific, so both matrix legs
+      # intentionally share this one cache entry. On a cold cache both legs
+      # race to bootstrap and save; actions/cache@v4 no-ops the losing save
+      # with a harmless "already exists" warning -- that's expected, not a
+      # race bug, so don't be alarmed by two "cache save" log lines for the
+      # same key.
+      - name: Cache vcpkg tool checkout
+        id: vcpkg-tool-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.VCPKG_ROOT }}
+          key: vcpkg-tool-${{ env.VCPKG_PINNED_TAG }}-${{ runner.os }}-${{ env.IMAGE_VERSION }}
+
+      # Trap 1 (shallow clone) + trap 3 (tool pin). Full clone, then check
+      # out the pinned tag, then bootstrap. Skipped entirely on a cache hit
+      # -- the restored checkout is already on the pinned commit with
+      # vcpkg.exe already built.
+      - name: Bootstrap vcpkg (full clone, pinned tool tag)
+        if: steps.vcpkg-tool-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          # Full clone -- NOT --depth 1. Manifest-mode version resolution
+          # (builtin-baseline + per-port version pins in vcpkg.json) checks
+          # out historical port-tree commits from the registry's own git
+          # object database; a shallow clone only has objects reachable from
+          # the single cloned commit and fails with "vcpkg was cloned as a
+          # shallow repository" the moment it needs anything else -- the
+          # exact failure scripts/setup-dev-env.ps1's
+          # Repair-ShallowVcpkgClone self-heals for the local path.
+          git clone https://github.com/microsoft/vcpkg.git "$env:VCPKG_ROOT"
+          if ($LASTEXITCODE -ne 0) { throw "git clone of vcpkg failed (exit $LASTEXITCODE)" }
+
+          git -C "$env:VCPKG_ROOT" checkout --quiet "$env:VCPKG_PINNED_TAG"
+          if ($LASTEXITCODE -ne 0) { throw "git checkout $env:VCPKG_PINNED_TAG failed (exit $LASTEXITCODE)" }
+
+          $actualCommit = (git -C "$env:VCPKG_ROOT" rev-parse HEAD).Trim()
+          Write-Host "vcpkg tool pinned at $env:VCPKG_PINNED_TAG ($actualCommit)"
+
+          & "$env:VCPKG_ROOT\bootstrap-vcpkg.bat" -disableMetrics
+          if ($LASTEXITCODE -ne 0) { throw "bootstrap-vcpkg.bat failed (exit $LASTEXITCODE)" }
+
+          if (-not (Test-Path -LiteralPath "$env:VCPKG_ROOT\vcpkg.exe")) {
+            throw "bootstrap-vcpkg.bat ran but vcpkg.exe still not found under $env:VCPKG_ROOT"
+          }
+
+      # Cache 2/2: this triplet's install root. Keyed on vcpkg.json content,
+      # the triplet (x86 and x64 must never share a cache entry -- that
+      # would just reintroduce trap 2 via the cache instead of the install
+      # root), and the runner image version, so a GitHub-side compiler/SDK
+      # bump on windows-latest misses the cache and rebuilds against the new
+      # toolset automatically instead of silently linking against a
+      # binary-cached older one.
+      - name: Cache vcpkg install root (${{ matrix.triplet }})
+        id: vcpkg-installed-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.VCPKG_INSTALL_ROOT }}
+          key: vcpkg-installed-${{ matrix.triplet }}-${{ hashFiles('vcpkg.json') }}-${{ env.IMAGE_VERSION }}
+
+      # Trap 2 (per-triplet install roots). Always run, even on a cache hit
+      # -- manifest-mode install is idempotent and fast when the install
+      # root already matches vcpkg.json, and this is the same
+      # verify-don't-trust-the-cache posture scripts/setup-dev-env.ps1 takes
+      # (it re-verifies the lib directory exists after every install call
+      # rather than trusting a prior run's report). Working directory is the
+      # repo root deliberately: this vcpkg build has no --x-manifest-root
+      # flag on `install`, only cwd-based auto-detection of vcpkg.json (see
+      # scripts/setup-dev-env.ps1's Install-ManifestTriplet doc comment).
+      - name: vcpkg install (${{ matrix.triplet }})
+        shell: pwsh
+        working-directory: ${{ github.workspace }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & "$env:VCPKG_ROOT\vcpkg.exe" install "--triplet=${{ matrix.triplet }}" "--x-install-root=$env:VCPKG_INSTALL_ROOT"
+          if ($LASTEXITCODE -ne 0) { throw "vcpkg install --triplet=${{ matrix.triplet }} failed (exit $LASTEXITCODE)" }
+
+          $tripletLibDir = Join-Path "$env:VCPKG_INSTALL_ROOT" "${{ matrix.triplet }}\lib"
+          if (-not (Test-Path -LiteralPath $tripletLibDir)) {
+            throw "vcpkg install exited 0 but expected lib directory not found: $tripletLibDir -- do not trust exit code alone (see scripts/setup-dev-env.ps1's Install-ManifestTriplet)."
+          }
+
+      # Places libs exactly where the Makefile expects them: lib/<arch>/
+      # (product-linked: only libcurl.lib and zs.lib -- an explicit
+      # allow-list, matching scripts/setup-dev-env.ps1's Copy-TripletLibs,
+      # never a blanket copy that would drag gtest/gmock into the
+      # product-linked directory) and lib/gtest/<arch>/ (test-only:
+      # gtest.lib plus gtest_main.lib, the latter relocated by the vcpkg
+      # gtest port's own patch to lib/manual-link/, matching
+      # Copy-GTestTripletLibs). Also copies GoogleTest's headers into
+      # include/vendor/gtest/, matching Copy-GTestHeaders -- required for
+      # `make test`'s TEST_CXXFLAGS (/I include/vendor) to resolve
+      # <gtest/gtest.h>.
+      - name: Place libs where the Makefile expects them
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $triplet = "${{ matrix.triplet }}"
+          $arch = "${{ matrix.arch }}"
+          $srcLib = Join-Path "$env:VCPKG_INSTALL_ROOT" "$triplet\lib"
+          $srcManualLink = Join-Path $srcLib 'manual-link'
+          $srcInclude = Join-Path "$env:VCPKG_INSTALL_ROOT" "$triplet\include\gtest"
+
+          $libDest = "lib\$arch"
+          $gtestLibDest = "lib\gtest\$arch"
+          $gtestIncludeDest = "include\vendor\gtest"
+
+          New-Item -ItemType Directory -Force -Path $libDest, $gtestLibDest, $gtestIncludeDest | Out-Null
+
+          # Product-linked -- must match the Makefile's LIBS variable
+          # exactly (libcurl.lib zs.lib $(SYSLIBS)).
+          foreach ($name in 'libcurl.lib', 'zs.lib') {
+            $src = Join-Path $srcLib $name
+            if (-not (Test-Path -LiteralPath $src)) { throw "Expected product lib not found: $src" }
+            Copy-Item -LiteralPath $src -Destination $libDest -Force
+          }
+
+          # Test-only -- gtest.lib stays in plain lib/, gtest_main.lib is
+          # relocated to lib/manual-link/ by the port's own patch.
+          $gtestLibSrc = Join-Path $srcLib 'gtest.lib'
+          $gtestMainLibSrc = Join-Path $srcManualLink 'gtest_main.lib'
+          if (-not (Test-Path -LiteralPath $gtestLibSrc)) { throw "Expected gtest.lib not found: $gtestLibSrc" }
+          if (-not (Test-Path -LiteralPath $gtestMainLibSrc)) { throw "Expected gtest_main.lib not found: $gtestMainLibSrc" }
+          Copy-Item -LiteralPath $gtestLibSrc -Destination $gtestLibDest -Force
+          Copy-Item -LiteralPath $gtestMainLibSrc -Destination $gtestLibDest -Force
+
+          if (-not (Test-Path -LiteralPath $srcInclude)) { throw "Expected gtest header directory not found: $srcInclude" }
+          Copy-Item -Path (Join-Path $srcInclude '*') -Destination $gtestIncludeDest -Recurse -Force
+
+          Write-Host "Placed: $libDest\libcurl.lib, $libDest\zs.lib, $gtestLibDest\gtest.lib, $gtestLibDest\gtest_main.lib, headers under $gtestIncludeDest"
+
+      # CI-side equivalent of REV-2's /MT provenance check -- re-verified on
+      # every push instead of spot-checked once locally. Expect
+      # /DEFAULTLIB:LIBCMT and never /DEFAULTLIB:MSVCRT on every lib this
+      # job just provisioned and is about to link.
+      - name: Verify /MT provenance (dumpbin /directives)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $arch = "${{ matrix.arch }}"
+          $libs = @(
+            "lib\$arch\libcurl.lib",
+            "lib\$arch\zs.lib",
+            "lib\gtest\$arch\gtest.lib",
+            "lib\gtest\$arch\gtest_main.lib"
+          )
+
+          $failed = $false
+          foreach ($lib in $libs) {
+            $directivesOutput = (& dumpbin /nologo /directives "$lib") -join "`n"
+            # -match is unescaped regex, so a bare '/DEFAULTLIB:LIBCMT' check
+            # would also match '/DEFAULTLIB:LIBCMTD' (the DEBUG static CRT)
+            # as a false positive, since LIBCMTD contains LIBCMT as a
+            # substring. Require the release LIBCMT token AND the absence of
+            # the debug LIBCMTD token so a lib declaring only LIBCMTD
+            # correctly fails this check instead of passing.
+            $declaresLibcmt = ($directivesOutput -match '/DEFAULTLIB:LIBCMT') -and ($directivesOutput -notmatch '/DEFAULTLIB:LIBCMTD')
+            if (-not $declaresLibcmt) {
+              Write-Host "::error::$lib does not declare /DEFAULTLIB:LIBCMT (release static CRT) -- expected for /MT. A lib declaring only /DEFAULTLIB:LIBCMTD (debug static CRT) also fails this check."
+              $failed = $true
+            }
+            if ($directivesOutput -match '/DEFAULTLIB:MSVCRT') {
+              Write-Host "::error::$lib declares /DEFAULTLIB:MSVCRT -- built with /MD, not /MT. Never mix /MT and /MD in one link (see msvc-build-conventions)."
+              $failed = $true
+            }
+          }
+
+          if ($failed) {
+            throw "/MT provenance check failed for one or more provisioned libs."
+          }
+          Write-Host "All provisioned libs confirmed /DEFAULTLIB:LIBCMT, no MSVCRT."
+
+      # The same Make target run locally -- no cl.exe/rc.exe/link.exe
+      # invocation is duplicated in this YAML.
+      - name: make build-${{ matrix.arch }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          make build-${{ matrix.arch }}
+          if ($LASTEXITCODE -ne 0) { throw "make build-${{ matrix.arch }} failed (exit $LASTEXITCODE)" }
+
+      # Both architectures' test suites run in CI, making bitness parity for
+      # `make test` continuously enforced rather than spot-checked (see
+      # plan.md's "x86 evidence gap" note under Stage 4 -- only x64 test
+      # artifacts existed locally before this workflow).
+      - name: make test (ARCH=${{ matrix.arch }})
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          make test ARCH=${{ matrix.arch }}
+          if ($LASTEXITCODE -ne 0) { throw "make test ARCH=${{ matrix.arch }} failed (exit $LASTEXITCODE)" }
+
+      - name: Upload DLL artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: restifycapl-${{ matrix.arch }}
+          path: build/${{ matrix.arch }}/restifycapl-${{ matrix.arch }}.dll
+          if-no-files-found: error
