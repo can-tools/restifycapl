@@ -34,9 +34,14 @@ description: MSVC build rules for the CAPL REST DLL — runtime library, archite
 ## Directory conventions
 
 ```
-lib/x86/, lib/x64/       static dependencies (.lib), built with /MT
+lib/x86/, lib/x64/       static dependencies (.lib), built with /MT —
+                         linked into the product DLL
+lib/gtest/x86/, x64/     GoogleTest (.lib), built with /MT — build-time-only,
+                         linked into the test executable, NEVER the DLL
 build/x86/, build/x64/   build output (.dll, .lib, .exp, .res) — gitignored
-include/vendor/          third-party headers (json.hpp, capl-dll-sdk/)
+include/vendor/          third-party headers (json.hpp, capl-dll-sdk/,
+                         gtest/ — the latter is test-only, same rule as
+                         lib/gtest/ above)
 scripts/                 setup-dev-env.ps1 — environment bootstrap only,
                          never a second build system
 ```
@@ -119,6 +124,15 @@ number found anywhere as a bug.
 - zlib arrives transitively with libcurl.
 - nlohmann/json: `json.hpp` pinned to v3.11.3, taken from the Releases page
   (amalgamated single file) and SHA-256 verified. Not `git clone`.
+- GoogleTest: vcpkg, `gtest:x86-windows-static` and `gtest:x64-windows-static`
+  — `/MT` by default, same as libcurl. Build-time-only (the test executable
+  links it; the product DLL never does), so it is copied into a separate
+  `lib/gtest/x86/`, `lib/gtest/x64/` location, never mixed into `lib/x86/`,
+  `lib/x64/`. The vcpkg `gtest` port's own patch relocates any `_main`
+  target: `gtest.lib` lands in the triplet's plain `lib/`, but
+  `gtest_main.lib` lands in a separate `lib/manual-link/` — the bootstrap
+  script copies from both source directories, so both files end up
+  together under `lib/gtest/<arch>/`.
 - Windows system libs, always link all of them: crypt32, bcrypt, secur32,
   ws2_32, normaliz, wldap32, advapi32.
 - Record exact versions in `lib/README`.

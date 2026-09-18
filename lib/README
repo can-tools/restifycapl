@@ -23,4 +23,4 @@ lib/x64/   x64 static libraries (vcpkg triplet x64-windows-static)
 Verify /MT provenance with `dumpbin /directives <lib>` -- expect
 `/DEFAULTLIB:LIBCMT`, never `MSVCRT`.
 
-Last refreshed: 2026-09-17 21:41:47 by scripts/setup-dev-env.ps1
+Last refreshed: 2026-09-17 23:41:30 by scripts/setup-dev-env.ps1

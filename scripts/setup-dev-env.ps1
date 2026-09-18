@@ -22,15 +22,27 @@
       3. Resolve vcvarsall.bat; confirm cl/rc/link/dumpbin resolve for both
          x86 and x64, and that each reports the matching architecture.
       4. Detect `make`; install it (MSYS2 / Chocolatey / Scoop) if absent.
-      5. Detect or bootstrap vcpkg; install curl (default features pull in
-         SChannel automatically on Windows) for both x86-windows-static and
-         x64-windows-static triplets.
-      6. Copy the resulting .lib files into lib/x86/ and lib/x64/.
-      7. Download json.hpp (nlohmann/json v3.11.3), verify its SHA-256, and
+      5. Detect or bootstrap vcpkg; run a manifest-mode install
+         (`vcpkg install --triplet=<T>`) against vcpkg.json at the repo
+         root -- the single authoritative pin for curl and gtest versions
+         (default curl features pull in SChannel automatically on
+         Windows) -- for both x86-windows-static and x64-windows-static
+         triplets. Manifest mode installs everything vcpkg.json lists in
+         one command; there is no per-package argument any more.
+      6. Copy the resulting curl/zlib .lib files into lib/x86/ and
+         lib/x64/.
+      7. Copy the resulting GoogleTest .lib files (installed by the same
+         manifest-mode command as step 5, since gtest is also listed in
+         vcpkg.json) into lib/gtest/x86/ and lib/gtest/x64/ (kept separate
+         from lib/x86/ and lib/x64/ on purpose) -- a build-time-only test
+         dependency, never linked into the shipped DLL -- and copy the
+         headers into include/vendor/gtest/.
+      8. Download json.hpp (nlohmann/json v3.11.3), verify its SHA-256, and
          place it in include/vendor/.
-      8. Create the lib/x86 and lib/x64 directories and write lib/README.
-      9. Verify (never fetch) that include/vendor/capl-dll-sdk/ holds the
-         three Vector SDK headers.
+      9. Create the lib/x86, lib/x64, lib/gtest/x86 and lib/gtest/x64
+         directories and write lib/README.
+      10. Verify (never fetch) that include/vendor/capl-dll-sdk/ holds the
+          three Vector SDK headers.
 
 .NOTES
     Human approval gate: this script installs software and touches global
@@ -46,7 +58,17 @@
     Skip probing/installing `make` (step 4).
 
 .PARAMETER SkipVcpkg
-    Skip vcpkg bootstrap / curl install / lib copy (steps 5-6).
+    Skip vcpkg bootstrap / manifest install / lib copy (steps 5-6).
+
+.PARAMETER SkipGTest
+    Skip copying GoogleTest's lib+header output (step 7). Note this is
+    narrower than it was under classic mode: manifest mode installs curl
+    and gtest together in one `vcpkg install --triplet=<T>` command (see
+    vcpkg.json), so -SkipGTest cannot prevent gtest from being *built* by
+    vcpkg when curl is being installed -- it only skips copying gtest's
+    output into lib/gtest/<arch>/ and include/vendor/gtest/. Independent of
+    -SkipVcpkg so a curl-only refresh can still skip the gtest copy step,
+    or vice versa.
 
 .PARAMETER SkipJson
     Skip the json.hpp download/verify step (step 7).
@@ -66,6 +88,7 @@ param(
     [switch]$SkipVsBuildTools,
     [switch]$SkipMake,
     [switch]$SkipVcpkg,
+    [switch]$SkipGTest,
     [switch]$SkipJson,
     [string]$VcpkgRoot,
     [switch]$Force
@@ -78,12 +101,15 @@ $ProgressPreference = 'SilentlyContinue'
 # Paths
 # ---------------------------------------------------------------------------
 
-$RepoRoot   = Split-Path -Parent $PSScriptRoot
-$LibX86Dir  = Join-Path $RepoRoot 'lib\x86'
-$LibX64Dir  = Join-Path $RepoRoot 'lib\x64'
-$VendorDir  = Join-Path $RepoRoot 'include\vendor'
-$SdkDir     = Join-Path $VendorDir 'capl-dll-sdk'
-$JsonHppDst = Join-Path $VendorDir 'json.hpp'
+$RepoRoot     = Split-Path -Parent $PSScriptRoot
+$LibX86Dir    = Join-Path $RepoRoot 'lib\x86'
+$LibX64Dir    = Join-Path $RepoRoot 'lib\x64'
+$LibGtestX86Dir = Join-Path $RepoRoot 'lib\gtest\x86'
+$LibGtestX64Dir = Join-Path $RepoRoot 'lib\gtest\x64'
+$VendorDir    = Join-Path $RepoRoot 'include\vendor'
+$SdkDir       = Join-Path $VendorDir 'capl-dll-sdk'
+$GtestVendorDir = Join-Path $VendorDir 'gtest'
+$JsonHppDst   = Join-Path $VendorDir 'json.hpp'
 
 # nlohmann/json v3.11.3 amalgamated single header, pinned per
 # msvc-build-conventions. Hash independently re-verified from two official
@@ -100,6 +126,15 @@ if (-not $VcpkgRoot) {
         $VcpkgRoot = Join-Path $env:LOCALAPPDATA 'vcpkg'
     }
 }
+
+# vcpkg.json at $RepoRoot is the single authoritative dependency pin (curl,
+# gtest, builtin-baseline) -- see msvc-build-conventions / plan.md BPE-15.
+# Manifest-mode installs land under $RepoRoot\vcpkg_installed\<triplet>\,
+# NOT $VcpkgRoot\installed\<triplet>\ (the latter is classic-mode only) --
+# confirmed by running `vcpkg list` with cwd at $RepoRoot and observing it
+# report against the project-local tree instead of the vcpkg checkout's own
+# installed/ directory. .gitignore already excludes vcpkg_installed/.
+$VcpkgInstalledDir = Join-Path $RepoRoot 'vcpkg_installed'
 
 # ---------------------------------------------------------------------------
 # Result tracking / output helpers
@@ -154,6 +189,16 @@ function Test-IsElevated {
     $principal = New-Object Security.Principal.WindowsPrincipal($identity)
     return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
+
+# Manifest-mode vcpkg invocations (steps 5-7) need the working directory at
+# $RepoRoot so vcpkg auto-detects vcpkg.json -- this vcpkg build exposes no
+# --x-manifest-root flag on `install`/`list` (only --classic, to force the
+# OTHER mode), which confirms cwd-based auto-detection is the supported
+# mechanism for this version. Pushed once here, for the whole script, rather
+# than around each individual vcpkg call, since every other path in this
+# script is already built via Join-Path from an absolute root and is
+# unaffected by cwd. Popped back before both exit points at the bottom.
+Push-Location -LiteralPath $RepoRoot
 
 # ===========================================================================
 # Step 1/2 -- MSVC toolchain: probe via vswhere, install Build Tools if absent
@@ -420,11 +465,57 @@ function Get-VcpkgExe {
     return $null
 }
 
+function Repair-ShallowVcpkgClone {
+    <#
+        Manifest mode's versioning system (builtin-baseline plus
+        per-dependency version resolution, see vcpkg.json) checks out
+        specific historical commits' port trees from the local git object
+        database. A --depth 1 shallow clone only has objects reachable
+        from the single cloned commit, so a manifest install against a
+        shallow checkout fails with "failed to unpack tree object ...
+        vcpkg was cloned as a shallow repository" as soon as it needs a
+        port-version commit that isn't the tip -- confirmed by actually
+        running `vcpkg install --dry-run` against this machine's
+        pre-existing checkout, not by inspection (consistent with this
+        project's static-review-is-not-enough pattern; see plan.md Stage 4
+        risk notes).
+
+        Earlier revisions of this script bootstrapped with
+        `git clone --depth 1`, so an existing checkout can still be
+        shallow even though $Root already exists and vcpkg.exe already
+        resolves (the early-return path in Install-VcpkgIfMissing).
+        Self-heals by unshallowing in place -- idempotent: a fast
+        `rev-parse` no-op on a checkout that is already full.
+    #>
+    param([Parameter(Mandatory)][string]$Root)
+
+    $gitCmd = Get-Command git -ErrorAction SilentlyContinue
+    if (-not $gitCmd) {
+        Add-Result -Step 'vcpkg bootstrap (unshallow check)' -Status 'WARN' -Message "git not on PATH; cannot verify whether the existing vcpkg checkout at $Root is shallow. If a later manifest install fails with `"cloned as a shallow repository`", run: git -C `"$Root`" fetch --unshallow"
+        return
+    }
+
+    $isShallow = ((& git -C $Root rev-parse --is-shallow-repository 2>$null) -join '').Trim()
+    if ($isShallow -ne 'true') {
+        return
+    }
+
+    Add-Result -Step 'vcpkg bootstrap (unshallow check)' -Status 'WARN' -Message "Existing vcpkg checkout at $Root is a shallow clone (from an earlier version of this script); manifest-mode installs need full history. Unshallowing now -- downloads the full registry history, can take a few minutes."
+    & git -C $Root fetch --unshallow 2>&1 | Out-Null
+    $isShallowAfter = ((& git -C $Root rev-parse --is-shallow-repository 2>$null) -join '').Trim()
+    if ($isShallowAfter -ne 'true') {
+        Add-Result -Step 'vcpkg bootstrap (unshallow check)' -Status 'OK' -Message 'Unshallowed successfully.'
+    } else {
+        Add-Result -Step 'vcpkg bootstrap (unshallow check)' -Status 'FAIL' -Message "git fetch --unshallow did not complete; manifest installs will likely fail. Run manually: git -C `"$Root`" fetch --unshallow"
+    }
+}
+
 function Install-VcpkgIfMissing {
     param([Parameter(Mandatory)][string]$Root)
 
     $exe = Get-VcpkgExe -Root $Root
     if ($exe) {
+        Repair-ShallowVcpkgClone -Root $Root
         return $exe
     }
 
@@ -435,7 +526,9 @@ function Install-VcpkgIfMissing {
             Add-Result -Step 'vcpkg bootstrap' -Status 'FAIL' -Message 'git is not on PATH; cannot clone vcpkg. Install git first.'
             return $null
         }
-        & git clone --depth 1 https://github.com/microsoft/vcpkg.git $Root 2>&1 | Out-Null
+        # Full clone, NOT --depth 1 -- see Repair-ShallowVcpkgClone's
+        # doc comment for why manifest mode requires full history.
+        & git clone https://github.com/microsoft/vcpkg.git $Root 2>&1 | Out-Null
         if ($LASTEXITCODE -ne 0) {
             Add-Result -Step 'vcpkg bootstrap' -Status 'FAIL' -Message "git clone of vcpkg failed (exit $LASTEXITCODE)."
             return $null
@@ -459,22 +552,42 @@ function Install-VcpkgIfMissing {
     return $exe
 }
 
-function Install-CurlTriplet {
+function Install-ManifestTriplet {
+    <#
+        Manifest-mode install: reads dependencies (curl, gtest), the
+        builtin-baseline, and the curl version override from vcpkg.json at
+        $RepoRoot -- no package name on the command line any more, unlike
+        the old classic-mode `vcpkg install curl:<triplet>` /
+        `vcpkg install gtest:<triplet>` invocations this replaces. Requires
+        the working directory at $RepoRoot (set once via Push-Location near
+        the top of this script) so vcpkg auto-detects vcpkg.json; this
+        vcpkg build (`vcpkg version` = 2026-07-27-...) exposes no
+        --x-manifest-root flag on `install` -- only --classic, to force the
+        OTHER mode -- which confirms cwd-based auto-detection is the
+        supported mechanism for this version.
+
+        Installs everything vcpkg.json lists in one call -- curl AND gtest
+        together, since manifest mode has no per-package argument. Called
+        from both the "vcpkg / curl" and "vcpkg / gtest" steps below;
+        whichever runs first does the real work, the second is a fast,
+        idempotent no-op verification. $StepLabel lets each call site keep
+        its own step name in the results table.
+
+        No explicit "schannel" feature: the current vcpkg curl port has no
+        such feature, and SChannel is already wired in automatically via
+        curl's default "ssl" feature on Windows.
+        Rationale: see docs/development-environment.md#curl-no-schannel-vcpkg-feature
+    #>
     param(
         [Parameter(Mandatory)][string]$VcpkgExe,
-        [Parameter(Mandatory)][ValidateSet('x86-windows-static', 'x64-windows-static')][string]$Triplet
+        [Parameter(Mandatory)][ValidateSet('x86-windows-static', 'x64-windows-static')][string]$Triplet,
+        [Parameter(Mandatory)][string]$StepLabel
     )
-
-    # No explicit "schannel" feature: the current vcpkg curl port has no
-    # such feature, and SChannel is already wired in automatically via
-    # curl's default "ssl" feature on Windows.
-    # Rationale: see docs/development-environment.md#curl-no-schannel-vcpkg-feature
-    $package = "curl:$Triplet"
 
     # Capture vcpkg's own stdout+stderr instead of discarding it, so a FAIL
     # here shows the real underlying error (missing feature, compiler
     # detection failure, network error, etc.) instead of just an exit code.
-    $vcpkgOutput = & $VcpkgExe install $package 2>&1
+    $vcpkgOutput = & $VcpkgExe install "--triplet=$Triplet" 2>&1
     # $vcpkgOutput collapses to $null (not @()) when the pipeline emits zero
     # objects -- e.g. an early process-spawn failure that exits non-zero
     # before printing anything. Piping $null straight into
@@ -493,29 +606,32 @@ function Install-CurlTriplet {
         # Format-Table at the end of the script.
         $maxLines = 25
         $tail = if ($vcpkgOutputLines.Count -gt $maxLines) {
-            @("... ($($vcpkgOutputLines.Count - $maxLines) earlier line(s) omitted; re-run ``vcpkg install $package`` directly for the full log) ...") + ($vcpkgOutputLines | Select-Object -Last $maxLines)
+            @("... ($($vcpkgOutputLines.Count - $maxLines) earlier line(s) omitted; re-run ``vcpkg install --triplet=$Triplet`` directly from $RepoRoot for the full log) ...") + ($vcpkgOutputLines | Select-Object -Last $maxLines)
         } else {
             $vcpkgOutputLines
         }
         $tailText = $tail -join "`n"
-        Add-Result -Step "vcpkg install ($Triplet)" -Status 'FAIL' -Message @"
-``vcpkg install $package`` exited $LASTEXITCODE. Output:
+        Add-Result -Step $StepLabel -Status 'FAIL' -Message @"
+``vcpkg install --triplet=$Triplet`` (manifest mode, from $RepoRoot) exited $LASTEXITCODE. Output:
 $tailText
 "@
         return $false
     }
-    Add-Result -Step "vcpkg install ($Triplet)" -Status 'OK' -Message "$package installed (or already up to date)."
+    Add-Result -Step $StepLabel -Status 'OK' -Message "Manifest dependencies for $Triplet installed (or already up to date) per vcpkg.json: curl, gtest."
     return $true
 }
 
 function Copy-TripletLibs {
     param(
-        [Parameter(Mandatory)][string]$VcpkgRootPath,
+        [Parameter(Mandatory)][string]$InstalledRoot,
         [Parameter(Mandatory)][string]$Triplet,
         [Parameter(Mandatory)][string]$DestDir
     )
 
-    $srcLibDir = Join-Path $VcpkgRootPath "installed\$Triplet\lib"
+    # $InstalledRoot is $VcpkgInstalledDir ($RepoRoot\vcpkg_installed), the
+    # manifest-mode installed tree -- NOT $VcpkgRoot\installed\, which is
+    # where classic mode would have put this.
+    $srcLibDir = Join-Path $InstalledRoot "$Triplet\lib"
     if (-not (Test-Path -LiteralPath $srcLibDir)) {
         Add-Result -Step "lib copy ($Triplet)" -Status 'FAIL' -Message "Expected lib directory not found: $srcLibDir"
         return
@@ -539,6 +655,9 @@ function Get-InstalledCurlVersion {
         [Parameter(Mandatory)][string]$VcpkgExe,
         [Parameter(Mandatory)][string]$Triplet
     )
+    # Relies on the ambient manifest-mode context (cwd at $RepoRoot, set via
+    # Push-Location near the top of this script) so this resolves against
+    # $VcpkgInstalledDir rather than $VcpkgRoot\installed\.
     $line = & $VcpkgExe list "curl:$Triplet" 2>$null | Select-Object -First 1
     if ($line -match '\S+\s+(\S+)') {
         return $Matches[1]
@@ -557,26 +676,26 @@ Invoke-Step -Name 'vcpkg / curl' -Body {
 
     $vcpkgExe = Install-VcpkgIfMissing -Root $VcpkgRoot
     if (-not $vcpkgExe) {
-        Add-Result -Step 'vcpkg / curl' -Status 'FAIL' -Message 'Skipping curl install and lib copy: vcpkg is not available.'
+        Add-Result -Step 'vcpkg / curl' -Status 'FAIL' -Message 'Skipping manifest install and lib copy: vcpkg is not available.'
         return
     }
     Add-Result -Step 'vcpkg' -Status 'OK' -Message "Using vcpkg at: $vcpkgExe"
 
-    $okX86 = Install-CurlTriplet -VcpkgExe $vcpkgExe -Triplet 'x86-windows-static'
-    $okX64 = Install-CurlTriplet -VcpkgExe $vcpkgExe -Triplet 'x64-windows-static'
+    $okX86 = Install-ManifestTriplet -VcpkgExe $vcpkgExe -Triplet 'x86-windows-static' -StepLabel 'vcpkg install (x86-windows-static)'
+    $okX64 = Install-ManifestTriplet -VcpkgExe $vcpkgExe -Triplet 'x64-windows-static' -StepLabel 'vcpkg install (x64-windows-static)'
 
     if ($okX86) {
-        Copy-TripletLibs -VcpkgRootPath $VcpkgRoot -Triplet 'x86-windows-static' -DestDir $LibX86Dir
+        Copy-TripletLibs -InstalledRoot $VcpkgInstalledDir -Triplet 'x86-windows-static' -DestDir $LibX86Dir
         $script:CurlVersionX86ForReadme = Get-InstalledCurlVersion -VcpkgExe $vcpkgExe -Triplet 'x86-windows-static'
     } else {
-        Add-Result -Step 'lib copy (x86-windows-static)' -Status 'SKIP' -Message 'Skipped: curl install for this triplet failed.'
+        Add-Result -Step 'lib copy (x86-windows-static)' -Status 'SKIP' -Message 'Skipped: manifest install for this triplet failed.'
     }
 
     if ($okX64) {
-        Copy-TripletLibs -VcpkgRootPath $VcpkgRoot -Triplet 'x64-windows-static' -DestDir $LibX64Dir
+        Copy-TripletLibs -InstalledRoot $VcpkgInstalledDir -Triplet 'x64-windows-static' -DestDir $LibX64Dir
         $script:CurlVersionX64ForReadme = Get-InstalledCurlVersion -VcpkgExe $vcpkgExe -Triplet 'x64-windows-static'
     } else {
-        Add-Result -Step 'lib copy (x64-windows-static)' -Status 'SKIP' -Message 'Skipped: curl install for this triplet failed.'
+        Add-Result -Step 'lib copy (x64-windows-static)' -Status 'SKIP' -Message 'Skipped: manifest install for this triplet failed.'
     }
 
     if (($script:CurlVersionX86ForReadme -ne 'unknown') -and ($script:CurlVersionX64ForReadme -ne 'unknown') -and `
@@ -586,7 +705,199 @@ Invoke-Step -Name 'vcpkg / curl' -Body {
 }
 
 # ===========================================================================
-# Step 7 -- json.hpp: download, verify SHA-256, place in include/vendor/
+# Step 7 -- vcpkg / GoogleTest: build-time-only test dependency for
+# `make test`. Kept as its own Invoke-Step block, separate from the curl
+# step above, so a failure copying/verifying gtest's output is still
+# reported independently of curl's -- per the same probe-before-acting /
+# doesn't-abort-the-rest pattern this script uses throughout.
+#
+# Under manifest mode this step no longer has its own install call: curl
+# and gtest are both listed in vcpkg.json, so the single
+# `vcpkg install --triplet=<T>` command run by the "vcpkg / curl" step
+# above already provisions gtest too. This step consumes that shared
+# result (via Install-ManifestTriplet again, which is a fast, idempotent
+# no-op if the curl step already ran) and is responsible for gtest's own
+# concern: copying its .lib/.h output into the test-only locations.
+# ===========================================================================
+
+function Copy-GTestTripletLibs {
+    <#
+        Copies gtest*.lib into a single flat destination directory --
+        specifically NOT a straight "copy everything in lib/" like
+        Copy-TripletLibs, because the vcpkg gtest port installs
+        gtest_main.lib to a DIFFERENT subdirectory than gtest.lib.
+
+        Verified from the port's own fix-main-lib-path.patch (upstream
+        GoogleTest's CMake install_project() puts any target whose name
+        matches "_main" into lib/manual-link/, not plain lib/, so a
+        consumer never accidentally links two main()s together):
+          installed/<triplet>/lib/gtest.lib
+          installed/<triplet>/lib/manual-link/gtest_main.lib
+        (gmock.lib / gmock_main.lib follow the identical split, but are not
+        copied -- the project depends on gtest, not gmock.)
+
+        Only *.lib files matching "gtest*" are copied, from both source
+        directories, flattened into one lib/gtest/<arch>/ destination --
+        matching what the Makefile's GTESTDIR/TEST_LIBS already expect
+        (gtest.lib gtest_main.lib, both resolved via one /LIBPATH:).
+    #>
+    param(
+        [Parameter(Mandatory)][string]$InstalledRoot,
+        [Parameter(Mandatory)][string]$Triplet,
+        [Parameter(Mandatory)][string]$DestDir
+    )
+
+    # $InstalledRoot is $VcpkgInstalledDir ($RepoRoot\vcpkg_installed), the
+    # manifest-mode installed tree -- NOT $VcpkgRoot\installed\, which is
+    # where classic mode would have put this (see Copy-TripletLibs).
+    $srcLibDir        = Join-Path $InstalledRoot "$Triplet\lib"
+    $srcManualLinkDir = Join-Path $srcLibDir 'manual-link'
+
+    if (-not (Test-Path -LiteralPath $srcLibDir)) {
+        Add-Result -Step "gtest lib copy ($Triplet)" -Status 'FAIL' -Message "Expected lib directory not found: $srcLibDir"
+        return
+    }
+
+    New-Item -ItemType Directory -Force -Path $DestDir | Out-Null
+
+    $libs = @(Get-ChildItem -LiteralPath $srcLibDir -Filter 'gtest*.lib' -File -ErrorAction SilentlyContinue)
+    if (Test-Path -LiteralPath $srcManualLinkDir) {
+        $libs += @(Get-ChildItem -LiteralPath $srcManualLinkDir -Filter 'gtest*.lib' -File -ErrorAction SilentlyContinue)
+    }
+
+    if ($libs.Count -eq 0) {
+        Add-Result -Step "gtest lib copy ($Triplet)" -Status 'FAIL' -Message "No gtest*.lib files found under $srcLibDir or $srcManualLinkDir"
+        return
+    }
+
+    foreach ($lib in $libs) {
+        Copy-Item -LiteralPath $lib.FullName -Destination $DestDir -Force
+    }
+
+    $missing = @('gtest.lib', 'gtest_main.lib') | Where-Object { $_ -notin $libs.Name }
+    if ($missing.Count -gt 0) {
+        Add-Result -Step "gtest lib copy ($Triplet)" -Status 'WARN' -Message "Copied $($libs.Count) file(s) to $DestDir : $(($libs.Name) -join ', ') -- but expected file(s) not found: $($missing -join ', '). vcpkg's gtest port may have changed its output layout; re-check fix-main-lib-path.patch and update this function."
+        return
+    }
+
+    Add-Result -Step "gtest lib copy ($Triplet)" -Status 'OK' -Message "Copied $($libs.Count) .lib file(s) to $DestDir : $(($libs.Name) -join ', ')"
+}
+
+function Copy-GTestHeaders {
+    <#
+        GoogleTest headers are architecture-agnostic (no per-arch #ifdef
+        content relevant here), so they are copied once from whichever
+        triplet's install succeeded, not once per architecture -- matching
+        the Makefile's TEST_INCLUDES comment ("GoogleTest headers are
+        architecture-agnostic ... only the .lib binaries are per-architecture").
+        Standard CMake/GNUInstallDirs layout for the googletest project
+        installs public headers to <prefix>/include/gtest/*.h; this is
+        upstream GoogleTest's own long-standing install convention, not
+        something the vcpkg port changes.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$InstalledRoot,
+        [Parameter(Mandatory)][string]$Triplet,
+        [Parameter(Mandatory)][string]$DestDir
+    )
+
+    # $InstalledRoot is $VcpkgInstalledDir ($RepoRoot\vcpkg_installed), the
+    # manifest-mode installed tree -- NOT $VcpkgRoot\installed\, which is
+    # where classic mode would have put this (see Copy-TripletLibs).
+    $srcIncludeDir = Join-Path $InstalledRoot "$Triplet\include\gtest"
+    if (-not (Test-Path -LiteralPath $srcIncludeDir)) {
+        Add-Result -Step 'gtest headers' -Status 'FAIL' -Message "Expected header directory not found: $srcIncludeDir"
+        return $false
+    }
+
+    New-Item -ItemType Directory -Force -Path $DestDir | Out-Null
+    Copy-Item -Path (Join-Path $srcIncludeDir '*') -Destination $DestDir -Recurse -Force
+    $count = @(Get-ChildItem -LiteralPath $DestDir -Filter '*.h' -Recurse -File).Count
+    Add-Result -Step 'gtest headers' -Status 'OK' -Message "Copied $count header file(s) from $srcIncludeDir to $DestDir (source triplet: $Triplet)."
+    return $true
+}
+
+function Get-InstalledGTestVersion {
+    param(
+        [Parameter(Mandatory)][string]$VcpkgExe,
+        [Parameter(Mandatory)][string]$Triplet
+    )
+    # Same reasoning as Get-InstalledCurlVersion: relies on the ambient
+    # manifest-mode context (cwd at $RepoRoot, set via Push-Location near
+    # the top of this script) so `vcpkg list` resolves against
+    # $VcpkgInstalledDir rather than $VcpkgRoot\installed\. No explicit
+    # -InstalledRoot parameter is threaded through here (unlike the Copy-*
+    # functions) -- this function doesn't touch the filesystem directly,
+    # it only shells out to `vcpkg list`, and that command picks up the
+    # manifest root the same way `vcpkg install` does, from cwd.
+    $line = & $VcpkgExe list "gtest:$Triplet" 2>$null | Select-Object -First 1
+    if ($line -match '\S+\s+(\S+)') {
+        return $Matches[1]
+    }
+    return 'unknown'
+}
+
+$script:GTestVersionX86ForReadme = 'unknown'
+$script:GTestVersionX64ForReadme = 'unknown'
+
+Invoke-Step -Name 'vcpkg / gtest' -Body {
+    if ($SkipGTest) {
+        Add-Result -Step 'vcpkg / gtest' -Status 'SKIP' -Message 'Skipped by -SkipGTest.'
+        return
+    }
+    if ($SkipVcpkg) {
+        Add-Result -Step 'vcpkg / gtest' -Status 'SKIP' -Message 'Skipped: -SkipVcpkg implies no vcpkg-based installs.'
+        return
+    }
+
+    $vcpkgExe = Install-VcpkgIfMissing -Root $VcpkgRoot
+    if (-not $vcpkgExe) {
+        Add-Result -Step 'vcpkg / gtest' -Status 'FAIL' -Message 'Skipping manifest install and lib/header copy: vcpkg is not available.'
+        return
+    }
+
+    # Same manifest install as the "vcpkg / curl" step above -- curl and
+    # gtest are both listed in vcpkg.json, so this call is a fast,
+    # idempotent no-op if that step already ran; kept here too so this step
+    # is still correct standalone (e.g. -SkipVcpkg not set but the curl
+    # step somehow didn't run first).
+    $okX86 = Install-ManifestTriplet -VcpkgExe $vcpkgExe -Triplet 'x86-windows-static' -StepLabel 'vcpkg install (x86-windows-static, gtest)'
+    $okX64 = Install-ManifestTriplet -VcpkgExe $vcpkgExe -Triplet 'x64-windows-static' -StepLabel 'vcpkg install (x64-windows-static, gtest)'
+
+    $headersCopied = $false
+
+    if ($okX86) {
+        Copy-GTestTripletLibs -InstalledRoot $VcpkgInstalledDir -Triplet 'x86-windows-static' -DestDir $LibGtestX86Dir
+        $script:GTestVersionX86ForReadme = Get-InstalledGTestVersion -VcpkgExe $vcpkgExe -Triplet 'x86-windows-static'
+        if (-not $headersCopied) {
+            $headersCopied = Copy-GTestHeaders -InstalledRoot $VcpkgInstalledDir -Triplet 'x86-windows-static' -DestDir $GtestVendorDir
+        }
+    } else {
+        Add-Result -Step 'gtest lib copy (x86-windows-static)' -Status 'SKIP' -Message 'Skipped: manifest install for this triplet failed.'
+    }
+
+    if ($okX64) {
+        Copy-GTestTripletLibs -InstalledRoot $VcpkgInstalledDir -Triplet 'x64-windows-static' -DestDir $LibGtestX64Dir
+        $script:GTestVersionX64ForReadme = Get-InstalledGTestVersion -VcpkgExe $vcpkgExe -Triplet 'x64-windows-static'
+        if (-not $headersCopied) {
+            $headersCopied = Copy-GTestHeaders -InstalledRoot $VcpkgInstalledDir -Triplet 'x64-windows-static' -DestDir $GtestVendorDir
+        }
+    } else {
+        Add-Result -Step 'gtest lib copy (x64-windows-static)' -Status 'SKIP' -Message 'Skipped: manifest install for this triplet failed.'
+    }
+
+    if (-not $headersCopied) {
+        Add-Result -Step 'gtest headers' -Status 'FAIL' -Message 'Neither triplet installed successfully; include/vendor/gtest/ was not populated.'
+    }
+
+    if (($script:GTestVersionX86ForReadme -ne 'unknown') -and ($script:GTestVersionX64ForReadme -ne 'unknown') -and `
+        ($script:GTestVersionX86ForReadme -ne $script:GTestVersionX64ForReadme)) {
+        Add-Result -Step 'vcpkg / gtest' -Status 'WARN' -Message "x86 gtest version ($script:GTestVersionX86ForReadme) and x64 gtest version ($script:GTestVersionX64ForReadme) differ -- both triplets should normally resolve to the same vcpkg port version."
+    }
+}
+
+# ===========================================================================
+# Step 8 -- json.hpp: download, verify SHA-256, place in include/vendor/
 # ===========================================================================
 
 Invoke-Step -Name 'json.hpp' -Body {
@@ -656,32 +967,94 @@ Invoke-Step -Name 'lib skeleton + README' -Body {
         "x86=$curlVersionX86, x64=$curlVersionX64"
     }
 
+    $gtestVersionX86 = if ($script:GTestVersionX86ForReadme -and $script:GTestVersionX86ForReadme -ne 'unknown') {
+        $script:GTestVersionX86ForReadme
+    } else {
+        $unknownMsg
+    }
+    $gtestVersionX64 = if ($script:GTestVersionX64ForReadme -and $script:GTestVersionX64ForReadme -ne 'unknown') {
+        $script:GTestVersionX64ForReadme
+    } else {
+        $unknownMsg
+    }
+    $gtestVersion = if (($gtestVersionX86 -eq $gtestVersionX64) -and ($gtestVersionX86 -ne $unknownMsg)) {
+        $gtestVersionX86
+    } else {
+        "x86=$gtestVersionX86, x64=$gtestVersionX64"
+    }
+
     $readmePath = Join-Path $RepoRoot 'lib\README'
     $readme = @"
 # lib/
 
-Static dependencies for restifycapl, built with /MT (static multithreaded
-CRT) to match the project. Populated by scripts/setup-dev-env.ps1 -- do not
-hand-edit the .lib files; re-run the script instead.
+These directories hold **provisioned, uncommitted** dependency binaries,
+built with /MT (static multithreaded CRT) to match the project. They are
+NOT vendored artifacts under version control -- .gitignore excludes
+lib/x86/, lib/x64/, lib/gtest/ and include/vendor/gtest/ deliberately, on
+purpose, every time. Each environment (developer machine, CI runner)
+regenerates this tree independently, by running scripts/setup-dev-env.ps1
+(local) or the CI provisioning step (CI), from its own toolchain. Do not
+hand-edit the .lib files -- re-run the provisioning step instead. Do not
+hand-edit this file either: it is generated by the "lib skeleton + README"
+step of scripts/setup-dev-env.ps1 and will be silently overwritten on the
+next run; edit the template in that script instead.
+
+**The authoritative pin is vcpkg.json at the repo root**, not this file.
+This README restates versions and filenames for convenience at the moment
+they are needed (e.g. writing a linker line), but if this file and
+vcpkg.json ever disagree, vcpkg.json wins -- re-run the provisioning step
+to bring this file back in sync.
 
 ## Layout
 
-lib/x86/   x86 static libraries (vcpkg triplet x86-windows-static)
-lib/x64/   x64 static libraries (vcpkg triplet x64-windows-static)
+lib/x86/        x86 static libraries (vcpkg triplet x86-windows-static) --
+                 product-linked: linked into the product DLL
+lib/x64/        x64 static libraries (vcpkg triplet x64-windows-static) --
+                 product-linked: linked into the product DLL
+lib/gtest/x86/  x86 GoogleTest static libraries (vcpkg triplet
+                 x86-windows-static) -- test-only: build-time-only, linked
+                 into the test executable, never the DLL
+lib/gtest/x64/  x64 GoogleTest static libraries (vcpkg triplet
+                 x64-windows-static) -- test-only: build-time-only, linked
+                 into the test executable, never the DLL
 
 ## Versions
 
 - libcurl: $curlVersion (vcpkg port ``curl`` default features, which pull in
-  SChannel automatically on Windows -- no OpenSSL dependency)
-- zlib: bundled transitively via vcpkg's libcurl dependency; see
-  installed/<triplet>/lib for the exact file
+  SChannel automatically on Windows -- no OpenSSL dependency); file:
+  lib/x86/libcurl.lib, lib/x64/libcurl.lib
+- zlib: bundled transitively via vcpkg's libcurl dependency; file:
+  lib/x86/zs.lib, lib/x64/zs.lib -- note the filename is ``zs.lib``, not
+  ``zlib.lib``; this is not a name anyone would guess from the port name,
+  so it is spelled out here explicitly for whoever next writes a linker
+  line against it.
 - nlohmann/json: v$JsonHppVersion, single-header ``json.hpp`` at
   include/vendor/json.hpp, SHA-256 verified against the official v3.11.3
   GitHub Release asset (see scripts/setup-dev-env.ps1 for the pinned hash
-  and verification provenance)
+  and verification provenance). Unlike everything else in this file,
+  json.hpp IS committed source, not a provisioned binary -- it is a single
+  checksummed header, outside the compiled-artifact principle above.
+- GoogleTest: $gtestVersion (vcpkg port ``gtest``); files:
+  lib/gtest/x86/gtest.lib, lib/gtest/x86/gtest_main.lib,
+  lib/gtest/x64/gtest.lib, lib/gtest/x64/gtest_main.lib.
+  Test-only -- build-time-only, linked into the test executable, never the
+  shipped DLL. The vcpkg ``gtest`` port's own patch splits the install
+  output: ``gtest.lib`` stays in the triplet's plain ``lib/``, while
+  ``gtest_main.lib`` is relocated to ``lib/manual-link/`` (a vcpkg
+  ``manual-link`` split, so a consumer never accidentally links two
+  ``main()``s together); this is why the bootstrap script's copy logic
+  reads from both source directories before flattening everything into
+  lib/gtest/<arch>/.
+
+Both libcurl/zlib and GoogleTest are resolved from the single pin in
+vcpkg.json (``builtin-baseline`` plus the ``curl``/``gtest`` dependency
+entries) -- the version numbers above are what that pin resolved to on
+this machine at the time this file was last written, not a second,
+independently-maintained pin.
 
 Verify /MT provenance with ``dumpbin /directives <lib>`` -- expect
-``/DEFAULTLIB:LIBCMT``, never ``MSVCRT``.
+``/DEFAULTLIB:LIBCMT``, never ``MSVCRT``. This is a per-environment check:
+each environment verifies its own provisioned copies.
 
 Last refreshed: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') by scripts/setup-dev-env.ps1
 "@
@@ -731,6 +1104,8 @@ $warnCount = ($script:Results | Where-Object { $_.Status -eq 'WARN' }).Count
 $okCount   = ($script:Results | Where-Object { $_.Status -eq 'OK' }).Count
 
 Write-Host "$okCount OK, $warnCount WARN, $failCount FAIL" -ForegroundColor $(if ($failCount -gt 0) { 'Red' } elseif ($warnCount -gt 0) { 'Yellow' } else { 'Green' })
+
+Pop-Location
 
 if ($failCount -gt 0) {
     exit 1

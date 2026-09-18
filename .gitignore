@@ -32,7 +32,22 @@
 *.lai
 *.la
 *.a
-#*.lib
+*.lib
+# *.lib is ignored ON PURPOSE. Compiled dependency binaries are never
+# committed and never shared between environments: each environment
+# (developer machine, CI runner) provisions its own from the source-level
+# pin in vcpkg.json, built by that environment's own toolchain. Committing
+# a .lib would mean CI links against a binary produced on someone's laptop.
+# Vendored SOURCE is still committed (include/vendor/json.hpp,
+# include/vendor/capl-dll-sdk/) -- only compiled output is not.
+
+# Provisioned dependency trees -- populated by vcpkg via
+# scripts/setup-dev-env.ps1 (local) or the CI provisioning step. Scoped to
+# subdirectories so lib/README itself stays tracked.
+lib/x86/
+lib/x64/
+lib/gtest/
+include/vendor/gtest/
 
 # Executables
 *.exe
@@ -42,13 +57,14 @@
 # Build directories
 build/
 Build/
-build-*/
 
 # CMake generated files
 CMakeFiles/
 CMakeCache.txt
 cmake_install.cmake
-# Makefile
+# Makefile -- commented out deliberately: this project has ONE hand-written
+# Makefile that is committed and tracked, not a CMake-generated one. Do not
+# uncomment this line; doing so would untrack the real Makefile.
 install_manifest.txt
 compile_commands.json
 
