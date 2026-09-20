@@ -31,3 +31,15 @@ hand-invented version numbers.
   to `main` and the four working-branch prefixes, so a future release tag
   push no longer also matches this workflow's `push` trigger (Stage 7,
   BPE-20).
+
+### Fixed
+
+- `.github/workflows/ci.yml`: the vcpkg tool checkout step cloned
+  unconditionally into `VCPKG_ROOT`, which `ilammy/msvc-dev-cmd@v1` had
+  silently repointed at the VS-bundled vcpkg checkout already present on
+  `windows-latest` runners (`<VS install>\VC\vcpkg`), so the clone failed
+  with "already exists and is not an empty directory" on the workflow's
+  first real run. `VCPKG_ROOT` is now explicitly re-pinned to a CI-only
+  path under `$RUNNER_TEMP` immediately after the MSVC activation step,
+  leaving the pinned-tag clone/checkout/bootstrap sequence itself
+  unchanged.

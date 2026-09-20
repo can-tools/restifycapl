@@ -19,9 +19,10 @@
 #   - This is build+test only. Release/publish (tag-driven, approval-gated)
 #     is Stage 13 (BPE-11) and lives in a separate release.yml, not here.
 #
-# Three carry-over traps replicated from scripts/setup-dev-env.ps1 (see that
-# script's Repair-ShallowVcpkgClone / $VcpkgInstalledRootX86+X64 /
-# $VcpkgPinnedTag for the original, locally-discovered bugs):
+# Four carry-over/CI-discovered traps (see scripts/setup-dev-env.ps1's
+# Repair-ShallowVcpkgClone / $VcpkgInstalledRootX86+X64 / $VcpkgPinnedTag for
+# the original, locally-discovered bugs; trap 4 is CI-only and was found the
+# hard way on this workflow's first real run):
 #   1. Shallow clone of the vcpkg registry breaks manifest-mode version
 #      resolution ("vcpkg was cloned as a shallow repository"). Fixed here by
 #      a full `git clone` (no --depth) of microsoft/vcpkg.
@@ -36,6 +37,22 @@
 #      script pins ($VcpkgPinnedTag = 2026.07.29,
 #      commit 9e593bb18ea69cc5095e012465dcd675a822ed0d), not just the
 #      registry content pinned by vcpkg.json's builtin-baseline.
+#   4. windows-latest ships a full VS Enterprise install with its own
+#      pre-cloned, pre-bootstrapped vcpkg under
+#      `<VS install>\VC\vcpkg` (VS 17.6+ bundles vcpkg and vsdevcmd.bat sets
+#      its own VCPKG_ROOT pointing there). ilammy/msvc-dev-cmd@v1 captures
+#      every env var vsdevcmd.bat sets/changes and persists it to
+#      GITHUB_ENV for all later steps -- which silently overwrote this job's
+#      own VCPKG_ROOT the moment the "Activate MSVC developer environment"
+#      step ran, so the "Bootstrap vcpkg" step's unconditional `git clone`
+#      landed on that already-populated VS-bundled directory and failed
+#      ("already exists and is not an empty directory", exit 128). Fixed by
+#      re-pinning VCPKG_ROOT to a CI-only path under $RUNNER_TEMP
+#      immediately after MSVC activation (see the dedicated step below) --
+#      the full clone + pinned-tag checkout + bootstrap sequence itself is
+#      unchanged, it just no longer targets the VS-bundled path. $RUNNER_TEMP
+#      is unique per runner, so the two matrix legs (separate runners) still
+#      cannot collide with each other either.
 #
 # Caching is purely a performance concern here (plan.md, Stage 6): nothing
 # about correctness depends on a cache hit, since every provisioned binary
@@ -88,9 +105,12 @@ jobs:
 
     env:
       # Vcpkg TOOL checkout -- separate from the repo checkout, and separate
-      # from the per-triplet install roots below. A short, fixed path avoids
-      # MAX_PATH problems vcpkg is known to hit on Windows CI runners.
-      VCPKG_ROOT: C:\vcpkg
+      # from the per-triplet install roots below. NOT set here: trap 4 above
+      # means anything set in this job-level `env:` block gets silently
+      # overwritten by the "Activate MSVC developer environment" step, so
+      # VCPKG_ROOT is instead set (and re-set, authoritatively) by the
+      # dedicated "Pin VCPKG_ROOT..." step immediately after that one --
+      # look there for its actual value.
       # Pins the vcpkg TOOL itself (trap 3). Must match
       # scripts/setup-dev-env.ps1's $VcpkgPinnedTag exactly -- re-derive both
       # together (`git ls-remote --tags https://github.com/microsoft/vcpkg.git`)
@@ -121,6 +141,19 @@ jobs:
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: ${{ matrix.msvc_arch }}
+
+      # Trap 4 (see file header): the step above just clobbered VCPKG_ROOT
+      # with the path to VS's own bundled vcpkg checkout
+      # (`<VS install>\VC\vcpkg`, already populated and bootstrapped by
+      # Microsoft). Re-pin it here to a CI-only path under $RUNNER_TEMP --
+      # short (avoids MAX_PATH issues, same reasoning as the old fixed
+      # C:\vcpkg value), guaranteed not to already exist, and unique per
+      # runner so the two matrix legs never collide with each other. Every
+      # later step in this job (cache key, clone, install, dumpbin checks)
+      # reads VCPKG_ROOT from here, not from the job-level `env:` block.
+      - name: Pin VCPKG_ROOT to a CI-only path (avoid VS-bundled vcpkg collision)
+        shell: pwsh
+        run: echo "VCPKG_ROOT=$env:RUNNER_TEMP\vcpkg" >> $env:GITHUB_ENV
 
       # GitHub's default runner-image env vars (ImageOS, ImageVersion) are
       # only visible to running shells, not to the `env` expression context,
