@@ -1,0 +1,123 @@
+# ==============================================================================
+# auto-pr.yml -- bot-side draft PR opener for restifycapl (CAPL REST DLL)
+#
+# Stage 7 (BPE-21) of docs/work/capl-rest-dll-rebuild/plans/plan.md, section
+# 7.5. Read that section for the full design rationale; this file implements
+# its requirements contract, it does not restate it.
+#
+# What this does, in one sentence: on a push to a working-branch prefix, if
+# the branch is ahead of main and has no open PR yet, open a draft PR into
+# main with a fixed checklist-scaffold body.
+#
+# Deliberate choices, not defaults:
+#   - ubuntu-latest, not windows-latest. This job builds nothing; it only
+#     calls `gh`, which is preinstalled on every GitHub-hosted runner
+#     (including Windows), so ubuntu is strictly faster with no downside.
+#   - No actions/checkout. `GH_REPO` gives `gh` its repo context, and both
+#     guards below query the GitHub API rather than inspecting a working
+#     tree, so no checkout is needed at all.
+#   - Auth is the default GITHUB_TOKEN (Option A, plan.md 7.5) -- not a PAT
+#     or GitHub App. This means events this workflow itself creates do NOT
+#     retrigger other workflows (GitHub's recursion guard), which is fine
+#     here: ci.yml already fires from the developer's own push, independent
+#     of whether this bot succeeds (plan.md 7.6).
+#   - Draft PRs, unconditionally. See plan.md 7.5 -- this is now a fixed
+#     global policy, not a per-branch judgement call.
+#   - No hand-written `git`/checkout logic and no marketplace PR-creator
+#     action -- see plan.md 7.5's "why a hand-written script" note. The
+#     ahead-by guard below is the reason a generic action wasn't reused.
+#   - No `|| true` anywhere past the two guards. Once both guards pass, any
+#     remaining failure (e.g. the "Allow GitHub Actions to create and
+#     approve pull requests" repo setting being off) is genuine and must
+#     surface as a red run -- do not paper over it.
+#
+# Required repo setting for this workflow to work at all (HUM-20):
+#   Settings -> Actions -> General -> "Allow GitHub Actions to create and
+#   approve pull requests" -> ON. Without it, `gh pr create` fails with
+#   "GitHub Actions is not permitted to create or approve pull requests."
+#   Workflow permissions must also not be repo-default read-only.
+# ==============================================================================
+
+name: Auto PR
+
+on:
+  push:
+    branches:
+      - 'stage/**'
+      - 'chore/**'
+      - 'fix/**'
+      - 'docs/**'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  open-draft-pr:
+    name: open draft PR
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      BRANCH: ${{ github.ref_name }}
+    steps:
+      # Guard 1 -- ahead-by check. `gh pr create` fails outright with "No
+      # commits between main and <branch>" if the branch has nothing new
+      # relative to main; that is a harmless situation (e.g. a branch just
+      # cut from an up-to-date main with no commits yet) and must not turn
+      # into a red run. Checked via the compare API, not git, since there is
+      # no checkout in this job.
+      - name: "Guard 1: branch ahead of main?"
+        id: ahead
+        run: |
+          set -euo pipefail
+          ahead_by=$(gh api "repos/${GH_REPO}/compare/main...${BRANCH}" --jq '.ahead_by')
+          echo "Branch '${BRANCH}' is ahead of main by ${ahead_by} commit(s)."
+          if [ "${ahead_by}" -eq 0 ]; then
+            echo "No commits ahead of main -- nothing to open a PR for. Exiting."
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Guard 2 -- idempotency. This workflow fires on every push to a
+      # matching branch, forever; only the first push carrying a commit
+      # should create a PR. Every later push should no-op here.
+      - name: "Guard 2: PR already open for this branch?"
+        id: existing
+        if: steps.ahead.outputs.proceed == 'true'
+        run: |
+          set -euo pipefail
+          existing_pr=$(gh pr list --head "${BRANCH}" --state open --json number --jq '.[0].number // empty')
+          if [ -n "${existing_pr}" ]; then
+            echo "Open PR #${existing_pr} already exists for '${BRANCH}' -- nothing to do. Exiting."
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "No open PR found for '${BRANCH}' -- will create one."
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Past both guards: create the draft PR. No `|| true` here -- a
+      # failure at this point (most likely the "Allow GitHub Actions to
+      # create and approve pull requests" repo setting being off) is a real
+      # problem and must be visibly red.
+      - name: Create draft PR
+        if: steps.ahead.outputs.proceed == 'true' && steps.existing.outputs.proceed == 'true'
+        run: |
+          set -euo pipefail
+          body=$(printf '%s\n' \
+            '## Merge checklist' \
+            '' \
+            '- [ ] CI green on both legs (`build + test (x86)`, `build + test (x64)`)' \
+            '- [ ] `code-reviewer` clean on this branch (`git diff main...HEAD`), zero Must-fix' \
+            '- [ ] Human gate passed against the PR CI artifact, if this branch has one' \
+            '- [ ] `CHANGELOG.md` `[Unreleased]` entry present' \
+            '- [ ] Branch up to date with `main`' \
+            '' \
+            'TODO: stage and task IDs')
+          gh pr create \
+            --draft \
+            --base main \
+            --head "${BRANCH}" \
+            --title "${BRANCH}" \
+            --body "${body}"

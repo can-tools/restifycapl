@@ -18,3 +18,16 @@ hand-invented version numbers.
   that provisions MSVC Build Tools, `make`, vcpkg-built libcurl (x86 and
   x64, static, SChannel), and the pinned `nlohmann/json` single header.
   Verified working end to end on a real machine (14 OK, 0 WARN, 0 FAIL).
+- `.github/workflows/auto-pr.yml`: bot-side workflow that opens a draft PR
+  into `main` on a push to a `stage/`, `chore/`, `fix/`, or `docs/` branch,
+  guarded against no-op reruns and branches with no commits ahead of `main`
+  (Stage 7, BPE-21).
+- `.claude/skills/stage-branch/SKILL.md`: branch-naming convention and
+  create-and-push procedure for starting new work (Stage 7, BPE-22).
+
+### Changed
+
+- `.github/workflows/ci.yml`: `push`/`pull_request` triggers now filtered
+  to `main` and the four working-branch prefixes, so a future release tag
+  push no longer also matches this workflow's `push` trigger (Stage 7,
+  BPE-20).

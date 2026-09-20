@@ -50,9 +50,20 @@
 
 name: CI
 
+# BPE-20 (plan.md 7.6): branch filter added so a release tag push (Stage 14,
+# `vX.Y.Z`) does not also match this unfiltered `push:` trigger and race
+# release.yml -- a branch filter means tag pushes no longer match `push` at
+# all. The four working-branch prefixes here must stay in sync with
+# auto-pr.yml's trigger filter and the stage-branch skill's naming
+# convention (plan.md 7.3). Do NOT unify push/pull_request into one
+# concurrency group below to dedupe these two runs -- see plan.md 7.6's
+# "Implementation trap" note: cancel-in-progress would cancel a run a
+# required status check still needs to see succeed.
 on:
   push:
+    branches: [main, 'stage/**', 'chore/**', 'fix/**', 'docs/**']
   pull_request:
+    branches: [main]
 
 # Cancel superseded runs on the same ref to avoid burning matrix minutes on
 # stale pushes -- a performance nicety, not a correctness requirement.
