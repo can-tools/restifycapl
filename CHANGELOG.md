@@ -51,6 +51,18 @@ hand-invented version numbers.
   above as a fourth load-bearing use of the four branch-prefix
   conventions, and notes that retargeting a PR's base off `main` costs it
   its `pull_request` CI runs (BPE-27).
+- `.github/workflows/ci.yml`: `actions/checkout` bumped `v4` -> `v7`,
+  `actions/cache` bumped `v4` -> `v6` (both occurrences), and
+  `actions/upload-artifact` bumped `v4` -> `v7`, so each now runs on the
+  `node24` runtime instead of the deprecated `node20`. Verified against each
+  action's own `action.yml` and release notes that no input or default
+  behavior this workflow relies on (`fetch-depth: 0`, plain `path`/`key`
+  cache usage, single-file DLL artifact upload) changed across the jump.
+  `ilammy/msvc-dev-cmd` stays pinned to `v1` -- its latest release
+  (`v1.13.0`) still declares `node20`, so no bump resolves the warning for
+  that action yet -- but is now pinned to the exact commit `v1.13.0`
+  resolves to, with a trailing version comment, for supply-chain hardening
+  independent of the Node.js question.
 
 ### Fixed
 
