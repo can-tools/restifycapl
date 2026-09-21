@@ -52,9 +52,9 @@ A developer machine and a CI runner are independent environments. Each provision
 
 **Stage 3 — UNCONFIRMED.** Unchanged, and now the *only* remaining blocker of consequence. It gates HUM-13 and therefore the Stage 5 gate, and nothing else.
 
-**Follow-ups outstanding:** BPE-16 (`version-string` note), BPE-17 (stale `lib/x64/` residue), BPE-27 (`auto-pr.yml` base-branch gap — §7.13), and HUM-20's verification. **BPE-19 closed** as absorbed by BPE-24 + CPP-17. **BPE-18 — verify before closing:** `CHANGELOG.md` gained entries across PRs #1 and #2; confirm the CI workflow entry, the `version.lib` entry and the 14→19 count correction are all present rather than assuming they are.
+**Follow-ups outstanding:** BPE-16 (`version-string` note), BPE-17 (stale `lib/x64/` residue), BPE-27 (`auto-pr.yml` base-branch gap — §7.13), and HUM-23 (the actual GitHub configuration — §7.14; HUM-20's verification is done and found it absent). **BPE-19 closed** as absorbed by BPE-24 + CPP-17. **BPE-18 — verify before closing:** `CHANGELOG.md` gained entries across PRs #1 and #2; confirm the CI workflow entry, the `version.lib` entry and the 14→19 count correction are all present rather than assuming they are.
 
-**Next:** HUM-20 verification, then **Stage 8 on `stage/08-core-pure-logic`.** HUM-12 is **done** — it is what made Stages 6 and 7 real.
+**Next:** HUM-23 (branch protection on `main` — cheap, blocks Stage 10, §7.14), then **Stage 8 on `stage/08-core-pure-logic`,** which does not depend on HUM-23. HUM-12 is **done** — it is what made Stages 6 and 7 real.
 
 ---
 
@@ -497,15 +497,15 @@ on:
 - **`fetch-depth: 0` must be in `release.yml` too.** `ci.yml` has it; `release.yml` does not exist yet. Without it `git describe` degrades silently rather than failing loudly — flag for BPE-11.
 - **Stage 14's approval gate is a GitHub *Environment* with required reviewers**, under Settings → Environments. Different from branch protection and configured separately, also by hand.
 
-#### 7.8 What "done enough to land on `main`" means, and the manual GitHub configuration (HUM-20)
+#### 7.8 What "done enough to land on `main`" means, and the manual GitHub configuration (HUM-20 verified it; HUM-23 applies it — §7.14)
 
 `main` is **gate-passed, CI-green work only.** A stage branch merges when all of the following hold, in this order:
 
-1. **Both CI matrix legs green on the PR** — `build + test (x86)` and `build + test (x64)`. Non-negotiable; mechanically enforced by branch protection.
+1. **Both CI matrix legs green on the PR** — `build + test (x86)` and `build + test (x64)`. Non-negotiable in principle; **not yet mechanically enforced — branch protection on `main` is currently absent (§7.14, HUM-23), so this is a convention followed by the human merging, not a server-side gate.**
 2. **`code-reviewer` clean on the branch**, reviewed against `git diff main...HEAD` (three-dot — the PR diff, i.e. what this branch introduces, excluding what `main` gained meanwhile), zero Must-fix. Should-fix may be deferred to a `chore/` branch if explicitly recorded; nice-to-haves need no ceremony.
 3. **The stage's human gate has passed, where it has one.** For Stages 10/11/12 (HUM-14/15/16) and any future export-table append, the gate is verified **against the branch's CI artifact, before merge** — the human downloads `restifycapl-x86`/`restifycapl-x64` from the PR's workflow run and loads it in CANoe. Verifying after merge would put unverified export-table rows on `main`, which is the exact thing this strategy exists to prevent.
 4. **`CHANGELOG.md` `[Unreleased]` entry present in the branch**, per §5 — both halves of the rule (export-table appends *and* user-visible build/CI/packaging changes; BPE-18 exists because the second half was missed).
-5. **Branch is up to date with `main`** (enforced by protection).
+5. **Branch is up to date with `main`** — the plan's intent, **not currently enforced by protection** (§7.14, HUM-23); until then, this is the merging human's own check, and §7.10's interim mitigation applies to the fold-in commit specifically.
 6. **The branch's working plan has been folded into `plan.md`**, including any renumbering of task IDs and section numbers, per §7.10. This is the branch's last commit, before it is marked Ready for review.
 
 Stages without a human gate (8, 9, 15) merge on 1 + 2 + 4 + 5 + 6.
@@ -517,7 +517,7 @@ Stages without a human gate (8, 9, 15) merge on 1 + 2 + 4 + 5 + 6.
 
 **Review happens once, on the branch, before merge — not again after.** Nothing changes on merge but the merge commit. **One exception:** if the merge required non-trivial conflict resolution — above all in `src/module/exports.cpp` — re-run `code-reviewer` on the resolved result before pushing the merge. A hand-resolved export table has never been reviewed by anyone.
 
-**HUM-20 — manual GitHub configuration. No agent can do any of this.** There is no GitHub admin access in this session at all.
+**HUM-23 — manual GitHub configuration, the table below. No agent can do any of this.** There is no GitHub admin access in this session at all. HUM-20 verified the current state (§7.14): none of this is configured yet except the Actions-PR setting.
 
 Settings → Branches → ruleset targeting `main`:
 
@@ -563,11 +563,11 @@ Also required:
 
 Two mitigations, both required:
 - **Serialize export-table work. Never have two open PRs that both touch `src/module/exports.cpp`.** Stages 10 → 11 → 12 → 13 run one at a time. If Stage 11's logic must start early, stack it off Stage 10 (7.2) and keep its export-table append as the last commit.
-- **"Require branches to be up to date before merging"** (7.8), so a stale base cannot reach `main` at all.
+- **"Require branches to be up to date before merging"** (7.8), so a stale base cannot reach `main` at all. **Not currently active — branch protection on `main` is absent (§7.14).** Not urgent today since no export-table stage has started, but a hard blocker before Stage 10; HUM-23 must land first.
 
 **Merging `main` into a stage branch can reintroduce this.** When refreshing a long-lived branch, if `main` has gained export-table rows, the conflict must be resolved so `main`'s rows stay **before** the branch's — always. Resolving "mine first" is the exact reordering defect above, wearing a conflict marker.
 
-**Narrowing the push deny is the largest single expansion of agent capability in this project's history.** Until now the guarantee was absolute — no agent could push anything. It becomes conditional, enforced by string patterns on a command that has many equivalent spellings. Three mitigations, in descending order of strength: GitHub branch protection with bypass disabled (structural, server-side, the only real one); the explicit deny of bare `Bash(git push)` and the `main`/force/tag forms; and the convention that merges are human. **Do not record this as "agents still cannot touch `main`" — record it as "the server refuses, and the client discourages."**
+**Narrowing the push deny is the largest single expansion of agent capability in this project's history.** Until now the guarantee was absolute — no agent could push anything. It becomes conditional, enforced by string patterns on a command that has many equivalent spellings. Three mitigations, in descending order of strength: GitHub branch protection with bypass disabled (structural, server-side, the only real one — **currently absent; see §7.14, HUM-23**); the explicit deny of bare `Bash(git push)` and the `main`/force/tag forms; and the convention that merges are human. **Do not record this as "agents still cannot touch `main`" — record it as "the server refuses, and the client discourages," and note that today the server side of that sentence is not yet installed.**
 
 **`auto-pr.yml` will not have run when it is reviewed.** It joins Stage 5's DLLs and Stage 6's workflow in §13's standing category — seven recorded instances of static review failing to substitute for execution. The two most likely first-run failures are the "Allow GitHub Actions to create and approve pull requests" setting being off, and workflow permissions being repo-default read-only. Budget a fix cycle.
 
@@ -594,7 +594,7 @@ Four conditions:
 
 **What is deliberately accepted.** A time-boxed window in which the working document and this one disagree, closing at merge. And a residual possibility of a `plan.md` conflict, whose cost is one hand-resolved prose conflict with no runtime consequence — nothing in this file compiles, links, or is loaded by CANoe. **That asymmetry against `src/module/exports.cpp`, where a silent mis-merge reorders an already-shipped export row and breaks CAPL scripts at runtime, is exactly why the export table keeps strict serialization and this document does not.** The two files are not comparable and must not share a rule.
 
-**Unchanged.** No agent pushes to `main`. This document still reaches `main` only through a PR under §7.8 and branch protection. No admin bypass. **This removes a PR cycle, not a gate.**
+**Unchanged.** No agent pushes to `main`. This document still reaches `main` only through a PR under §7.8's criteria. **The "no admin bypass" branch-protection backstop this paragraph used to also claim is not currently in place — see §7.14; HUM-23 is the fix.** Until then, §7.8's criteria are enforced by convention and human review, not mechanically. **This removes a PR cycle, not a gate.**
 
 **Two guardrails.** A fold-in describes work that has not merged yet — write the state that will be true at merge, and **never record a human gate (HUM-13/14/15/16/18) as passed before it has actually passed.** And **`code-reviewer` does not review `plan.md` prose**; it is out of scope for a review whose subject is the export contract, the build, or `/MT`. §7.8 criterion 2 does not apply to a plan-only branch.
 
@@ -607,7 +607,8 @@ Four conditions:
 | ID | Task | Owner | Gate |
 |---|---|---|---|
 | **HUM-21** | Scoped-push `settings.json` wording, edited by hand | Human only | **DONE — applied** |
-| **HUM-20** | GitHub config: branch protection, required checks, "Allow Actions to create PRs" ON, workflow permissions, auto-delete branches, bypass ON | Human only | **OPEN — verification pending in the GitHub UI** |
+| **HUM-20** | GitHub config: branch protection, required checks, "Allow Actions to create PRs" ON, workflow permissions, auto-delete branches, bypass ON | Human only | **VERIFIED 2026-09-21 — see §7.14; config found absent** |
+| **HUM-23** | Apply the missing GitHub configuration found by HUM-20 — see §7.14 | Human only | **OPEN — blocker before Stage 10** |
 | **BPE-21** | `.github/workflows/auto-pr.yml` as specified in 7.5 | `build-pipeline-engineer` | **DONE — live, opens draft PRs unattended** |
 | **BPE-22** | `.claude/skills/stage-branch/SKILL.md` | `build-pipeline-engineer` | **DONE** |
 | **BPE-20** | `ci.yml` `branches:` filter | `build-pipeline-engineer` | **DONE — taken in PR #1, not deferred** |
@@ -623,7 +624,7 @@ Four conditions:
 
 **`REV-17` predating `REV-16` is not an anomaly.** REV IDs in this document have never been chronological — `REV-5` through `REV-12` are pre-allocated to Stages 10–17, work that has not started. They are allocation slots, not a timeline.
 
-**Sequence (historical):** HUM-12 → first CI run (red) → `VCPKG_ROOT` fix + BPE-25 → REV-13, REV-17 → PR #1 merged → PR #2 rebased → REV-14, REV-16 → PR #2 merged → BPE-26 + REV-15 merged → v15. **Next:** HUM-20 verification → BPE-27 → Stage 8 on `stage/08-core-pure-logic`.
+**Sequence (historical):** HUM-12 → first CI run (red) → `VCPKG_ROOT` fix + BPE-25 → REV-13, REV-17 → PR #1 merged → PR #2 rebased → REV-14, REV-16 → PR #2 merged → BPE-26 + REV-15 merged → v15 → HUM-20 verified (§7.14). **Next:** HUM-23 → BPE-27 → Stage 8 on `stage/08-core-pure-logic`.
 
 **Human approval gate: SATISFIED.** It touched CI, `.claude/settings.json` and what gets shipped, and the gate's own standard was "only once the bot has actually opened a PR and its CI run has been observed green." Both happened. Per §13, written-and-reviewed is not executed — and this stage is now the project's best evidence for that, in both directions.
 
@@ -664,7 +665,25 @@ The accepted route was the **downgrade** — curl to 8.21.0#1, gtest to 1.17.0#3
 
 **The rebase exception, recorded as precedent.** A stacked branch whose parent squash-merged **may** be rebased — human-only — because merging `main` in is the *more* dangerous option there: both sides present different content for files absent from the merge base, and hand-resolving two YAML files is the exact artifact class §13 keeps burning this project on. The licence is narrow and carries a mechanical proof obligation: **`git diff <pre-rebase-tip> HEAD` must print nothing** before pushing, proving the rebase rewrote SHAs and dropped duplicated commits without altering a single byte. Where the rebased branch touched `src/module/exports.cpp`, a confirmatory review must additionally verify the `CAPL_DLL_INFO_LIST4` rows are byte-identical to `main`'s. **Both are required; neither alone is sufficient.** This was exercised once, on PR #2, with REV-16 as the confirmatory review. `.claude/skills/stage-branch/SKILL.md` otherwise says *never rebase*, and that stands for agents and for ordinary refreshes.
 
-**What the closeout changed about earlier claims.** BPE-20 was taken, not deferred (§7.6). §7.6's open question — whether branch protection evaluates the latest status when two runs report the same check name against one commit — was exercised across PR #1's several reports; **record the observed answer against HUM-20 rather than leaving it open.**
+**What the closeout changed about earlier claims.** BPE-20 was taken, not deferred (§7.6). §7.6's open question — whether branch protection evaluates the latest status when two runs report the same check name against one commit — was exercised across PR #1's several reports; **record the observed answer against HUM-20 rather than leaving it open.** Note, given §7.14: that observation was made without branch protection actually active on `main`, so it describes GitHub's Checks-tab behaviour in general, not confirmed enforcement behaviour — the latter still needs re-confirming once HUM-23 lands.
+
+#### 7.14 HUM-20 verified — branch protection on `main` is absent (blocker before Stage 10)
+
+**Verified 2026-09-21, in the GitHub UI, by the human:**
+
+| Setting | State |
+|---|---|
+| Branch protection / ruleset on `main` | **ABSENT — no rule exists at all** |
+| "Allow GitHub Actions to create and approve pull requests" | **ON** — confirmed working; it is why `auto-pr.yml` functions |
+| "Automatically delete head branches" | **OFF** |
+
+**§7.10's "only real mitigation" for the scoped-push relaxation does not currently exist.** §7.10 calls GitHub branch protection with bypass disabled the structural control behind "the server refuses, and the client discourages" — the server half is not there. The exposure this leaves is narrow, not the ordinary case: agent pushes are still caught client-side by the `settings.json` deny list (HUM-21), so routine `stage/*`/`chore/*`/`fix/*`/`docs/*` work is unaffected. What is genuinely unprotected is that nothing server-side currently stops a force-push to `main`, or a deletion of `main`, by anyone with write access who is not going through the deny-listed client. This is a real gap, not a rhetorical one, and it is why HUM-23 is a human-only, non-deferrable task rather than routine cleanup.
+
+**The export-table hazard (§7.10) is down to one of its two required mitigations.** Serializing Stages 10–13 (never two open PRs touching `exports.cpp`) is a convention and still holds regardless of GitHub configuration. "Require branches to be up to date before merging" is a branch-protection setting and, with protection absent, does not exist. **Not urgent today** — Stage 8 does not touch the export table — **but a hard blocker before Stage 10**, which is the first stage that does.
+
+**A second interaction, not previously named: the fold-in rule (§7.10) assumes the same missing setting.** §7.10's fold-in model works by writing the reconciled state as the branch's last commit; without "require branches up to date before merging," a branch that has drifted behind `main` can merge anyway, and a fold-in commit written against a stale `main` can silently **drop** content `main` gained in the meantime rather than surfacing as a visible merge conflict — the same failure shape, one layer quieter, that produced the abandoned `docs/plan-v15` branch this revision replaces. **Interim mitigation, until HUM-23 lands: merge `main` into a branch immediately before writing its fold-in commit**, every time, rather than trusting protection to catch a stale base.
+
+**HUM-23 is cheap and unblocks the enforcement everything else in this stage assumes** — seven settings in one GitHub UI pass (§7.8's table) plus one checkbox for auto-delete. It is placed first in §7.11's sequence for that reason: nothing about it requires Stage 8 to happen first, and leaving it undone longer only widens the window described above.
 
 ---
 
@@ -839,7 +858,7 @@ Trigger: hand-assembling JSON in CAPL proves genuinely cumbersome. Dead code las
 | REV-16 | 7 | PR #2 confirmatory review after its rebase; export-table rows byte-identical | **CLEAN** |
 | REV-17 | 7 | PR #1 full-branch review — BPE-21 + BPE-22 + BPE-20 + `VCPKG_ROOT` fix + BPE-25 | **CLEAN — gated the merge of `2123c80`** |
 
-### Human — 22 tasks
+### Human — 23 tasks
 
 | ID | Stage | Task | Status |
 |---|---|---|---|
@@ -854,9 +873,10 @@ Trigger: hand-assembling JSON in CAPL proves genuinely cumbersome. Dead code las
 | HUM-16 | 12 | Verify CAPL associative-field syntax against the official CANoe help | |
 | HUM-17 | 14 | Create the release tag | |
 | HUM-18 | 14 | Verify the CI artifact in CANoe, then approve the publish | |
-| HUM-20 | 7 | GitHub config: branch protection, required checks, Actions-can-create-PRs, auto-delete branches | **OPEN — verification pending in the GitHub UI** |
+| HUM-20 | 7 | GitHub config: branch protection, required checks, Actions-can-create-PRs, auto-delete branches | **VERIFIED 2026-09-21 — PARTIALLY CONFIGURED.** "Allow Actions to create PRs" ON. Branch protection/ruleset on `main`: ABSENT. Auto-delete head branches: OFF. See §7.14. |
 | HUM-21 | 7 | Approve exact `settings.json` scoped-push wording **and make the edit by hand** | **DONE — applied by hand** |
 | HUM-22 | 6b | Approve the exact comment-discipline rule wording | **APPROVED** |
+| HUM-23 | 7 | Apply the missing GitHub configuration: the §7.8 ruleset on `main` (7 settings), auto-delete head branches | **OPEN — human only. Blocker before Stage 10.** |
 
 ---
 
@@ -920,7 +940,7 @@ The RC2237 scare showed the inverse failure: a hand-reconstructed invocation pro
 
 ## 14. Operational loose ends
 
-1. **HUM-20 verification is the only open process item.** Branch protection, required checks (`build + test (x86)` / `(x64)`), bypass-disabled, Actions-can-create-PRs and auto-delete-branches all need confirming in the GitHub UI. §7.8's sequencing gotcha has passed — the checks have reported, so they are selectable. **§7.10's guarantee that a fold-in is authored against an up-to-date `main` leans on "require branches to be up to date"; if that setting is off, the guarantee is conventional rather than mechanical.** While there, record §7.6's duplicate-check-name observation.
+1. **HUM-20 verification is done; HUM-23 is the open process item.** HUM-20 confirmed in the GitHub UI on 2026-09-21 that branch protection/ruleset on `main` is absent, "Allow Actions to create PRs" is ON, and auto-delete head branches is OFF (§7.14). HUM-23 applies the missing configuration: the §7.8 ruleset (required checks, bypass-disabled, up-to-date-before-merging, and the rest) plus auto-delete. §7.8's sequencing gotcha has passed — the checks have reported, so they are selectable. **§7.10's guarantee that a fold-in is authored against an up-to-date `main` leans on "require branches to be up to date"; that setting is currently off, so the guarantee is conventional, not mechanical, until HUM-23 lands.** While there, record §7.6's duplicate-check-name observation.
 2. **BPE-27 is open and touches CI** — see §7.13. Human approval required.
 3. **BPE-16 and BPE-17 remain non-blocking.** BPE-17's `lib/x64/` residue is gitignored and cannot enter a commit.
 4. **BPE-18 needs verifying rather than assuming** — confirm all three CHANGELOG items are present.
@@ -932,12 +952,12 @@ The RC2237 scare showed the inverse failure: a hand-reconstructed invocation pro
 
 ## 15. Execution order
 
-**1 → 2 → 4 → 5 Half A (executed, green) → 6 (executed, green) → 7 (executed, closed out) → HUM-20 verification → 8 → 9 → 10 → 11 → 12 → 13 → 14 → 15**, with Stages 16–17 only on demonstrated need.
+**1 → 2 → 4 → 5 Half A (executed, green) → 6 (executed, green) → 7 (executed, closed out) → HUM-20 verified (§7.14) → 8 → 9 → 10 → 11 → 12 → 13 → 14 → 15**, with Stages 16–17 only on demonstrated need.
 
-**Track A is complete.** Commit, push, first CI run, fix cycle, green on both architectures — done, and it closed the x86 evidence gap and BPE-8's build half along the way. **Track B (human, CANoe) is now the sole critical path:** HUM-10 → HUM-11 → HUM-13 → Stage 5 gate closed.
+**Track A is complete.** Commit, push, first CI run, fix cycle, green on both architectures — done, and it closed the x86 evidence gap and BPE-8's build half along the way. **Track B (human, CANoe) is now the sole critical path for the Stage 5 gate:** HUM-10 → HUM-11 → HUM-13 → Stage 5 gate closed.
 
-Stage 8 is unblocked and may begin immediately on `stage/08-core-pure-logic`. But **no export-table append (Stage 10 onward) may proceed until HUM-13 has passed** — appending to a table whose base layout has never been loaded by CANoe would multiply the unknowns in exactly the way Stage 5 exists to prevent.
+Stage 8 is unblocked and may begin immediately on `stage/08-core-pure-logic`, independently of HUM-23. But **no export-table append (Stage 10 onward) may proceed until both HUM-13 and HUM-23 have passed** — HUM-13 because appending to a table whose base layout has never been loaded by CANoe would multiply the unknowns in exactly the way Stage 5 exists to prevent; HUM-23 because "require branches up to date before merging" is the mechanical half of the export-table merge-hazard mitigation (§7.10, §7.14) and is currently missing.
 
-BPE-16, BPE-17, BPE-18 and BPE-27 are non-blocking and can happen at any time; BPE-27 needs human approval because it touches CI.
+BPE-16, BPE-17, BPE-18 and BPE-27 are non-blocking and can happen at any time; BPE-27 needs human approval because it touches CI. HUM-23 is cheap and non-urgent for Stage 8/9 but is a hard blocker before Stage 10.
 
-**Status:** v15. Stages 1, 2 and 4 complete and execution-verified. Stage 5 code complete and building on both architectures; hard gate open on Stage 3. **Stages 6 and 7 executed and closed out** — CI green on both legs, branching and auto-PR live, three units of work merged through the flow. Comment discipline is a loaded rule (§6b). `plan.md` maintenance is the fold-in model (§7.10). Open: HUM-20 verification, BPE-27, BPE-16/17/18. Next action: **HUM-20, then Stage 8.**
+**Status:** v15. Stages 1, 2 and 4 complete and execution-verified. Stage 5 code complete and building on both architectures; hard gate open on Stage 3. **Stages 6 and 7 executed and closed out** — CI green on both legs, branching and auto-PR live, three units of work merged through the flow. Comment discipline is a loaded rule (§6b). `plan.md` maintenance is the fold-in model (§7.10). **HUM-20 verified: branch protection on `main` is absent (§7.14).** Open: HUM-23 (branch protection — blocker before Stage 10), BPE-27, BPE-16/17/18. Next action: **HUM-23, then Stage 8.**
