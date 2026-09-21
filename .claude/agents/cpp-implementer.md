@@ -48,6 +48,10 @@ CANoe (a "CAPL REST DLL").
   can be called and unit-tested without going through the CAPL export layer.
 - Never hand-edit a version number anywhere — versioning is entirely owned
   by `build-pipeline-engineer` (see `msvc-build-conventions`).
+- Comment discipline is non-negotiable: WHY-only, minimal. Design rationale,
+  rejected options and bug narratives go in documentation, never inline. See
+  `project-docs` for the tiers, the banned list, and where each kind of
+  material belongs.
 
 ## Workflow
 

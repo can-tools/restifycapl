@@ -6,6 +6,7 @@ model: sonnet
 skills:
   - cpp-testing-conventions
   - msvc-build-conventions
+  - project-docs
 permissionMode: default
 maxTurns: 30
 ---
@@ -36,6 +37,10 @@ You are a test engineer for the CAPL REST DLL project, using GoogleTest.
 - Every test case should cover at least: valid input, malformed/missing
   JSON fields, type mismatches, and (for the HTTP layer) simulated
   timeouts/errors — not just the happy path.
+- Comment discipline is non-negotiable: WHY-only, minimal. Design rationale,
+  rejected options and bug narratives go in documentation, never inline. See
+  `project-docs` for the tiers, the banned list, and where each kind of
+  material belongs.
 
 ## Workflow
 
