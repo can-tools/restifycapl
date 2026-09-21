@@ -675,6 +675,78 @@ function Invoke-VcpkgBootstrap {
     return $exe
 }
 
+function Assert-VcpkgBaselinePin {
+    <#
+        BPE-25 drift guard. vcpkg.json's builtin-baseline pins WHICH port
+        versions resolve (registry content); $VcpkgPinnedTag / the checkout
+        at $Root pins WHICH vcpkg.exe does the resolving. These are two
+        independent axes that must still name the same commit in the
+        microsoft/vcpkg registry -- if the baseline is newer than the tool's
+        own checked-out commit, `vcpkg install` fails with "no version
+        database entry for <port> at <version>" (the baseline's version
+        isn't present in the older, checked-out version database), exactly
+        the bug this guard is meant to catch immediately instead of via that
+        much less obvious downstream error. Runs after
+        Set-VcpkgPinnedVersion has had a chance to run (called from
+        Install-VcpkgIfMissing, both the fresh-clone and existing-checkout
+        paths), so $Root already reflects whatever commit the tool pin
+        actually landed on.
+
+        Mirrors the equivalent CI step in .github/workflows/ci.yml ("Verify
+        vcpkg tool pin matches vcpkg.json's builtin-baseline") -- keep both
+        in sync if this check's logic ever changes.
+        Rationale: see docs/development-environment.md#pinning-the-vcpkg-tool-itself
+    #>
+    param([Parameter(Mandatory)][string]$Root)
+
+    $vcpkgJsonPath = Join-Path $RepoRoot 'vcpkg.json'
+    if (-not (Test-Path -LiteralPath $vcpkgJsonPath)) {
+        Add-Result -Step 'vcpkg baseline/tool pin check' -Status 'WARN' -Message "vcpkg.json not found at $vcpkgJsonPath; cannot verify the baseline/tool-pin invariant."
+        return
+    }
+
+    $baseline = $null
+    try {
+        $baseline = (Get-Content -LiteralPath $vcpkgJsonPath -Raw | ConvertFrom-Json).'builtin-baseline'
+    } catch {
+        Add-Result -Step 'vcpkg baseline/tool pin check' -Status 'WARN' -Message "Could not parse vcpkg.json to read builtin-baseline: $($_.Exception.Message)"
+        return
+    }
+    if ([string]::IsNullOrWhiteSpace($baseline)) {
+        Add-Result -Step 'vcpkg baseline/tool pin check' -Status 'WARN' -Message "vcpkg.json has no builtin-baseline value; cannot verify the baseline/tool-pin invariant."
+        return
+    }
+
+    $gitCmd = Get-Command git -ErrorAction SilentlyContinue
+    if (-not $gitCmd) {
+        Add-Result -Step 'vcpkg baseline/tool pin check' -Status 'WARN' -Message "git not on PATH; cannot verify the vcpkg tool checkout at $Root matches vcpkg.json's builtin-baseline ($baseline)."
+        return
+    }
+
+    $toolCommit = ((& git -C $Root rev-parse HEAD 2>$null) -join '').Trim()
+    if (-not $toolCommit) {
+        Add-Result -Step 'vcpkg baseline/tool pin check' -Status 'WARN' -Message "Could not resolve HEAD of the vcpkg tool checkout at $Root; cannot verify the baseline/tool-pin invariant."
+        return
+    }
+
+    if ($toolCommit -ne $baseline) {
+        Add-Result -Step 'vcpkg baseline/tool pin check' -Status 'FAIL' -Message @"
+vcpkg.json's builtin-baseline ($baseline) does not match the pinned vcpkg
+TOOL's checked-out commit ($toolCommit, from VcpkgPinnedTag=$VcpkgPinnedTag).
+These are two independent pins that must name the same commit in the
+microsoft/vcpkg registry -- otherwise version resolution reads baseline
+versions from one commit but checks them against a version database pinned
+at a different (often older) commit, producing "no version database entry"
+errors (see BPE-25). Fix by re-deriving the commit VcpkgPinnedTag ($VcpkgPinnedTag)
+dereferences to (git ls-remote --tags https://github.com/microsoft/vcpkg.git <tag>)
+and setting vcpkg.json's builtin-baseline to that exact commit.
+"@
+        return
+    }
+
+    Add-Result -Step 'vcpkg baseline/tool pin check' -Status 'OK' -Message "vcpkg tool pin ($toolCommit) matches vcpkg.json's builtin-baseline."
+}
+
 function Install-VcpkgIfMissing {
     param([Parameter(Mandatory)][string]$Root)
 
@@ -916,6 +988,13 @@ Invoke-Step -Name 'vcpkg / curl' -Body {
         return
     }
     Add-Result -Step 'vcpkg' -Status 'OK' -Message "Using vcpkg at: $vcpkgExe"
+
+    # BPE-25 drift guard -- runs right after the tool pin (Set-VcpkgPinnedVersion,
+    # inside Install-VcpkgIfMissing above) has had a chance to act, before any
+    # manifest install is attempted, so a mismatch is reported clearly instead
+    # of surfacing later as a confusing "no version database entry" error from
+    # vcpkg itself. Mirrors the equivalent step in .github/workflows/ci.yml.
+    Assert-VcpkgBaselinePin -Root $VcpkgRoot
 
     $okX86 = Install-ManifestTriplet -VcpkgExe $vcpkgExe -Triplet 'x86-windows-static' -InstallRoot $VcpkgInstalledRootX86 -StepLabel 'vcpkg install (x86-windows-static)'
     $okX64 = Install-ManifestTriplet -VcpkgExe $vcpkgExe -Triplet 'x64-windows-static' -InstallRoot $VcpkgInstalledRootX64 -StepLabel 'vcpkg install (x64-windows-static)'

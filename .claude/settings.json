@@ -25,7 +25,21 @@
       "Bash(git describe *)",
       "Bash(git rev-list *)",
       "Bash(git add *)",
-      "Bash(git commit *)"
+      "Bash(git commit *)",
+      "Bash(git switch -c stage/*)",
+      "Bash(git switch -c chore/*)",
+      "Bash(git switch -c fix/*)",
+      "Bash(git switch -c docs/*)",
+      "Bash(git switch main)",
+      "Bash(git pull --ff-only)",
+      "Bash(git push -u origin stage/*)",
+      "Bash(git push -u origin chore/*)",
+      "Bash(git push -u origin fix/*)",
+      "Bash(git push -u origin docs/*)",
+      "Bash(git push origin stage/*)",
+      "Bash(git push origin chore/*)",
+      "Bash(git push origin fix/*)",
+      "Bash(git push origin docs/*)"
     ],
     "deny": [
       "Bash(git push *)",
@@ -40,7 +54,17 @@
       "Read(**/*.pem)",
       "Read(**/*.key)",
       "Read(**/.env)",
-      "Read(**/.env.*)"
+      "Read(**/.env.*)",
+      "Bash(git push)",
+      "Bash(git push origin main*)",
+      "Bash(git push * main*)",
+      "Bash(git push * HEAD:main*)",
+      "Bash(git push --force*)",
+      "Bash(git push * --force*)",
+      "Bash(git push * -f*)",
+      "Bash(git push * --tags*)",
+      "Bash(git push * --delete*)",
+      "Bash(git push * :*)"
     ]
   }
 }

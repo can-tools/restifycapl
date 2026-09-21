@@ -33,7 +33,7 @@ lib/gtest/x64/  x64 GoogleTest static libraries (vcpkg triplet
 
 ## Versions
 
-- libcurl: 8.22.0 (vcpkg port `curl` default features, which pull in
+- libcurl: 8.21.0#1 (vcpkg port `curl` default features, which pull in
   SChannel automatically on Windows -- no OpenSSL dependency); file:
   lib/x86/libcurl.lib, lib/x64/libcurl.lib
 - zlib: bundled transitively via vcpkg's libcurl dependency; file:
@@ -47,7 +47,7 @@ lib/gtest/x64/  x64 GoogleTest static libraries (vcpkg triplet
   and verification provenance). Unlike everything else in this file,
   json.hpp IS committed source, not a provisioned binary -- it is a single
   checksummed header, outside the compiled-artifact principle above.
-- GoogleTest: 1.18.0 (vcpkg port `gtest`); files:
+- GoogleTest: 1.17.0#3 (vcpkg port `gtest`); files:
   lib/gtest/x86/gtest.lib, lib/gtest/x86/gtest_main.lib,
   lib/gtest/x64/gtest.lib, lib/gtest/x64/gtest_main.lib.
   Test-only -- build-time-only, linked into the test executable, never the
@@ -70,3 +70,15 @@ Verify /MT provenance with `dumpbin /directives <lib>` -- expect
 each environment verifies its own provisioned copies.
 
 Last refreshed: 2026-09-18 16:01:58 by scripts/setup-dev-env.ps1
+
+STOPGAP NOTE (BPE-25, 2026-09-21): the two version numbers above were
+hand-corrected to match vcpkg.json's new builtin-baseline (curl 8.21.0#1,
+GoogleTest 1.17.0#3) after fixing the baseline/tool-pin mismatch, because
+no environment with a working vcpkg + MSVC toolchain was available to
+actually re-run scripts/setup-dev-env.ps1 and regenerate this file for
+real. This is exactly the kind of hand-edit this file's own header warns
+against -- it works only until the next real run of the script, which will
+overwrite it (harmlessly, since the script derives the same two version
+numbers from the corrected vcpkg.json baseline via `vcpkg list`). Whoever
+next runs setup-dev-env.ps1 with real tooling should let the regenerated
+version stand and can remove this note.

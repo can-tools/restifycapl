@@ -18,3 +18,42 @@ hand-invented version numbers.
   that provisions MSVC Build Tools, `make`, vcpkg-built libcurl (x86 and
   x64, static, SChannel), and the pinned `nlohmann/json` single header.
   Verified working end to end on a real machine (14 OK, 0 WARN, 0 FAIL).
+- `.github/workflows/auto-pr.yml`: bot-side workflow that opens a draft PR
+  into `main` on a push to a `stage/`, `chore/`, `fix/`, or `docs/` branch,
+  guarded against no-op reruns and branches with no commits ahead of `main`
+  (Stage 7, BPE-21).
+- `.claude/skills/stage-branch/SKILL.md`: branch-naming convention and
+  create-and-push procedure for starting new work (Stage 7, BPE-22).
+
+### Changed
+
+- `.github/workflows/ci.yml`: `push`/`pull_request` triggers now filtered
+  to `main` and the four working-branch prefixes, so a future release tag
+  push no longer also matches this workflow's `push` trigger (Stage 7,
+  BPE-20).
+
+### Fixed
+
+- `vcpkg.json`: `builtin-baseline` was a newer vcpkg registry commit than
+  the pinned vcpkg tool (`VCPKG_PINNED_TAG` in `ci.yml` /
+  `$VcpkgPinnedTag` in `scripts/setup-dev-env.ps1`), so `vcpkg install`
+  resolved baseline versions (curl 8.22.0, gtest 1.18.0) that don't exist
+  in the older, checked-out version database, failing both triplets with
+  "no version database entry for curl/gtest at X.Y.Z" (BPE-25).
+  `builtin-baseline` is now pinned to
+  `9e593bb18ea69cc5095e012465dcd675a822ed0d`, the exact commit
+  `VCPKG_PINNED_TAG`'s tag (`2026.07.29`) dereferences to, and the
+  now-redundant `curl` version override was removed. This downgrades the
+  DLL's linked dependencies to libcurl 8.21.0#1 and (test-only) GoogleTest
+  1.17.0#3. A drift guard (CI step + `Assert-VcpkgBaselinePin` in
+  `scripts/setup-dev-env.ps1`) now fails loudly if these two pins ever
+  diverge again instead of only being documented.
+- `.github/workflows/ci.yml`: the vcpkg tool checkout step cloned
+  unconditionally into `VCPKG_ROOT`, which `ilammy/msvc-dev-cmd@v1` had
+  silently repointed at the VS-bundled vcpkg checkout already present on
+  `windows-latest` runners (`<VS install>\VC\vcpkg`), so the clone failed
+  with "already exists and is not an empty directory" on the workflow's
+  first real run. `VCPKG_ROOT` is now explicitly re-pinned to a CI-only
+  path under `$RUNNER_TEMP` immediately after the MSVC activation step,
+  leaving the pinned-tag clone/checkout/bootstrap sequence itself
+  unchanged.

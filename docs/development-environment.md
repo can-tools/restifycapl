@@ -42,7 +42,9 @@ The script installs `curl:$Triplet` with no explicit feature list. It
 deliberately does not request `curl[schannel]:$Triplet`.
 
 The current vcpkg `curl` port (checked against port version curl
-8.22.0-1) has no feature named `schannel` — running
+8.21.0#1, the version this project's `builtin-baseline` resolves to as of
+BPE-25 -- see "Pinning the vcpkg tool itself" below) has no feature named
+`schannel` — running
 `vcpkg install curl[schannel]:...` fails outright with "curl has no
 feature named schannel." SChannel is wired in automatically instead:
 curl's default features include `ssl`, and on Windows (non-UWP),
@@ -220,7 +222,10 @@ product-linked `lib/x64/`, alongside the intended `libcurl.lib`/`zs.lib`.
 Confirmed by reading `Copy-TripletLibs`'s previous implementation: it
 copied everything matching `*.lib` in the triplet's `lib/` directory with
 no name filter, and under manifest mode curl, zlib, gtest and gmock (gtest
-pulls in gmock as of the `1.18.0` port resolved here) all land together in
+pulls in gmock as part of the same googletest source tree -- true of the
+`1.18.0` port resolved at the time of this incident, and equally true of
+the `1.17.0#3` port this project's `builtin-baseline` resolves to as of
+BPE-25, see "Pinning the vcpkg tool itself" below) all land together in
 one shared `<triplet>/lib/` -- unlike classic mode, where each `vcpkg
 install <port>:<triplet>` call touched a narrower set.
 
@@ -321,6 +326,38 @@ not `FAIL`: the pin is a defence-in-depth measure, not something that
 should block an otherwise-working provisioning run over a transient
 network hiccup. The existing, already-resolvable `vcpkg.exe` (if any) is
 still used in that case.
+
+**The invariant BPE-25 revealed: the two pins must name the same commit.**
+`builtin-baseline` and `$VcpkgPinnedTag` were treated as independent for
+too long -- `builtin-baseline` was originally recorded from an unpinned
+clone's moving `HEAD` (commit `386d7c478221b7ee0c97bfe6ea61dcf65121d564`),
+before this tag pin existed, and the two were never reconciled after the
+tag pin was added. The result: `builtin-baseline` pointed at a *newer*
+registry commit than `$VcpkgPinnedTag`'s checkout, so `vcpkg install`
+resolved baseline versions (curl 8.22.0, gtest 1.18.0) that don't exist in
+the older, checked-out version database at all -- "no version database
+entry for curl at 8.22.0" / "... gtest at 1.18.0". `vcpkg.json` also
+carried an explicit `curl` version override pinning 8.22.0, which looked
+like the likely cause at first -- but `gtest` failed identically with no
+override at all, which is what proved the override was a red herring: the
+newer version was coming from the baseline commit itself, not from the
+override, so removing only the override would not have fixed the gtest
+failure. **`builtin-baseline`
+must be the exact commit the pinned `VCPKG_PINNED_TAG` dereferences to --
+the two pins are two independent axes that must still name the same
+point, or version resolution breaks in exactly this way.** The fix:
+`builtin-baseline` is now `9e593bb18ea69cc5095e012465dcd675a822ed0d` --
+re-derived and confirmed (`git ls-remote --tags
+https://github.com/microsoft/vcpkg.git 2026.07.29`) to be exactly the
+commit `2026.07.29` (the existing `$VcpkgPinnedTag`) dereferences to, not
+a new tag chosen to chase newer dependency versions. This downgrades the
+resolved versions to curl 8.21.0#1 and gtest 1.17.0#3 (both confirmed
+present in the version database at that same commit) -- a deliberate,
+accepted tradeoff, not a bug to "fix" by bumping `VCPKG_PINNED_TAG`
+forward instead. Both CI (`.github/workflows/ci.yml`) and this script
+(`Assert-VcpkgBaselinePin`, called right after the tool pin is applied)
+now assert this invariant structurally and fail loudly if it ever
+diverges again, rather than relying on this paragraph alone.
 
 ## Human approval gate
 
