@@ -1,60 +1,19 @@
-// ==============================================================================
 // exports.cpp -- restifycapl (CAPL REST DLL)
 //
-// This is the ONLY file in this project that includes the Vector CAPL DLL
-// SDK headers or otherwise knows anything about CANoe/CAPL. Every other
-// file under src/ (core, http, registry, mapping) must stay ignorant of
-// this layer -- see CLAUDE.md and the capl-export-contract skill.
-//
-// Stage 5 ("Hello DLL", the hard gate): exactly one trivial, self-contained
-// operation, purely to prove the CAPL ABI end to end before any REST/HTTP/
-// JSON logic exists. No business logic beyond a caller-buffer-safe string
-// copy lives here.
-// ==============================================================================
+// The ONLY file in this project that includes the CAPL DLL SDK headers or
+// knows about CANoe/CAPL -- see CLAUDE.md and capl-export-contract.
 
-// ==============================================================================
-// CAPL-visible naming convention -- DECIDED HERE, PERMANENTLY (Stage 5)
-// ==============================================================================
-//
-// Every operation this project will ever expose to CAPL is named:
+// CAPL-visible naming convention -- DECIDED HERE, PERMANENTLY (Stage 5):
 //
 //     restify<VerbNoun>          e.g. restifyGetVersion
 //
-// i.e. a lowercase project prefix ("restify", taken from the project name
-// restifycapl -- "capl" is dropped from the prefix itself, since the name
-// is only ever read *inside* a CAPL script, where that suffix would be
-// redundant) immediately followed by an UpperCamelCase verb-noun phrase,
-// giving an overall lowerCamelCase symbol.
-//
-// Why this convention, and not something else -- decided deliberately
-// because the never-rename rule (capl-export-contract) makes it a one-way
-// door: once a later stage ships an operation under this convention,
-// changing it is a major-version break, not a refactor.
-//
-// 1. CAPL itself, and every Vector-shipped CAPL library function visible
-//    from the SDK headers and from CANoe's own built-in function library
-//    (sysGetVariableInt, diagGetLastResponseCode, dbGetSignalValue, ...),
-//    uses lowerCamelCase, usually further prefixed by the owning subsystem
-//    ("sys", "diag", "db"). Matching that convention makes restifycapl's
-//    operations read as idiomatic CAPL, not as a foreign C library bolted
-//    on to the language.
-//
-// 2. cdll.h's own illustrative sample entry uses a bare "HelloWorld", with
-//    no prefix at all. That is acceptable for a single-purpose sample DLL
-//    nobody expects to load next to another CAPL DLL, but it is unsafe for
-//    a general-purpose library: the CAPL_DLL_INFO table has no
-//    namespacing -- every name any loaded CAPL DLL exports lives in one
-//    flat, script-global name space. A CAPL script that has restifycapl
-//    loaded alongside some other vendor's DLL which also happens to export
-//    a generic name like "getVersion" would get an ambiguous or silently
-//    wrong binding. A project-specific prefix is the only collision
-//    defence available at this layer, so it is applied starting from this,
-//    the very first entry.
-//
-// 3. Deciding it now, on the project's first-ever export, is the entire
-//    point of Stage 5 being a hard gate: every operation from Stage 9
-//    onward inherits this convention and can never rename it.
-// ==============================================================================
+// lowercase "restify" prefix + UpperCamelCase verb-noun, giving an overall
+// lowerCamelCase symbol matching idiomatic CAPL (sysGetVariableInt,
+// dbGetSignalValue, ...). This is a one-way door: the never-rename rule
+// (capl-export-contract) means changing it later is a major-version break,
+// not a refactor. The CAPL_DLL_INFO table has no namespacing -- every
+// loaded CAPL DLL's exports share one flat, script-global name space -- so
+// this prefix is the only collision defence available at this layer.
 
 #include "cdll.h"  // Vector CAPL DLL SDK -- include/vendor/capl-dll-sdk/
 
@@ -65,57 +24,17 @@
 #include <vector>
 
 #pragma comment(lib, "version.lib")
-// version.lib provides GetFileVersionInfoSize/GetFileVersionInfo/
-// VerQueryValue (declared in <winver.h>), used below to read this DLL's own
-// embedded VERSIONINFO resource (src/module/version.rc, produced by the
-// Makefile from the Git tag / commit count -- see msvc-build-conventions)
-// at runtime. This is a standard Windows import library that ships with
-// the OS/SDK -- the same class of thing as the seven system libs already
-// listed in the Makefile's SYSLIBS, not a third-party or /MT concern.
-// Linked here via #pragma comment rather than by editing the Makefile, per
-// this stage's explicit instruction not to touch build files;
-// build-pipeline-engineer may still want to add it to SYSLIBS for
-// visibility even though this pragma alone is sufficient for the link to
-// succeed.
+// Needed for the VerQueryValue* calls below; see the Makefile's SYSLIBS comment.
 
 namespace {
 
-// ------------------------------------------------------------------------
-// CopyOwnVersionString -- the one piece of non-trivial logic in this file,
-// kept as a plain, separate function rather than written inline inside the
-// exported CAPL wrapper below (see cpp-implementer's "thin glue" rule).
-//
-// It cannot be reached by the GoogleTest suite: src/module is deliberately
-// excluded from `make test` (see the Makefile and cpp-testing-conventions),
-// because this function's logic is inseparable from the Windows
-// resource/module APIs it wraps and from this DLL's own embedded resource
-// -- not because it was left untested by oversight. Verifying it is
-// exactly HUM-13's job: load this DLL into real CANoe and call the
-// operation from a .can script.
-//
-// Reads this DLL's own embedded FileVersion string -- the same
-// `git describe --tags --always --dirty` value the Makefile bakes into
-// version.rc's VER_STRING at build time (see msvc-build-conventions) -- and
-// copies it into the caller-supplied buffer. No version number is
-// hand-typed anywhere in this file; the value always comes from the
-// resource the existing versioning mechanism already produces.
-//
-// Never returns a raw pointer to the version text (the first post-mortem
-// rule from capl-export-contract / CLAUDE.md's standing constraints) -- the
-// string only ever travels through a caller-owned buffer with an explicit
-// size.
+// Not unit-tested: CAPL/Win32 module glue, excluded per cpp-testing-conventions.
 //
 // Returns:
 //    0  success -- buffer holds the null-terminated version string.
 //   -1  invalid arguments (null buffer or zero size).
-//   -2  the version string does not fit in the supplied buffer. The buffer
-//       is left empty (not truncated) -- callers must never observe a
-//       partial version string.
-//   -3  the embedded version resource could not be read. Should not happen
-//       in a DLL produced by this project's own Makefile, but a
-//       resource-stripped or otherwise malformed binary could in principle
-//       hit this path, so it is handled rather than assumed away.
-// ------------------------------------------------------------------------
+//   -2  version string does not fit; buffer is left empty, never truncated.
+//   -3  embedded version resource could not be read.
 long CopyOwnVersionString(char* buffer, unsigned long bufferSize) {
   if (buffer == nullptr || bufferSize == 0) {
     return -1;
