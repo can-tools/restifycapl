@@ -50,6 +50,11 @@ scripts/                 setup-dev-env.ps1 — environment bootstrap only,
 
 No version number is ever hand-edited in any file. The mechanism:
 
+`vcpkg.json`'s `"version-string": "0.0.0"` is manifest boilerplate required by
+vcpkg's own package format, not a version source — it feeds nothing here (not
+`version.rc`, not the Makefile's `VER_*`, not `/VERSION:`); the product
+version is derived solely from the Git tag below.
+
 **Release builds (GitHub Actions, triggered by pushing a tag).**
 The tag format is `vX.Y.Z` (e.g. `v2.5.0`) — this is the dominant
 convention across the Git/GitHub ecosystem, not specific to C++. The
