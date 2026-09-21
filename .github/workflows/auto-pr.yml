@@ -28,11 +28,14 @@ jobs:
     steps:
       # `gh pr create` fails outright ("No commits between main and
       # <branch>") on a harmless just-cut branch, so skip creation instead.
+      # The full response is persisted so the body-composition step below
+      # can reuse it without a second API call (plan.md §7.5).
       - name: "Guard 1: branch ahead of main?"
         id: ahead
         run: |
           set -euo pipefail
-          ahead_by=$(gh api "repos/${GH_REPO}/compare/main...${BRANCH}" --jq '.ahead_by')
+          gh api "repos/${GH_REPO}/compare/main...${BRANCH}" > "$RUNNER_TEMP/compare.json"
+          ahead_by=$(jq -r '.ahead_by' "$RUNNER_TEMP/compare.json")
           echo "Branch '${BRANCH}' is ahead of main by ${ahead_by} commit(s)."
           if [ "${ahead_by}" -eq 0 ]; then
             echo "No commits ahead of main -- nothing to open a PR for. Exiting."
@@ -57,25 +60,98 @@ jobs:
             echo "proceed=true" >> "$GITHUB_OUTPUT"
           fi
 
+      # EDITING TRAP: filenames and commit subjects below come from the
+      # GitHub API and are attacker-influenced free text. Never splice them
+      # into a run: script through ${{ }} -- that substitutes raw text into
+      # the shell script before bash sees it, so backticks/$()/quotes in a
+      # commit subject could corrupt the body or execute arbitrary shell.
+      # Everything here stays inside jq (reading the persisted file) or is
+      # passed to printf as a %s argument, never as a format string itself.
+      - name: Compose PR body
+        if: steps.ahead.outputs.proceed == 'true' && steps.existing.outputs.proceed == 'true'
+        run: |
+          set -euo pipefail
+          compare_file="$RUNNER_TEMP/compare.json"
+          body_file="$RUNNER_TEMP/pr-body.md"
+
+          # Exactly two classes -- do not extend this into a per-prefix
+          # decision matrix mirroring §7.8; see plan.md §7.5.
+          plan_only=$(jq -r '
+            (.files // []) as $f
+            | ($f | length > 0) and
+              ($f | all(.filename | test("^docs/work/[^/]+/plans/.*\\.md$")))
+          ' "$compare_file")
+          exports_touched=$(jq -r '(.files // []) | any(.filename == "src/module/exports.cpp")' "$compare_file")
+          jq -r '.commits[].commit.message | split("\n")[0]' "$compare_file" > "$RUNNER_TEMP/subjects.txt"
+
+          # Only stage/ and chore/ branch names carry a structural stage
+          # number or task ID; fix/** and docs/** keep the original line
+          # (see plan.md §7.5 -- mapping those to a stage is human judgement).
+          case "${BRANCH}" in
+            stage/*)
+              stage_num=$(printf '%s' "${BRANCH}" | sed -E 's#^stage/([0-9]+(-[0-9]+)?)-.*#\1#')
+              todo_line="Stage ${stage_num} -- TODO: task IDs (e.g. CPP/TEST/REV/HUM)"
+              ;;
+            chore/*)
+              task_id=$(printf '%s' "${BRANCH}" | sed -E 's#^chore/([a-z]+-[0-9]+)-.*#\1#' | tr '[:lower:]' '[:upper:]')
+              todo_line="${task_id} -- TODO: any additional REV/HUM IDs"
+              ;;
+            *)
+              todo_line="TODO: stage and task IDs"
+              ;;
+          esac
+
+          # Composed once, at PR creation, from this push's diff -- a later
+          # push that grows src/ changes or adds exports.cpp does not update
+          # this body (accepted limitation, see plan.md §7.5).
+          {
+            echo '## Merge checklist'
+            echo
+            if [ "${plan_only}" = "true" ]; then
+              echo 'Plan-only branch: per plan.md §7.8, criteria 2 (`code-reviewer`), 3 (human'
+              echo 'gate) and 4 (CHANGELOG) do not apply -- see the guardrail in §7.10.'
+              echo 'Criteria 1 (CI green) and 5 (up to date with `main`) still apply.'
+              echo
+            fi
+            echo '- [ ] CI green on both legs (`build + test (x86)`, `build + test (x64)`)'
+            echo '- [ ] `code-reviewer` clean on this branch (`git diff main...HEAD`), zero Must-fix'
+            echo '- [ ] Human gate passed against the PR CI artifact, if this branch has one'
+            echo '- [ ] `CHANGELOG.md` `[Unreleased]` entry present'
+            echo '- [ ] Branch up to date with `main`'
+            echo '- [ ] Plan folded into `plan.md`, incl. any renumbering (§7.8 criterion 6)'
+            echo
+            echo "${todo_line}"
+
+            if [ "${exports_touched}" = "true" ]; then
+              echo
+              echo '---'
+              echo
+              echo '⚠️ This branch touches `src/module/exports.cpp`. Per plan.md §7.10: never'
+              echo 'have two open PRs that both touch this file, and verify the human gate'
+              echo 'against the CI artifact from this PR before merge.'
+            fi
+
+            if [ -s "$RUNNER_TEMP/subjects.txt" ]; then
+              echo
+              echo '---'
+              echo
+              echo '### Commits on this branch'
+              echo
+              while IFS= read -r subject; do
+                printf -- '- %s\n' "${subject}"
+              done < "$RUNNER_TEMP/subjects.txt"
+            fi
+          } > "$body_file"
+
       # No `|| true` past both guards -- a failure here is real (most
       # likely HUM-20's repo setting being off) and must be visibly red.
       - name: Create draft PR
         if: steps.ahead.outputs.proceed == 'true' && steps.existing.outputs.proceed == 'true'
         run: |
           set -euo pipefail
-          body=$(printf '%s\n' \
-            '## Merge checklist' \
-            '' \
-            '- [ ] CI green on both legs (`build + test (x86)`, `build + test (x64)`)' \
-            '- [ ] `code-reviewer` clean on this branch (`git diff main...HEAD`), zero Must-fix' \
-            '- [ ] Human gate passed against the PR CI artifact, if this branch has one' \
-            '- [ ] `CHANGELOG.md` `[Unreleased]` entry present' \
-            '- [ ] Branch up to date with `main`' \
-            '' \
-            'TODO: stage and task IDs')
           gh pr create \
             --draft \
             --base main \
             --head "${BRANCH}" \
             --title "${BRANCH}" \
-            --body "${body}"
+            --body-file "$RUNNER_TEMP/pr-body.md"

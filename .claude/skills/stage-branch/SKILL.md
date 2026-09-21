@@ -54,24 +54,41 @@ create` manually as part of this procedure.
 
 ## Why the naming convention is load-bearing, not cosmetic
 
-The same four prefixes are hardcoded in three separate places, and they must
+The same four prefixes are hardcoded in four separate places, and they must
 stay in sync:
 
 1. `.github/workflows/auto-pr.yml`'s `push.branches` trigger filter.
 2. `.claude/settings.json`'s permission allowlist (`git switch -c`/`git push`
    entries).
-3. `.github/workflows/ci.yml`'s `push.branches` filter (BPE-20, once taken —
-   see `msvc-build-conventions`).
+3. `.github/workflows/ci.yml`'s `push.branches` filter (BPE-20 — see
+   `msvc-build-conventions`).
+4. `auto-pr.yml`'s PR base, which is always `main` regardless of prefix
+   (BPE-27) — see below.
 
 A branch named outside this convention gets no automatic PR and a
 permission prompt on push, silently. Deliberately loud when it happens, but
 know it in advance rather than discovering it mid-task.
 
+**The bot's PR base is always `main`, never a stacked parent (BPE-27, plan.md
+§7.2/§7.13's Defect 2).** `auto-pr.yml` hardcodes `--base main`; it cannot
+infer stacking intent from a push alone. If an interim clean diff against a
+stacked parent is wanted, a human retargets that PR's base by hand in the
+GitHub UI. **Doing so silently costs the PR its `pull_request` CI runs** —
+`ci.yml` filters that trigger to `branches: [main]`, so a PR based on
+anything else stops getting them. `push` runs on the branch's own prefix
+continue regardless, so required checks still report; only the doubled
+`pull_request` run is lost. A squash-merged parent (`chore/*`, `fix/*`,
+`docs/*`) needs the human-only rebase recipe in plan.md §7.13's "rebase
+exception" instead of a retarget — see there, not re-derived here.
+
 ## Guardrails
 
 - **Refresh long-lived branches by merging `main` in, never by rebasing.**
   Rebasing rewrites SHAs and severs the link between a commit
-  `code-reviewer` already approved and the one that ends up merged.
+  `code-reviewer` already approved and the one that ends up merged. **One
+  narrow, human-only exception** — a branch stacked on a squash-merged
+  parent — is documented in plan.md §7.13's "rebase exception"; it does not
+  apply to agents or to ordinary refreshes.
 - **Never have two open PRs that both touch `src/module/exports.cpp`.**
   Export-table stages (10–13) are strictly serialized — see plan.md 7.9/7.10
   for why a stale branch reordering the export table on merge is a silent,
