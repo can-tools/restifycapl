@@ -1,42 +1,7 @@
-# ==============================================================================
-# auto-pr.yml -- bot-side draft PR opener for restifycapl (CAPL REST DLL)
-#
-# Stage 7 (BPE-21) of docs/work/capl-rest-dll-rebuild/plans/plan.md, section
-# 7.5. Read that section for the full design rationale; this file implements
-# its requirements contract, it does not restate it.
-#
-# What this does, in one sentence: on a push to a working-branch prefix, if
-# the branch is ahead of main and has no open PR yet, open a draft PR into
-# main with a fixed checklist-scaffold body.
-#
-# Deliberate choices, not defaults:
-#   - ubuntu-latest, not windows-latest. This job builds nothing; it only
-#     calls `gh`, which is preinstalled on every GitHub-hosted runner
-#     (including Windows), so ubuntu is strictly faster with no downside.
-#   - No actions/checkout. `GH_REPO` gives `gh` its repo context, and both
-#     guards below query the GitHub API rather than inspecting a working
-#     tree, so no checkout is needed at all.
-#   - Auth is the default GITHUB_TOKEN (Option A, plan.md 7.5) -- not a PAT
-#     or GitHub App. This means events this workflow itself creates do NOT
-#     retrigger other workflows (GitHub's recursion guard), which is fine
-#     here: ci.yml already fires from the developer's own push, independent
-#     of whether this bot succeeds (plan.md 7.6).
-#   - Draft PRs, unconditionally. See plan.md 7.5 -- this is now a fixed
-#     global policy, not a per-branch judgement call.
-#   - No hand-written `git`/checkout logic and no marketplace PR-creator
-#     action -- see plan.md 7.5's "why a hand-written script" note. The
-#     ahead-by guard below is the reason a generic action wasn't reused.
-#   - No `|| true` anywhere past the two guards. Once both guards pass, any
-#     remaining failure (e.g. the "Allow GitHub Actions to create and
-#     approve pull requests" repo setting being off) is genuine and must
-#     surface as a red run -- do not paper over it.
-#
-# Required repo setting for this workflow to work at all (HUM-20):
-#   Settings -> Actions -> General -> "Allow GitHub Actions to create and
-#   approve pull requests" -> ON. Without it, `gh pr create` fails with
-#   "GitHub Actions is not permitted to create or approve pull requests."
-#   Workflow permissions must also not be repo-default read-only.
-# ==============================================================================
+# auto-pr.yml -- bot-side draft PR opener for restifycapl (CAPL REST DLL).
+# Implements the requirements contract in plan.md §7.5; see that section
+# for design rationale, and HUM-20 for the required repo setting
+# ("Allow GitHub Actions to create and approve pull requests" -> ON).
 
 name: Auto PR
 
@@ -61,12 +26,8 @@ jobs:
       GH_REPO: ${{ github.repository }}
       BRANCH: ${{ github.ref_name }}
     steps:
-      # Guard 1 -- ahead-by check. `gh pr create` fails outright with "No
-      # commits between main and <branch>" if the branch has nothing new
-      # relative to main; that is a harmless situation (e.g. a branch just
-      # cut from an up-to-date main with no commits yet) and must not turn
-      # into a red run. Checked via the compare API, not git, since there is
-      # no checkout in this job.
+      # `gh pr create` fails outright ("No commits between main and
+      # <branch>") on a harmless just-cut branch, so skip creation instead.
       - name: "Guard 1: branch ahead of main?"
         id: ahead
         run: |
@@ -80,9 +41,8 @@ jobs:
             echo "proceed=true" >> "$GITHUB_OUTPUT"
           fi
 
-      # Guard 2 -- idempotency. This workflow fires on every push to a
-      # matching branch, forever; only the first push carrying a commit
-      # should create a PR. Every later push should no-op here.
+      # This workflow fires on every push, forever -- only the first push
+      # carrying a commit should create a PR; later pushes no-op here.
       - name: "Guard 2: PR already open for this branch?"
         id: existing
         if: steps.ahead.outputs.proceed == 'true'
@@ -97,10 +57,8 @@ jobs:
             echo "proceed=true" >> "$GITHUB_OUTPUT"
           fi
 
-      # Past both guards: create the draft PR. No `|| true` here -- a
-      # failure at this point (most likely the "Allow GitHub Actions to
-      # create and approve pull requests" repo setting being off) is a real
-      # problem and must be visibly red.
+      # No `|| true` past both guards -- a failure here is real (most
+      # likely HUM-20's repo setting being off) and must be visibly red.
       - name: Create draft PR
         if: steps.ahead.outputs.proceed == 'true' && steps.existing.outputs.proceed == 'true'
         run: |

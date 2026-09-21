@@ -1,25 +1,7 @@
-# ==============================================================================
-# Makefile -- restifycapl (CAPL REST DLL)
-#
-# Targets: all (default), build-x86, build-x64, test, clean.
-#
-# build-x86 and build-x64 are THIN WRAPPERS over one parameterized rule
-# (`_build`), selected via the ARCH make variable -- see the
-# msvc-build-conventions skill. Never add a second, parallel recipe for the
-# other architecture: any x86/x64-specific value belongs in the per-ARCH
-# variable block below, not in a duplicated recipe. This is a hard project
-# requirement, not a style preference -- it makes x86/x64 flag drift
-# structurally impossible.
-#
-# This Makefile expects an MSVC developer environment matching the
-# architecture being built to already be active on PATH (cl.exe, rc.exe,
-# link.exe resolving to the right target) -- e.g. an "x86 Native Tools
-# Command Prompt" before `make build-x86`, an "x64 Native Tools Command
-# Prompt" before `make build-x64`, or the equivalent CI step (see
-# .github/workflows/ci.yml, Stage 6: "MSVC environment activated ... before
-# invoking Make"). This Makefile deliberately does not call vcvarsall.bat
-# itself -- environment activation is the caller's job, not Make's.
-# ==============================================================================
+# Makefile -- restifycapl (CAPL REST DLL). Targets: all (default),
+# build-x86, build-x64, test, clean -- see msvc-build-conventions.
+# Requires an MSVC dev environment for the target arch already active on
+# PATH (see .github/workflows/ci.yml); never calls vcvarsall.bat itself.
 
 SHELL := cmd.exe
 .SHELLFLAGS := /Q /C
@@ -105,16 +87,9 @@ INCLUDES := /I include /I include/vendor /I include/vendor/capl-dll-sdk
 CXXFLAGS := /nologo /c /std:c++17 /EHsc /MT /W4 $(INCLUDES)
 
 # Windows system libs required transitively by libcurl -- link all of them,
-# always (see msvc-build-conventions, Dependency acquisition). version.lib
-# is required by src/module/exports.cpp (GetFileVersionInfoA/VerQueryValueA,
-# used to read this DLL's own embedded VERSIONINFO resource) -- exports.cpp
-# already pulls it in via `#pragma comment(lib, "version.lib")`, which is
-# sufficient on its own (verified: BPE-8 real link succeeded without this
-# line present). It is listed here too, explicitly, so the product's full
-# external-import-lib set stays visible in one place instead of depending on
-# a reader noticing a pragma buried in a single .cpp file -- same standard
-# Windows SDK import lib class as the other entries in this list, no /MT or
-# third-party concern.
+# always (see msvc-build-conventions). version.lib is also pulled in via
+# exports.cpp's own #pragma comment; listed here too so the product's full
+# external-import-lib set stays visible in one place.
 SYSLIBS := crypt32.lib bcrypt.lib secur32.lib ws2_32.lib normaliz.lib wldap32.lib advapi32.lib version.lib
 LIBS    := libcurl.lib zs.lib $(SYSLIBS)
 
