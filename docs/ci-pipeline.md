@@ -80,3 +80,12 @@ convention.
 groups (not unified to dedupe the two runs on an open PR): unifying them
 would let `cancel-in-progress` cancel a run that a required status check
 still needs to see succeed.
+
+## `ci.yml` never calls `scripts/setup-dev-env.ps1` (found during Stage 6/7, BPE-24)
+
+That script provisions a local development machine: installing MSVC Build
+Tools, `make`, and bootstrapping vcpkg for a box that starts with none of
+them. A GitHub-hosted runner starts from a different baseline, so none of
+that applies — MSVC is already preinstalled and activated via
+`ilammy/msvc-dev-cmd`, and `make`/vcpkg are provisioned directly by
+`ci.yml`'s own steps, CI-native rather than by shelling out to the script.
