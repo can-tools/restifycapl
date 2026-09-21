@@ -141,7 +141,7 @@ No automation path exists for either item — a licensing constraint, not a tech
 
 ### Stage 4 — Repo skeleton, Makefile, versioning, dependency pinning — COMPLETE
 
-**BPE-2 — DONE.** `.gitignore` ignores `*.lib` on purpose, with scoped exclusions for `lib/x86/`, `lib/x64/`, `lib/gtest/` and `include/vendor/gtest/`. Scoping to subdirectories rather than `lib/` keeps `lib/README` tracked.
+**BPE-2 — DONE.** `.gitignore` ignores `*.lib` on purpose, with scoped exclusions for `lib/x86/`, `lib/x64/`, `lib/gtest/` and `include/vendor/gtest/`. `lib/README` was originally left out of these exclusions so it would stay tracked; that decision was later reversed and the file explicitly untracked — see §7.12 (BPE-26).
 
 **BPE-3 — DONE.** Skeleton present.
 
@@ -153,7 +153,7 @@ The `VER_STRING` quoting was contested across two reviews — one reproduction p
 
 **BPE-6 — DONE.** The `lib/README` template inside the script carries the provisioned/uncommitted framing, exact filenames (including an explicit note that `zs.lib` is not the name anyone would guess), the product-linked versus test-only distinction, the `manual-link` split rationale, per-environment `/MT` verification, and "the authoritative pin is `vcpkg.json`". It additionally distinguishes `json.hpp` as committed source rather than a provisioned binary — beyond specification and correct.
 
-Editing the template rather than the generated file was the right call: `lib/README` is script-generated and a hand edit would have silently reverted.
+Editing the template rather than the generated file was the right call: `lib/README` is script-generated and a hand edit would have silently reverted. The file itself is no longer tracked in git (see §7.12, BPE-26); the template's content-generation logic described here is unaffected.
 
 **BPE-7 — DONE.** GoogleTest via vcpkg into `lib/gtest/<arch>/`. The separation is real in the link line, not just in folder naming: the Makefile's `LIBS` contains only `libcurl.lib zs.lib` plus the system libs, while `TEST_LIBS` adds `gtest.lib gtest_main.lib` with a separate `/LIBPATH:$(GTESTDIR)` used solely by the test recipe.
 
@@ -173,7 +173,7 @@ Editing the template rather than the generated file was the right call: `lib/REA
 
 The baseline resolves to a genuine dated commit in the real registry and is an exact `HEAD` match; the `curl` override matches the port file at that baseline. The script runs in manifest mode with per-triplet `--x-install-root`, an allow-listed lib copy, a `Repair-ShallowVcpkgClone` self-heal, and a pinned tool binary. Verified by a real 19/0/0 run on both architectures.
 
-**BPE-16 — Preempt the `version-string` confusion.** Add one line stating that `vcpkg.json`'s `"version-string": "0.0.0"` is manifest boilerplate, not a product version source. Best home is `msvc-build-conventions`' Versioning section — where someone checks "is this a version source?", and which currently says no version is ever hand-edited, making a tracked literal `0.0.0` read as a counterexample. The `lib/README` template is a reasonable second home. Non-blocking.
+**BPE-16 — Preempt the `version-string` confusion.** Add one line stating that `vcpkg.json`'s `"version-string": "0.0.0"` is manifest boilerplate, not a product version source. Best home is `msvc-build-conventions`' Versioning section — where someone checks "is this a version source?", and which currently says no version is ever hand-edited, making a tracked literal `0.0.0` read as a counterexample. The `lib/README` template is not a good second home — it is untracked and local-only (see §7.12, BPE-26), a poor place for a note meant to be read; the skill is the only home now. Non-blocking.
 
 **BPE-17 — Make the lib copy synchronising, and clear the existing residue.**
 
@@ -557,10 +557,29 @@ Two mitigations, both required:
 | **BPE-22** | `.claude/skills/stage-branch/SKILL.md` | `build-pipeline-engineer` | No; blocked on HUM-21 |
 | **BPE-20** | `ci.yml` `branches:` filter | `build-pipeline-engineer` | **Optional/deferred — revisit at Stage 14 for the tag collision** |
 | **REV-13** | Review BPE-21 + BPE-22 together, plus the applied `settings.json` diff | `code-reviewer` | — |
+| **BPE-26** | Untrack `lib/README` from git — see §7.12 | `build-pipeline-engineer` | No |
+| **REV-15** | Review BPE-26 against the §7.12 acceptance checks | `code-reviewer` | — |
 
 **Sequence:** HUM-12 (push, the plan's current next action) → observe first CI run → HUM-20 → HUM-21 → BPE-21 + BPE-22 on `chore/bpe-21-auto-pr` — **the workflow's first exercise of itself, deliberately while the stakes are a YAML file and not an export table** → REV-13 → human merge → Stage 8 on `stage/08-core-pure-logic`.
 
 **Human approval gate: YES.** It touches CI, `.claude/settings.json`, and what gets shipped. Treat the gate as satisfied only once the bot has actually opened a PR and its CI run has been observed green — per §13, written-and-reviewed is not executed.
+
+#### 7.12 `lib/README`: from tracked-on-purpose to untracked (BPE-26)
+
+**The original problem.** BPE-25's implementer had no working MSVC/vcpkg toolchain, so it hand-edited `lib/README`'s version numbers as a stopgap (with an explicit STOPGAP NOTE) after fixing a baseline/tool-pin mismatch in `vcpkg.json`. That hand-edit rode through PR #1 and PR #2 onto `main` untouched by a real run.
+
+**Live-verified evidence (recorded here since the file is about to lose its home).** A real run of `setup-dev-env.ps1` on 2026-09-21 reported **23 OK / 0 WARN / 0 FAIL**, including `Assert-VcpkgBaselinePin` passing for real, and confirmed **libcurl 8.21.0#1** and **GoogleTest 1.17.0#3** — matching what CI had already resolved independently. The regenerated file overwrote the stopgap note, exactly as designed.
+
+**The tracking rationale — retracted, not merely dropped.** BPE-2/BPE-6 originally kept `lib/README` tracked partly so a git diff on it would surface local-vs-committed divergence. That argument does not hold and must not be reinvented:
+- the unconditional `Last refreshed:` timestamp makes the file show as modified on 100% of runs, so the "signal" fires always and carries zero information;
+- it was never actually a comparison against CI — the file has no relationship to CI at all, only to whatever a previous committer's local machine happened to produce;
+- every divergence it could theoretically catch is already caught earlier and louder elsewhere in the script itself: `Assert-VcpkgBaselinePin` FAILs loudly on baseline/tool-pin drift, and a separate check WARNs on an x86/x64 version mismatch.
+
+**Two generator "defects" considered and deliberately not fixed.** The unconditional `Last refreshed:` timestamp, and the `<unknown>` overwrite of stale numbers on a `-SkipVcpkg` run, were only defects because the file was tracked. Untracked, each is arguably correct local behaviour — the timestamp becomes the only answer to "when was this environment last provisioned?", and `<unknown>` is a truthful report of a run that didn't probe. No changes were made to `scripts/setup-dev-env.ps1` as part of BPE-26.
+
+**The decision.** `lib/README` is not needed in the repository. It stays generated locally and on disk, unchanged in content or mechanism; it leaves git's index (`git rm --cached`) and `.gitignore` gains an explicit `lib/README` entry. The one fact from its static prose not already duplicated in `msvc-build-conventions` — zlib's import library being named `zs.lib`, not `zlib.lib` — was added to that skill's zlib bullet so nothing load-bearing is lost.
+
+**A narrow, recorded exception to §7.10.** §7.10 says stage branches should not edit `plan.md`, to keep it from becoming a conflict hotspot. `chore/bpe-26-untrack-lib-readme` edits it anyway, because the stale tracked-on-purpose rationale lives here and must be corrected in the same change that reverses the decision. This is safe only because `docs/plan-v15` — a separate, not-yet-merged plan revision — is deliberately held back to branch off `main` only after this branch merges, so no two branches edit `plan.md` concurrently.
 
 ---
 
@@ -648,11 +667,11 @@ Trigger: hand-assembling JSON in CAPL proves genuinely cumbersome. Dead code las
 | ID | Stage | Task | Status |
 |---|---|---|---|
 | BPE-1 | 2 | `scripts/setup-dev-env.ps1` — local provisioning | **DONE — 19/0/0 both arches** |
-| BPE-2 | 4 | `.gitignore` — excludes provisioned binaries, keeps `lib/README` | **DONE** |
+| BPE-2 | 4 | `.gitignore` — excludes provisioned binaries; `lib/README` later untracked too (§7.12, BPE-26) | **DONE** |
 | BPE-3 | 4 | Directory skeleton | **DONE** |
 | BPE-4 | 4 | `Makefile`, one parameterized rule | **DONE — run with real GNU Make** |
 | BPE-5 | 4 | Git-tag versioning wiring | **DONE — `.res` fields decoded and verified** |
-| BPE-6 | 4 | `lib/README` template — provisioned framing + exact filenames | **DONE** |
+| BPE-6 | 4 | `lib/README` template — provisioned framing + exact filenames (untracked, see §7.12) | **DONE** |
 | BPE-7 | 4 | GoogleTest via vcpkg into `lib/gtest/<arch>/` | **DONE** |
 | BPE-15 | 4 | `vcpkg.json` manifest, per-triplet install roots, lib allow-list, tool pin | **DONE — EXECUTION-VERIFIED** |
 | BPE-16 | 4 | One-line note that `vcpkg.json`'s `version-string` is not a version source | **Non-blocking** |
