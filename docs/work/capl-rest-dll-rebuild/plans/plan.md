@@ -353,7 +353,9 @@ Steps 1 and 4 are the human/agent boundary; steps 2 and 3 are entirely GitHub-si
 - **Stages 10–13 get one branch each, strictly serialized.** Each appends to `CAPL_DLL_INFO_LIST4` and each has its own CANoe gate. See 7.9 for why parallel export-table branches are the sharpest hazard in this strategy.
 - **Non-stage follow-ups (BPE-16/17/18/19, doc fixes, CI fixes) get their own small branches** and do not wait on a stage.
 
-**Stacking.** When a stage is blocked on its predecessor's *unmerged* code — e.g. Stage 11's async work needs Stage 10's exports in spirit while HUM-14 is still pending in CANoe — branch Stage 11 **off Stage 10's branch**, not off `main`, and target its PR at Stage 10's branch. GitHub retargets the child PR at `main` automatically when the parent lands. Do not cherry-pick between stage branches: it duplicates commits and breaks the "this exact reviewed SHA is what merged" property.
+**Stacking.** When a stage is blocked on its predecessor's *unmerged* code — e.g. Stage 11's async work needs Stage 10's exports in spirit while HUM-14 is still pending in CANoe — branch Stage 11 **off Stage 10's branch**, not off `main`. Do not cherry-pick between stage branches: it duplicates commits and breaks the "this exact reviewed SHA is what merged" property.
+
+**The bot always opens its PR against `main` — it cannot open against a stacked parent (BPE-27, §7.13's Defect 2).** `auto-pr.yml` hardcodes `--base main`; it has no way to infer stacking intent from a push alone. If an interim clean diff against the stacked parent is wanted, a human retargets that PR's base by hand in the GitHub UI. Once the parent's branch is deleted post-merge, GitHub retargets any PR still based on it to `main` automatically — but this only helps for a merge-commit parent (`stage/*`, §7.8); a **squash-merged** parent (`chore/*`, `fix/*`, `docs/*`) needs the human-only rebase recipe in §7.13's "rebase exception" instead, since squashing never makes the parent's original commits ancestors of `main`. Not re-derived here — see §7.13.
 
 **Refresh, don't rebase.** Long-lived branches (a CANoe gate can take days) stay current by **merging `main` into the branch**, never by rebasing. Rebasing rewrites SHAs, destroying the claim "`code-reviewer` passed *this* commit" — a claim this project leans on heavily (REV-3, REV-4).
 
@@ -437,7 +439,7 @@ Keep and extend `deny`:
 - **Auth:** the default `GITHUB_TOKEN`, per the Option A decision above.
 - **Guard 1 — ahead-by check.** If the branch has no commits ahead of `main`, log and exit 0. `gh pr create` would otherwise fail with "No commits between main and <branch>", turning a harmless situation into a red run. Determine this via the GitHub API rather than git, so no checkout is needed.
 - **Guard 2 — idempotency.** If an open PR already exists for the branch (`gh pr list --head`), log and exit 0. This workflow fires on every push, forever; only the first one should create anything.
-- **Action:** `gh pr create --draft --base main`, title derived from the branch name, body set to the fixed checklist scaffold described below.
+- **Action:** `gh pr create --draft --base main`, title derived from the branch name, body built from the checklist scaffold described below.
 - **No `|| true` anywhere.** Past both guards, any failure is a genuine one and must surface as a red run.
 
 **Design notes, each one a trap avoided:**
@@ -447,7 +449,14 @@ Keep and extend `deny`:
 - **Explicit `permissions:` block.** Default `GITHUB_TOKEN` permissions may be repo-default read-only, in which case `gh pr create` fails without it.
 - **Two guards, then create — and no `|| true` anywhere.** After both guards, the only remaining failure is a genuine one. A red run here should mean something is actually wrong, almost certainly the repo setting below.
 - **Draft PRs, by decision.** Drafts still run `pull_request` workflows, and under Option A CI arrives from the push trigger anyway, so draft state is doubly irrelevant to whether tests run. What it buys is an accurate signal: the bot opens the PR at the *first commit*, which is by definition unfinished. The one cost is clicking "Ready for review" before merging — and since the merge is deliberately manual, that click is a free explicit "I consider this done" moment rather than friction. Note this is now a fixed global policy baked into the YAML, not a per-branch judgement call.
-- **The bot creates a scaffold, not a finished PR body.** It cannot infer plan semantics. The body is a fixed checklist — CI green both legs / `code-reviewer` clean / human gate / CHANGELOG entry / branch up to date — plus a `TODO: stage and task IDs` line the human or implementing agent fills in, so the PR ends up self-describing ("Stage 10 — CPP-6, REV-5, HUM-14") without anyone reading this plan.
+- **The bot creates a scaffold, not a finished PR body (BPE-27 revises the boundary — §7.13's Defect 2).** It still cannot infer plan semantics — no amount of API data lets it know which REV/HUM IDs gate a `fix/`- or `docs/`-branch, and that stays a human/agent judgement call, filled into the surviving `TODO: stage and task IDs` line. What the bot *can* derive mechanically, from the compare-API response it already fetches for Guard 1, it now does:
+  - **Classification: `plan-only` or not.** `plan-only` means every changed file matches a plan-doc path under `docs/work/` (`docs/work/*/plans/plan.md` and similar); anything touching `src/`, `Makefile`, or `.github/workflows/` is not. Exactly two classes — deliberately not a per-prefix decision matrix mirroring §7.8.
+  - **For a `plan-only` branch, a pointer to §7.8/§7.10, not a restatement of them** — the checklist notes that criteria 2 (`code-reviewer`), 3 (human gate) and 4 (CHANGELOG) do not apply per §7.10's guardrail, and that criteria 1 (CI green) and 5 (up to date with `main`) still do. **Pointer, not restatement, is the rule here too, not just an implementation detail:** if §7.10 changes later, a stale pointer is harmless, a paraphrase baked into the YAML is a workflow file confidently asserting a rule the plan no longer contains.
+  - **A pre-seeded `TODO: stage and task IDs` line, from `$BRANCH` alone.** `stage/<nn>-<slug>` becomes `Stage <nn> — TODO: task IDs (e.g. CPP/TEST/REV/HUM)`; `chore/<task-id>-<slug>` becomes `<TASK-ID> — TODO: any additional REV/HUM IDs`; `fix/**` and non-`plan-only` `docs/**` keep the original unseeded line, since mapping those to a stage is genuine semantic judgement.
+  - **The branch's own commit subjects**, quoted verbatim from the same compare-API response — free provenance, not inference.
+  - **An export-table safety warning** when `.files[].filename` includes `src/module/exports.cpp`, pointing at §7.10's never-two-open-PRs rule and the human-gate-against-this-PR's-own-artifact rule — the highest-value single line in the body, landing at the exact moment someone is about to click merge.
+  - **A "plan fold-in done" checklist line**, so §7.8 criterion 6 appears in the PR body itself rather than depending on memory.
+  - **Known limitation, accepted rather than solved:** the body is composed once, at PR creation, from that first push's diff. A branch that starts `plan-only` and later grows `src/` changes keeps a stale `plan-only` block; a branch that adds `exports.cpp` on a later push gets no retroactive warning. Guard 2 already no-ops on repeat pushes by design, and the bot does not edit an existing PR body — extending it to do so is out of scope here.
 - **A run fires on every push forever**, no-oping via guard 2 after the first. Seconds on ubuntu, free; not worth suppressing.
 - **No recursion risk.** The workflow pushes nothing, and `main` is not in the branch filter.
 
@@ -596,7 +605,7 @@ Four conditions:
 
 **Unchanged.** No agent pushes to `main`. This document still reaches `main` only through a PR under §7.8's criteria. **The "no admin bypass" branch-protection backstop this paragraph used to also claim is not currently in place — see §7.14; HUM-23 is the fix.** Until then, §7.8's criteria are enforced by convention and human review, not mechanically. **This removes a PR cycle, not a gate.**
 
-**Two guardrails.** A fold-in describes work that has not merged yet — write the state that will be true at merge, and **never record a human gate (HUM-13/14/15/16/18) as passed before it has actually passed.** And **`code-reviewer` does not review `plan.md` prose**; it is out of scope for a review whose subject is the export contract, the build, or `/MT`. §7.8 criterion 2 does not apply to a plan-only branch.
+**Two guardrails.** A fold-in describes work that has not merged yet — write the state that will be true at merge, and **never record a human gate (HUM-13/14/15/16/18) as passed before it has actually passed.** And **`code-reviewer` does not review `plan.md` prose**; it is out of scope for a review whose subject is the export contract, the build, or `/MT`. §7.8 criterion 2 does not apply to a plan-only branch. **Nor do criteria 3 and 4.** A plan-only branch touches no `src/module/exports.cpp` and ships nothing to CANoe, so there is no artifact for a human gate to verify against; and a prose-only diff changes nothing user-visible, build-related, or packaged, so it carries no CHANGELOG obligation. Criteria 1 (CI green) and 5 (branch up to date with `main`) still apply regardless.
 
 **This strategy does not retroactively fix anything already on `main`.** If HUM-13 fails, the fix is a `fix/` branch like any other — meaning the first real exercise of this workflow could be an export-contract fix, the highest-stakes possible debut. That is why BPE-21/22 deliberately go first on a `chore/` branch: exercise the workflow where the stakes are a YAML file.
 
@@ -614,19 +623,22 @@ Four conditions:
 | **BPE-20** | `ci.yml` `branches:` filter | `build-pipeline-engineer` | **DONE — taken in PR #1, not deferred** |
 | **BPE-25** | `vcpkg.json` baseline/tool-pin reconciliation + drift guard | `build-pipeline-engineer` | **DONE — see §7.13** |
 | **BPE-26** | Untrack `lib/README` from git — see §7.12 | `build-pipeline-engineer` | **DONE** |
-| **BPE-27** | `auto-pr.yml` base-branch gap + PR-checklist fold-in line + `stage-branch` rebase exception — see §7.13 | `build-pipeline-engineer` | **OPEN — human approval: YES** (touches CI) |
+| **BPE-27** | `auto-pr.yml` base-branch gap + PR-checklist fold-in line + `stage-branch` rebase exception — see §7.13 | `build-pipeline-engineer` | **DONE — see §7.13** |
 | **REV-13** | BPE-21 + BPE-22 + BPE-20 + applied `settings.json` diff | `code-reviewer` | **CLEAN — 0 Must-fix, 0 Should-fix** |
 | **REV-15** | BPE-26 against §7.12's acceptance checks | `code-reviewer` | **CLEAN** |
 | **REV-16** | PR #2 confirmatory review after its rebase | `code-reviewer` | **CLEAN** |
 | **REV-17** | PR #1 full-branch review — BPE-21 + BPE-22 + BPE-20 + `VCPKG_ROOT` fix + BPE-25 | `code-reviewer` | **CLEAN — gated the merge of `2123c80`** |
+| **REV-18** | BPE-27 — `auto-pr.yml` + `stage-branch/SKILL.md` + `CHANGELOG.md`, against `git diff main...HEAD` on `chore/bpe-27-auto-pr-base` | `code-reviewer` | **PENDING — recommended next** |
 
 **Two recorded renumbers.** `BPE-26` was claimed by two different tasks — untracking `lib/README` (merged to `main`, named in commit `91e0561`) and the `auto-pr.yml` base-branch gap. The merged claimant keeps the ID; the other becomes **`BPE-27`**. `REV-15` was likewise double-spent: the PR #1 full-branch review was conducted under that label in-session but never written into this document, so a later session correctly read the slot as free and allocated it to BPE-26's review, which merged. BPE-26 keeps `REV-15`; the PR #1 review is retroactively **`REV-17`**.
 
 **`REV-17` predating `REV-16` is not an anomaly.** REV IDs in this document have never been chronological — `REV-5` through `REV-12` are pre-allocated to Stages 10–17, work that has not started. They are allocation slots, not a timeline.
 
-**Sequence (historical):** HUM-12 → first CI run (red) → `VCPKG_ROOT` fix + BPE-25 → REV-13, REV-17 → PR #1 merged → PR #2 rebased → REV-14, REV-16 → PR #2 merged → BPE-26 + REV-15 merged → v15 → HUM-20 verified (§7.14). **Next:** HUM-23 → BPE-27 → Stage 8 on `stage/08-core-pure-logic`.
+**Sequence (historical):** HUM-12 → first CI run (red) → `VCPKG_ROOT` fix + BPE-25 → REV-13, REV-17 → PR #1 merged → PR #2 rebased → REV-14, REV-16 → PR #2 merged → BPE-26 + REV-15 merged → v15 → HUM-20 verified (§7.14) → BPE-27. **Next:** HUM-23 → Stage 8 on `stage/08-core-pure-logic`.
 
 **Human approval gate: SATISFIED.** It touched CI, `.claude/settings.json` and what gets shipped, and the gate's own standard was "only once the bot has actually opened a PR and its CI run has been observed green." Both happened. Per §13, written-and-reviewed is not executed — and this stage is now the project's best evidence for that, in both directions.
+
+**BPE-27's human approval gate: SATISFIED.** It touches CI (`auto-pr.yml`), so §7.8 criterion 2 (`code-reviewer`, still pending — REV-18) and the human-approval-before-proceeding requirement both apply. The approval was given explicitly: the branch's task was started on the user's direct instruction to begin BPE-27, satisfying the gate before any commit landed.
 
 #### 7.12 `lib/README`: from tracked-on-purpose to untracked (BPE-26)
 
@@ -662,6 +674,8 @@ The accepted route was the **downgrade** — curl to 8.21.0#1, gtest to 1.17.0#3
 **Defect 2 — the stacking rule is not implementable by the bot (BPE-27).** §7.2 says a stacked branch should target its PR at its parent, and that GitHub retargets automatically when the parent lands. **`auto-pr.yml` hardcodes `--base main`**, so the bot cannot do the first half, and the second only fires when a PR's *base* branch is deleted — `main` never is. Worse for the general case: because `chore/*` merges are **squash** (§7.8), the parent's commits never become ancestors of `main` under their original SHAs, so a stacked child stays diff-polluted after its parent lands whatever the base says. **§7.2's stacking rule survives contact with merge-commit parents and does not survive contact with squash parents.** That is the durable lesson, and it is the one that will matter when Stage 11 stacks on Stage 10 with the export table at stake instead of a YAML file.
 
 **BPE-27** amends §7.2, `auto-pr.yml` and `.claude/skills/stage-branch/SKILL.md` to state that the bot always opens against `main`, that a human retargets by hand if an interim clean diff is wanted, and that a squash-merged parent requires the rebase recipe below, scoped explicitly to human execution. It also adds a *plan fold-in done* line to the PR-body checklist scaffold, so §7.8 criterion 6 appears in the PR rather than depending on memory. Note while amending that retargeting a PR's base to a non-`main` branch silently costs it its `pull_request` CI runs, since `ci.yml` filters that trigger to `branches: [main]`; `push` runs on `chore/**` continue, so required checks still report.
+
+**Shipped (`chore/bpe-27-auto-pr-base`).** §7.2 and §7.5 record the corrected boundary (prose-only commit); `auto-pr.yml`'s `Compose PR body` step now classifies plan-only vs. not from the compare-API response Guard 1 already persists, pre-seeds the `TODO:` line for `stage/`/`chore/` branches, quotes the branch's commit subjects, and adds the `exports.cpp` safety warning and the *plan fold-in done* checklist line described above; `stage-branch/SKILL.md` gained the fourth load-bearing-convention entry and the CI-loss note. Commit-subject/filename extraction stays inside `jq` reading the persisted file or `printf`'s `%s` argument, never through `${{ }}` — verified against a commit subject containing backticks, `$(...)` and quotes, which round-tripped into the body unexecuted.
 
 **The rebase exception, recorded as precedent.** A stacked branch whose parent squash-merged **may** be rebased — human-only — because merging `main` in is the *more* dangerous option there: both sides present different content for files absent from the merge base, and hand-resolving two YAML files is the exact artifact class §13 keeps burning this project on. The licence is narrow and carries a mechanical proof obligation: **`git diff <pre-rebase-tip> HEAD` must print nothing** before pushing, proving the rebase rewrote SHAs and dropped duplicated commits without altering a single byte. Where the rebased branch touched `src/module/exports.cpp`, a confirmatory review must additionally verify the `CAPL_DLL_INFO_LIST4` rows are byte-identical to `main`'s. **Both are required; neither alone is sufficient.** This was exercised once, on PR #2, with REV-16 as the confirmatory review. `.claude/skills/stage-branch/SKILL.md` otherwise says *never rebase*, and that stands for agents and for ordinary refreshes.
 
@@ -796,7 +810,7 @@ Trigger: hand-assembling JSON in CAPL proves genuinely cumbersome. Dead code las
 | BPE-24 | 6b | `docs/ci-pipeline.md`; trim `ci.yml`, `auto-pr.yml`, `Makefile` headers; disposition list | **DONE** |
 | BPE-25 | 7 | `vcpkg.json` baseline/tool-pin reconciliation + drift guard in both provisioning paths | **DONE — verified by a real run** |
 | BPE-26 | 7 | Untrack `lib/README` from git | **DONE** |
-| BPE-27 | 7 | `auto-pr.yml` base-branch gap; PR-checklist fold-in line; `stage-branch` rebase exception | **OPEN — human approval: YES** |
+| BPE-27 | 7 | `auto-pr.yml` base-branch gap; PR-checklist fold-in line; `stage-branch` rebase exception | **DONE — see §7.13** |
 
 ### `cpp-implementer` — 17 tasks
 
@@ -857,6 +871,7 @@ Trigger: hand-assembling JSON in CAPL proves genuinely cumbersome. Dead code las
 | REV-14 | 6b | Comment discipline — BPE-23 + BPE-24 + CPP-17, incl. rationale-migration Must-fix check | **CLEAN — 2 Must-fix resolved (`cf9e74b`, `25f6033`)** |
 | REV-16 | 7 | PR #2 confirmatory review after its rebase; export-table rows byte-identical | **CLEAN** |
 | REV-17 | 7 | PR #1 full-branch review — BPE-21 + BPE-22 + BPE-20 + `VCPKG_ROOT` fix + BPE-25 | **CLEAN — gated the merge of `2123c80`** |
+| REV-18 | 7 | BPE-27 — `auto-pr.yml` base-branch gap + PR-body auto-fill + `stage-branch` skill amendment | **PENDING — recommended next** |
 
 ### Human — 23 tasks
 
@@ -941,7 +956,7 @@ The RC2237 scare showed the inverse failure: a hand-reconstructed invocation pro
 ## 14. Operational loose ends
 
 1. **HUM-20 verification is done; HUM-23 is the open process item.** HUM-20 confirmed in the GitHub UI on 2026-09-21 that branch protection/ruleset on `main` is absent, "Allow Actions to create PRs" is ON, and auto-delete head branches is OFF (§7.14). HUM-23 applies the missing configuration: the §7.8 ruleset (required checks, bypass-disabled, up-to-date-before-merging, and the rest) plus auto-delete. §7.8's sequencing gotcha has passed — the checks have reported, so they are selectable. **§7.10's guarantee that a fold-in is authored against an up-to-date `main` leans on "require branches to be up to date"; that setting is currently off, so the guarantee is conventional, not mechanical, until HUM-23 lands.** While there, record §7.6's duplicate-check-name observation.
-2. **BPE-27 is open and touches CI** — see §7.13. Human approval required.
+2. **BPE-27 is done** — see §7.13 for what shipped (`auto-pr.yml` base-branch gap, PR-checklist fold-in line, `stage-branch` rebase exception); its CI-touching human approval gate is recorded satisfied in §7.11.
 3. **BPE-16 and BPE-17 remain non-blocking.** BPE-17's `lib/x64/` residue is gitignored and cannot enter a commit.
 4. **BPE-18 needs verifying rather than assuming** — confirm all three CHANGELOG items are present.
 5. **`docs/work/branching-strategy/`** is superseded and reduced to a pointer. **`docs/work/comment-discipline/`** may now be reduced to a pointer — §6b satisfies its §8 exit condition (the `docs/` destinations are listed, and REV-14's rationale-migration check passed).
@@ -958,6 +973,6 @@ The RC2237 scare showed the inverse failure: a hand-reconstructed invocation pro
 
 Stage 8 is unblocked and may begin immediately on `stage/08-core-pure-logic`, independently of HUM-23. But **no export-table append (Stage 10 onward) may proceed until both HUM-13 and HUM-23 have passed** — HUM-13 because appending to a table whose base layout has never been loaded by CANoe would multiply the unknowns in exactly the way Stage 5 exists to prevent; HUM-23 because "require branches up to date before merging" is the mechanical half of the export-table merge-hazard mitigation (§7.10, §7.14) and is currently missing.
 
-BPE-16, BPE-17, BPE-18 and BPE-27 are non-blocking and can happen at any time; BPE-27 needs human approval because it touches CI. HUM-23 is cheap and non-urgent for Stage 8/9 but is a hard blocker before Stage 10.
+BPE-16, BPE-17 and BPE-18 are non-blocking and can happen at any time. HUM-23 is cheap and non-urgent for Stage 8/9 but is a hard blocker before Stage 10.
 
-**Status:** v15. Stages 1, 2 and 4 complete and execution-verified. Stage 5 code complete and building on both architectures; hard gate open on Stage 3. **Stages 6 and 7 executed and closed out** — CI green on both legs, branching and auto-PR live, three units of work merged through the flow. Comment discipline is a loaded rule (§6b). `plan.md` maintenance is the fold-in model (§7.10). **HUM-20 verified: branch protection on `main` is absent (§7.14).** Open: HUM-23 (branch protection — blocker before Stage 10), BPE-27, BPE-16/17/18. Next action: **HUM-23, then Stage 8.**
+**Status:** v15. Stages 1, 2 and 4 complete and execution-verified. Stage 5 code complete and building on both architectures; hard gate open on Stage 3. **Stages 6 and 7 executed and closed out** — CI green on both legs, branching and auto-PR live, three units of work merged through the flow. Comment discipline is a loaded rule (§6b). `plan.md` maintenance is the fold-in model (§7.10). **HUM-20 verified: branch protection on `main` is absent (§7.14).** Open: HUM-23 (branch protection — blocker before Stage 10), BPE-16/17/18. Next action: **HUM-23, then Stage 8.**

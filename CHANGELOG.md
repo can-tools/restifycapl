@@ -31,6 +31,18 @@ hand-invented version numbers.
   to `main` and the four working-branch prefixes, so a future release tag
   push no longer also matches this workflow's `push` trigger (Stage 7,
   BPE-20).
+- `.github/workflows/auto-pr.yml`: the draft-PR body is now derived from
+  the branch's compare-API data instead of a fully static scaffold --
+  plan-only classification with a pointer to `plan.md` §7.8/§7.10, a
+  pre-seeded `TODO: stage and task IDs` line for `stage/`/`chore/`
+  branches, the branch's own commit subjects, and a safety warning when
+  the branch touches `src/module/exports.cpp`. `plan.md` §7.2 now also
+  documents that the bot always opens against `main`, never a stacked
+  parent (BPE-27, `plan.md` §7.13's Defect 2).
+- `.claude/skills/stage-branch/SKILL.md`: records the PR-base behavior
+  above as a fourth load-bearing use of the four branch-prefix
+  conventions, and notes that retargeting a PR's base off `main` costs it
+  its `pull_request` CI runs (BPE-27).
 
 ### Fixed
 
