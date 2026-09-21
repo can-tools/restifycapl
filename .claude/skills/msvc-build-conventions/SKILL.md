@@ -121,7 +121,9 @@ number found anywhere as a bug.
   already gets SChannel with no OpenSSL dependency. Static triplets are
   `/MT` by default — verify with `dumpbin /directives`, expecting
   `/DEFAULTLIB:LIBCMT` and never `MSVCRT`.
-- zlib arrives transitively with libcurl.
+- zlib arrives transitively with libcurl. Its import library is named
+  `zs.lib`, not `zlib.lib` — not guessable from the port name, and it is
+  the name the Makefile's `LIBS` must use.
 - nlohmann/json: `json.hpp` pinned to v3.11.3, taken from the Releases page
   (amalgamated single file) and SHA-256 verified. Not `git clone`.
 - GoogleTest: vcpkg, `gtest:x86-windows-static` and `gtest:x64-windows-static`
@@ -135,6 +137,10 @@ number found anywhere as a bug.
   together under `lib/gtest/<arch>/`.
 - Windows system libs, always link all of them: crypt32, bcrypt, secur32,
   ws2_32, normaliz, wldap32, advapi32.
-- Record exact versions in `lib/README`.
+- `scripts/setup-dev-env.ps1` writes the resolved versions into `lib/README`
+  on every run. That file is local, generated and deliberately untracked
+  (see `.gitignore`) — per-environment output, not a repo document. Never
+  commit it, never hand-edit it, and never treat it as a version source:
+  the authoritative pin is `vcpkg.json`.
 - Toolchain: Visual Studio Build Tools with the `VCTools` workload; the
   full VS IDE is not required.
