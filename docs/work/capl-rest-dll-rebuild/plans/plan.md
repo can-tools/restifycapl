@@ -52,7 +52,7 @@ A developer machine and a CI runner are independent environments. Each provision
 
 **Stage 3 — UNCONFIRMED.** Unchanged, and now the *only* remaining blocker of consequence. It gates HUM-13 and therefore the Stage 5 gate, and nothing else.
 
-**Follow-ups outstanding:** BPE-16 (`version-string` note), BPE-17 (stale `lib/x64/` residue), BPE-27 (`auto-pr.yml` base-branch gap — §7.13). **HUM-23 is done** — the GitHub configuration HUM-20 found absent on 2026-09-21 was applied and verified present via the GitHub REST API on 2026-09-22 (§7.14). **BPE-19 closed** as absorbed by BPE-24 + CPP-17. **BPE-18 — verify before closing:** `CHANGELOG.md` gained entries across PRs #1 and #2; confirm the CI workflow entry, the `version.lib` entry and the 14→19 count correction are all present rather than assuming they are.
+**Follow-ups outstanding:** BPE-27 (`auto-pr.yml` base-branch gap — §7.13). **HUM-23 is done** — the GitHub configuration HUM-20 found absent on 2026-09-21 was applied and verified present via the GitHub REST API on 2026-09-22 (§7.14). **BPE-19 closed** as absorbed by BPE-24 + CPP-17. **BPE-16, BPE-17 and BPE-18 are closed** (`chore/bpe-16-17-18-cleanup`, 2026-09-22): BPE-16 added the one-line `version-string`-is-not-a-source note to `msvc-build-conventions`; BPE-17 deleted the stale `lib/x64/gmock.lib`/`gtest.lib` residue and made `Copy-TripletLibs` synchronising (prunes non-allow-listed `.lib` files from the destination before copying); BPE-18's "believed closed" framing turned out wrong on actual inspection — **all three CHANGELOG items were genuinely missing**, not just unverified: no `Added` entry existed for `ci.yml` itself, no entry existed for the `version.lib`/`SYSLIBS` addition, and the `setup-dev-env.ps1` entry still read the stale "14 OK, 0 WARN, 0 FAIL". All three were added/corrected. The same branch also bumped `actions/checkout`, `actions/cache` and `actions/upload-artifact` in `ci.yml` off the deprecated Node 20 runtime and SHA-pinned `ilammy/msvc-dev-cmd` (BPE-28, §12).
 
 **Next:** **Stage 8 on `stage/08-core-pure-logic`.** HUM-23 (branch protection on `main`, §7.14) landed 2026-09-22 and is no longer a precondition. HUM-12 is **done** — it is what made Stages 6 and 7 real.
 
@@ -802,7 +802,7 @@ Trigger: hand-assembling JSON in CAPL proves genuinely cumbersome. Dead code las
 
 ## 12. Task index by agent
 
-### `build-pipeline-engineer` — 25 tasks
+### `build-pipeline-engineer` — 26 tasks
 
 | ID | Stage | Task | Status |
 |---|---|---|---|
@@ -814,11 +814,11 @@ Trigger: hand-assembling JSON in CAPL proves genuinely cumbersome. Dead code las
 | BPE-6 | 4 | `lib/README` template — provisioned framing + exact filenames (untracked, see §7.12) | **DONE** |
 | BPE-7 | 4 | GoogleTest via vcpkg into `lib/gtest/<arch>/` | **DONE** |
 | BPE-15 | 4 | `vcpkg.json` manifest, per-triplet install roots, lib allow-list, tool pin | **DONE — EXECUTION-VERIFIED** |
-| BPE-16 | 4 | One-line note that `vcpkg.json`'s `version-string` is not a version source | **Non-blocking** |
-| BPE-17 | 4 | Make `Copy-TripletLibs` synchronising; clear stale `lib/x64/` residue | **Non-blocking** |
+| BPE-16 | 4 | One-line note that `vcpkg.json`'s `version-string` is not a version source | **DONE — added to `msvc-build-conventions`'s Versioning section** |
+| BPE-17 | 4 | Make `Copy-TripletLibs` synchronising; clear stale `lib/x64/` residue | **DONE — residue deleted; `Copy-TripletLibs` now prunes non-allow-listed `.lib` files before copying** |
 | BPE-8 | 5 | Link/resource wiring for both DLLs; `dumpbin /exports` | **Both architectures build green in CI; `dumpbin /exports` surface confirmation still outstanding** |
 | BPE-9 | 6 | `ci.yml` — independent provisioning + build + `make test` both arches + artifacts + caching; `version.lib` in `SYSLIBS` | **DONE — EXECUTED; first runs red, two defects found and fixed** |
-| BPE-18 | 6 | CHANGELOG entries for `ci.yml` and `version.lib`; correct stale 14→19 OK count | **Believed closed by the CHANGELOG additions in PRs #1/#2 — verify all three items** |
+| BPE-18 | 6 | CHANGELOG entries for `ci.yml` and `version.lib`; correct stale 14→19 OK count | **DONE — verified, not assumed: all three items were actually still missing/stale, all three added/corrected** |
 | BPE-19 | 6 | Trim duplicated `version.lib` rationale in `exports.cpp` + Makefile | **CLOSED — absorbed by BPE-24 + CPP-17** |
 | BPE-10 | 9 | Link `libcurl.lib`, `zs.lib` and the system libs | |
 | BPE-11 | 14 | Release workflow — reuse `ci.yml` provisioning, tag extraction, approval gate, publish | |
@@ -832,6 +832,7 @@ Trigger: hand-assembling JSON in CAPL proves genuinely cumbersome. Dead code las
 | BPE-24 | 6b | `docs/ci-pipeline.md`; trim `ci.yml`, `auto-pr.yml`, `Makefile` headers; disposition list | **DONE** |
 | BPE-25 | 7 | `vcpkg.json` baseline/tool-pin reconciliation + drift guard in both provisioning paths | **DONE — verified by a real run** |
 | BPE-26 | 7 | Untrack `lib/README` from git | **DONE** |
+| BPE-28 | 6/7 | `ci.yml`: bump `actions/checkout`/`cache`/`upload-artifact` off deprecated Node 20; SHA-pin `ilammy/msvc-dev-cmd` | **DONE — verified via GitHub API that the new majors declare `node24` and change no input/default this workflow relies on; `msvc-dev-cmd` stays `v1` (no newer major exists) but is now SHA-pinned** |
 | BPE-27 | 7 | `auto-pr.yml` base-branch gap; PR-checklist fold-in line; `stage-branch` rebase exception | **DONE — see §7.13** |
 
 ### `cpp-implementer` — 17 tasks
@@ -880,7 +881,7 @@ Trigger: hand-assembling JSON in CAPL proves genuinely cumbersome. Dead code las
 | REV-1 | 1 | Stale-identifier sweep — `CLAUDE.md` and `.claude/**` only | **SATISFIED** |
 | REV-2 | 4 | Makefile, versioning, `/MT` provenance, tracking hygiene, provisioning | **CLEAN — CONFIRMED** |
 | REV-3 | 5 | **Export-contract genesis — the most important review in the plan** | **CLEAN — ZERO MUST-FIX** |
-| REV-4 | 6 | CI reuses Make targets; matrix symmetry; provisions independently | **CLEAN — ZERO MUST-FIX; 1 Should-fix open (BPE-18), 2 nice-to-haves** |
+| REV-4 | 6 | CI reuses Make targets; matrix symmetry; provisions independently | **CLEAN — ZERO MUST-FIX; 1 Should-fix (BPE-18) now closed, 2 nice-to-haves** |
 | REV-5 | 10 | Contract append — sync | |
 | REV-6 | 11 | Contract append — async | |
 | REV-7 | 12 | Contract append — flattening | |
@@ -979,11 +980,12 @@ The RC2237 scare showed the inverse failure: a hand-reconstructed invocation pro
 
 1. **HUM-20 and HUM-23 are both done.** HUM-20 confirmed in the GitHub UI on 2026-09-21 that branch protection/ruleset on `main` was absent, "Allow Actions to create PRs" was ON, and auto-delete head branches was OFF (§7.14). HUM-23 applied the missing configuration on 2026-09-22 — the §7.8 ruleset (required checks, bypass-disabled, up-to-date-before-merging, and the rest) plus auto-delete — and it was verified present via the GitHub REST API (§7.14). **§7.10's guarantee that a fold-in is authored against an up-to-date `main` leans on "require branches to be up to date"; that setting is now mechanically enforced (`strict_required_status_checks_policy: true`), so the guarantee is mechanical, not just conventional.** §7.6's duplicate-check-name observation is already recorded against HUM-20 in §7.13; the one thing not yet re-confirmed is live enforcement behaviour (a deliberately stale or failing PR actually blocked from merging) — see §7.13's closeout note.
 2. **BPE-27 is done** — see §7.13 for what shipped (`auto-pr.yml` base-branch gap, PR-checklist fold-in line, `stage-branch` rebase exception); its CI-touching human approval gate is recorded satisfied in §7.11.
-3. **BPE-16 and BPE-17 remain non-blocking.** BPE-17's `lib/x64/` residue is gitignored and cannot enter a commit.
-4. **BPE-18 needs verifying rather than assuming** — confirm all three CHANGELOG items are present.
+3. **BPE-16 and BPE-17 are done** (`chore/bpe-16-17-18-cleanup`, 2026-09-22). BPE-17's `lib/x64/` residue was gitignored and so never entered a commit — deleted on disk and confirmed via `ls` before/after; `Copy-TripletLibs` is now synchronising.
+4. **BPE-18 is done — it needed verifying, not assuming, and verification found all three items genuinely missing**, not merely unconfirmed: no `Added` entry existed for `ci.yml` itself, none for the `version.lib`/`SYSLIBS` addition, and the `setup-dev-env.ps1` entry still read the stale "14 OK, 0 WARN, 0 FAIL". All three added/corrected on the same branch.
 5. **`docs/work/branching-strategy/`** is superseded and reduced to a pointer. **`docs/work/comment-discipline/`** may now be reduced to a pointer — §6b satisfies its §8 exit condition (the `docs/` destinations are listed, and REV-14's rationale-migration check passed).
 6. **`docs/plan-v15` the branch is abandoned and deleted, not merged.** Its surviving content is in §6b, §7.13 and §5's baseline invariant. It was a sibling wholesale rewrite of v14 from a shared v13 ancestor (`33acd51`); merging it would have regressed this document and would have published a closeout narrative describing work already finished. See §7.10.
 7. **The `dumpbin /exports` confirmation for BPE-8 is still unevidenced** and is cheap — one CI step, or one local run per architecture.
+8. **BPE-28 (new) is done** — same branch as BPE-16/17/18. `ci.yml`'s `actions/checkout`, `actions/cache` and `actions/upload-artifact` were bumped off the deprecated Node 20 runtime (verified via the GitHub API that the new majors declare `node24` and change no input/default this workflow relies on); `ilammy/msvc-dev-cmd` stays on `v1` (no newer major exists, still `node20`) but is now pinned to the exact commit `v1.13.0` resolves to, for supply-chain hardening independent of the Node.js question.
 
 ---
 
@@ -995,6 +997,6 @@ The RC2237 scare showed the inverse failure: a hand-reconstructed invocation pro
 
 Stage 8 is unblocked and may begin immediately on `stage/08-core-pure-logic`. **HUM-23 has passed** (applied and verified 2026-09-22, §7.14) — "require branches up to date before merging" is now the mechanically enforced half of the export-table merge-hazard mitigation (§7.10, §7.14). **No export-table append (Stage 10 onward) may proceed until HUM-13 has also passed** — appending to a table whose base layout has never been loaded by CANoe would multiply the unknowns in exactly the way Stage 5 exists to prevent.
 
-BPE-16, BPE-17 and BPE-18 are non-blocking and can happen at any time. **HUM-23 is done** (§7.14) — Stage 10's blocker list is now down to HUM-13 alone.
+**BPE-16, BPE-17, BPE-18 and BPE-28 are done** (`chore/bpe-16-17-18-cleanup`, 2026-09-22 — see §14). **HUM-23 is done** (§7.14) — Stage 10's blocker list is now down to HUM-13 alone.
 
-**Status:** v15. Stages 1, 2 and 4 complete and execution-verified. Stage 5 code complete and building on both architectures; hard gate open on Stage 3. **Stages 6 and 7 executed and closed out** — CI green on both legs, branching and auto-PR live, three units of work merged through the flow. Comment discipline is a loaded rule (§6b). `plan.md` maintenance is the fold-in model (§7.10). **HUM-20 verified branch protection absent on 2026-09-21; HUM-23 applied and verified it present via the GitHub API on 2026-09-22 (§7.14).** Open: BPE-16/17/18 (non-blocking), HUM-13 (blocks the Stage 5 gate and any export-table append). Next action: **Stage 8.**
+**Status:** v15. Stages 1, 2 and 4 complete and execution-verified. Stage 5 code complete and building on both architectures; hard gate open on Stage 3. **Stages 6 and 7 executed and closed out** — CI green on both legs, branching and auto-PR live, three units of work merged through the flow. Comment discipline is a loaded rule (§6b). `plan.md` maintenance is the fold-in model (§7.10). **HUM-20 verified branch protection absent on 2026-09-21; HUM-23 applied and verified it present via the GitHub API on 2026-09-22 (§7.14).** **BPE-16/17/18/28 closed 2026-09-22** (§14). Open: HUM-13 (blocks the Stage 5 gate and any export-table append). Next action: **Stage 8.**
