@@ -17,16 +17,24 @@ hand-invented version numbers.
 - `scripts/setup-dev-env.ps1`: development environment bootstrap script
   that provisions MSVC Build Tools, `make`, vcpkg-built libcurl (x86 and
   x64, static, SChannel), and the pinned `nlohmann/json` single header.
-  Verified working end to end on a real machine (14 OK, 0 WARN, 0 FAIL).
+  Verified working end to end on a real machine (19 OK, 0 WARN, 0 FAIL).
 - `.github/workflows/auto-pr.yml`: bot-side workflow that opens a draft PR
   into `main` on a push to a `stage/`, `chore/`, `fix/`, or `docs/` branch,
   guarded against no-op reruns and branches with no commits ahead of `main`
   (Stage 7, BPE-21).
 - `.claude/skills/stage-branch/SKILL.md`: branch-naming convention and
   create-and-push procedure for starting new work (Stage 7, BPE-22).
+- `.github/workflows/ci.yml`: the project's first CI pipeline. Runs on
+  `windows-latest`, matrix over x86/x64, calling the same `make build-<arch>`
+  and `make test ARCH=<arch>` targets used locally, with its own `/MT`
+  provenance check and both DLLs uploaded as workflow artifacts (Stage 6,
+  BPE-9).
 
 ### Changed
 
+- `Makefile`: `SYSLIBS` now includes `version.lib`, required by
+  `CopyOwnVersionString`'s `GetFileVersionInfo` calls; applies identically to
+  both architectures via the shared parameterized rule (Stage 6, BPE-9).
 - `.github/workflows/ci.yml`: `push`/`pull_request` triggers now filtered
   to `main` and the four working-branch prefixes, so a future release tag
   push no longer also matches this workflow's `push` trigger (Stage 7,
