@@ -623,19 +623,22 @@ Four conditions:
 | **BPE-20** | `ci.yml` `branches:` filter | `build-pipeline-engineer` | **DONE — taken in PR #1, not deferred** |
 | **BPE-25** | `vcpkg.json` baseline/tool-pin reconciliation + drift guard | `build-pipeline-engineer` | **DONE — see §7.13** |
 | **BPE-26** | Untrack `lib/README` from git — see §7.12 | `build-pipeline-engineer` | **DONE** |
-| **BPE-27** | `auto-pr.yml` base-branch gap + PR-checklist fold-in line + `stage-branch` rebase exception — see §7.13 | `build-pipeline-engineer` | **OPEN — human approval: YES** (touches CI) |
+| **BPE-27** | `auto-pr.yml` base-branch gap + PR-checklist fold-in line + `stage-branch` rebase exception — see §7.13 | `build-pipeline-engineer` | **DONE — see §7.13** |
 | **REV-13** | BPE-21 + BPE-22 + BPE-20 + applied `settings.json` diff | `code-reviewer` | **CLEAN — 0 Must-fix, 0 Should-fix** |
 | **REV-15** | BPE-26 against §7.12's acceptance checks | `code-reviewer` | **CLEAN** |
 | **REV-16** | PR #2 confirmatory review after its rebase | `code-reviewer` | **CLEAN** |
 | **REV-17** | PR #1 full-branch review — BPE-21 + BPE-22 + BPE-20 + `VCPKG_ROOT` fix + BPE-25 | `code-reviewer` | **CLEAN — gated the merge of `2123c80`** |
+| **REV-18** | BPE-27 — `auto-pr.yml` + `stage-branch/SKILL.md` + `CHANGELOG.md`, against `git diff main...HEAD` on `chore/bpe-27-auto-pr-base` | `code-reviewer` | **PENDING — recommended next** |
 
 **Two recorded renumbers.** `BPE-26` was claimed by two different tasks — untracking `lib/README` (merged to `main`, named in commit `91e0561`) and the `auto-pr.yml` base-branch gap. The merged claimant keeps the ID; the other becomes **`BPE-27`**. `REV-15` was likewise double-spent: the PR #1 full-branch review was conducted under that label in-session but never written into this document, so a later session correctly read the slot as free and allocated it to BPE-26's review, which merged. BPE-26 keeps `REV-15`; the PR #1 review is retroactively **`REV-17`**.
 
 **`REV-17` predating `REV-16` is not an anomaly.** REV IDs in this document have never been chronological — `REV-5` through `REV-12` are pre-allocated to Stages 10–17, work that has not started. They are allocation slots, not a timeline.
 
-**Sequence (historical):** HUM-12 → first CI run (red) → `VCPKG_ROOT` fix + BPE-25 → REV-13, REV-17 → PR #1 merged → PR #2 rebased → REV-14, REV-16 → PR #2 merged → BPE-26 + REV-15 merged → v15 → HUM-20 verified (§7.14). **Next:** HUM-23 → BPE-27 → Stage 8 on `stage/08-core-pure-logic`.
+**Sequence (historical):** HUM-12 → first CI run (red) → `VCPKG_ROOT` fix + BPE-25 → REV-13, REV-17 → PR #1 merged → PR #2 rebased → REV-14, REV-16 → PR #2 merged → BPE-26 + REV-15 merged → v15 → HUM-20 verified (§7.14) → BPE-27. **Next:** HUM-23 → Stage 8 on `stage/08-core-pure-logic`.
 
 **Human approval gate: SATISFIED.** It touched CI, `.claude/settings.json` and what gets shipped, and the gate's own standard was "only once the bot has actually opened a PR and its CI run has been observed green." Both happened. Per §13, written-and-reviewed is not executed — and this stage is now the project's best evidence for that, in both directions.
+
+**BPE-27's human approval gate: SATISFIED.** It touches CI (`auto-pr.yml`), so §7.8 criterion 2 (`code-reviewer`, still pending — REV-18) and the human-approval-before-proceeding requirement both apply. The approval was given explicitly: the branch's task was started on the user's direct instruction to begin BPE-27, satisfying the gate before any commit landed.
 
 #### 7.12 `lib/README`: from tracked-on-purpose to untracked (BPE-26)
 
@@ -671,6 +674,8 @@ The accepted route was the **downgrade** — curl to 8.21.0#1, gtest to 1.17.0#3
 **Defect 2 — the stacking rule is not implementable by the bot (BPE-27).** §7.2 says a stacked branch should target its PR at its parent, and that GitHub retargets automatically when the parent lands. **`auto-pr.yml` hardcodes `--base main`**, so the bot cannot do the first half, and the second only fires when a PR's *base* branch is deleted — `main` never is. Worse for the general case: because `chore/*` merges are **squash** (§7.8), the parent's commits never become ancestors of `main` under their original SHAs, so a stacked child stays diff-polluted after its parent lands whatever the base says. **§7.2's stacking rule survives contact with merge-commit parents and does not survive contact with squash parents.** That is the durable lesson, and it is the one that will matter when Stage 11 stacks on Stage 10 with the export table at stake instead of a YAML file.
 
 **BPE-27** amends §7.2, `auto-pr.yml` and `.claude/skills/stage-branch/SKILL.md` to state that the bot always opens against `main`, that a human retargets by hand if an interim clean diff is wanted, and that a squash-merged parent requires the rebase recipe below, scoped explicitly to human execution. It also adds a *plan fold-in done* line to the PR-body checklist scaffold, so §7.8 criterion 6 appears in the PR rather than depending on memory. Note while amending that retargeting a PR's base to a non-`main` branch silently costs it its `pull_request` CI runs, since `ci.yml` filters that trigger to `branches: [main]`; `push` runs on `chore/**` continue, so required checks still report.
+
+**Shipped (`chore/bpe-27-auto-pr-base`).** §7.2 and §7.5 record the corrected boundary (prose-only commit); `auto-pr.yml`'s `Compose PR body` step now classifies plan-only vs. not from the compare-API response Guard 1 already persists, pre-seeds the `TODO:` line for `stage/`/`chore/` branches, quotes the branch's commit subjects, and adds the `exports.cpp` safety warning and the *plan fold-in done* checklist line described above; `stage-branch/SKILL.md` gained the fourth load-bearing-convention entry and the CI-loss note. Commit-subject/filename extraction stays inside `jq` reading the persisted file or `printf`'s `%s` argument, never through `${{ }}` — verified against a commit subject containing backticks, `$(...)` and quotes, which round-tripped into the body unexecuted.
 
 **The rebase exception, recorded as precedent.** A stacked branch whose parent squash-merged **may** be rebased — human-only — because merging `main` in is the *more* dangerous option there: both sides present different content for files absent from the merge base, and hand-resolving two YAML files is the exact artifact class §13 keeps burning this project on. The licence is narrow and carries a mechanical proof obligation: **`git diff <pre-rebase-tip> HEAD` must print nothing** before pushing, proving the rebase rewrote SHAs and dropped duplicated commits without altering a single byte. Where the rebased branch touched `src/module/exports.cpp`, a confirmatory review must additionally verify the `CAPL_DLL_INFO_LIST4` rows are byte-identical to `main`'s. **Both are required; neither alone is sufficient.** This was exercised once, on PR #2, with REV-16 as the confirmatory review. `.claude/skills/stage-branch/SKILL.md` otherwise says *never rebase*, and that stands for agents and for ordinary refreshes.
 
@@ -805,7 +810,7 @@ Trigger: hand-assembling JSON in CAPL proves genuinely cumbersome. Dead code las
 | BPE-24 | 6b | `docs/ci-pipeline.md`; trim `ci.yml`, `auto-pr.yml`, `Makefile` headers; disposition list | **DONE** |
 | BPE-25 | 7 | `vcpkg.json` baseline/tool-pin reconciliation + drift guard in both provisioning paths | **DONE — verified by a real run** |
 | BPE-26 | 7 | Untrack `lib/README` from git | **DONE** |
-| BPE-27 | 7 | `auto-pr.yml` base-branch gap; PR-checklist fold-in line; `stage-branch` rebase exception | **OPEN — human approval: YES** |
+| BPE-27 | 7 | `auto-pr.yml` base-branch gap; PR-checklist fold-in line; `stage-branch` rebase exception | **DONE — see §7.13** |
 
 ### `cpp-implementer` — 17 tasks
 
@@ -866,6 +871,7 @@ Trigger: hand-assembling JSON in CAPL proves genuinely cumbersome. Dead code las
 | REV-14 | 6b | Comment discipline — BPE-23 + BPE-24 + CPP-17, incl. rationale-migration Must-fix check | **CLEAN — 2 Must-fix resolved (`cf9e74b`, `25f6033`)** |
 | REV-16 | 7 | PR #2 confirmatory review after its rebase; export-table rows byte-identical | **CLEAN** |
 | REV-17 | 7 | PR #1 full-branch review — BPE-21 + BPE-22 + BPE-20 + `VCPKG_ROOT` fix + BPE-25 | **CLEAN — gated the merge of `2123c80`** |
+| REV-18 | 7 | BPE-27 — `auto-pr.yml` base-branch gap + PR-body auto-fill + `stage-branch` skill amendment | **PENDING — recommended next** |
 
 ### Human — 23 tasks
 
