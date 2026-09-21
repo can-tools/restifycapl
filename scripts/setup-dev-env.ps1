@@ -937,6 +937,14 @@ function Copy-TripletLibs {
     New-Item -ItemType Directory -Force -Path $DestDir | Out-Null
 
     $productLibNames = 'libcurl.lib', 'zs.lib'
+
+    # Synchronising, not purely additive: prune any stale .lib left behind by
+    # an older allow-list (BPE-17 -- gmock.lib/gtest.lib residue from before
+    # the filter above existed) so DestDir can never drift from the allow-list.
+    Get-ChildItem -LiteralPath $DestDir -Filter '*.lib' -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -notin $productLibNames } |
+        Remove-Item -Force
+
     $libs = @(Get-ChildItem -LiteralPath $srcLibDir -File | Where-Object { $_.Name -in $productLibNames })
     if ($libs.Count -eq 0) {
         Add-Result -Step "lib copy ($Triplet)" -Status 'FAIL' -Message "None of the expected product-linked files ($($productLibNames -join ', ')) found under $srcLibDir"

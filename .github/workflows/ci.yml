@@ -48,7 +48,7 @@ jobs:
       # Full history (not shallow) so `git describe` inside the Makefile's
       # versioning block never degrades silently.
       - name: Checkout (full history)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -56,7 +56,7 @@ jobs:
       # Prompt" locally before `make build-x86`/`build-x64` -- never
       # scripts/setup-dev-env.ps1 (docs/ci-pipeline.md).
       - name: Activate MSVC developer environment (${{ matrix.msvc_arch }})
-        uses: ilammy/msvc-dev-cmd@v1
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756  # v1.13.0
         with:
           arch: ${{ matrix.msvc_arch }}
 
@@ -86,7 +86,7 @@ jobs:
       # both legs share one entry (docs/ci-pipeline.md#caching).
       - name: Cache vcpkg tool checkout
         id: vcpkg-tool-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ env.VCPKG_ROOT }}
           key: vcpkg-tool-${{ env.VCPKG_PINNED_TAG }}-${{ runner.os }}-${{ env.IMAGE_VERSION }}
@@ -140,7 +140,7 @@ jobs:
       # share an entry (docs/ci-pipeline.md#caching).
       - name: Cache vcpkg install root (${{ matrix.triplet }})
         id: vcpkg-installed-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ env.VCPKG_INSTALL_ROOT }}
           key: vcpkg-installed-${{ matrix.triplet }}-${{ hashFiles('vcpkg.json') }}-${{ env.IMAGE_VERSION }}
@@ -259,7 +259,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "make test ARCH=${{ matrix.arch }} failed (exit $LASTEXITCODE)" }
 
       - name: Upload DLL artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: restifycapl-${{ matrix.arch }}
           path: build/${{ matrix.arch }}/restifycapl-${{ matrix.arch }}.dll
