@@ -1,6 +1,6 @@
-# Plan (v14): Build the CAPL REST DLL (restifycapl) from zero
+# Plan (v15): Build the CAPL REST DLL (restifycapl) from zero
 
-Revision of v13. **The branching strategy is folded in as a new Stage 7**, merged from the former standalone `docs/work/branching-strategy/plans/plan.md` (now a superseded stub) and extended with a settled branch/PR automation layer. **All former Stages 7–16 are renumbered 8–17.** Task IDs are unchanged — they were never stage-encoded. Stage 5's code and Stage 6's CI pipeline remain written and reviewed clean but unexecuted; Stage 3 remains the blocker on the ABI proof only.
+Revision of v14. **Stage 7 has been executed, not merely designed** — the branching flow, `auto-pr.yml` and CI all ran for real, and three units of work have been through them. This revision records that; folds comment discipline in as **§6b**; replaces §7.10's `plan.md` maintenance rule with the working-document/fold-in model now in force; adds **§7.13**, Stage 7's closeout; and reconciles a review ledger in which three of five completed reviews were absent from this document. Phases, stage numbers and task IDs are unchanged except for two recorded renumbers, **`BPE-27`** and **`REV-17`** (§7.11). **v14 stated that Stage 6 had never executed and that HUM-12 was the next action; both claims were false for the whole of Stage 7 and are corrected here — that drift is precisely what §7.10's new rule exists to prevent.**
 
 ---
 
@@ -38,21 +38,23 @@ A developer machine and a CI runner are independent environments. Each provision
 
 **Stage 1 — complete and verified.**
 
-**Stage 2 — COMPLETE AND EXECUTION-VERIFIED.** `scripts/setup-dev-env.ps1` ran end to end at **19 OK / 0 WARN / 0 FAIL on both architectures**, after two real bugs were found and fixed (see BPE-15). This closes HUM-19.
+**Stage 2 — COMPLETE AND EXECUTION-VERIFIED.** `scripts/setup-dev-env.ps1` ran end to end at **19 OK / 0 WARN / 0 FAIL on both architectures** at the time of BPE-15's verification, after two real bugs were found and fixed. This closes HUM-19. A later run on 2026-09-21, after BPE-25 added the baseline assertion, reported **23 OK / 0 WARN / 0 FAIL** (§7.12). **The two numbers are not in conflict — the check count grew.** Quote the run alongside its date whenever either is cited.
 
 **Stage 3 — UNCONFIRMED.** Neither HUM-10 (install CANoe) nor HUM-11 (build and load the official Vector sample) is observable from the repository. **It is no longer the sole blocker on everything** — it blocks only the *verification* half of Stage 5, not Stage 6.
 
 **Stage 4 — COMPLETE.**
 
-**Stage 5 — CODE COMPLETE AND REVIEWED CLEAN; HARD GATE STILL OPEN.** `src/module/exports.cpp` and `src/module/exports.def` now exist (untracked). The export table is populated with the reserved `CDLL_VERSION_NAME`/`CDLL_VERSION` sentinel row plus exactly one real operation, `restifyGetVersion`. `code-reviewer` passed it with **zero Must-fix items**. What is *not* yet evidenced: a real `make build-x86` / `make build-x64` producing both DLLs with `dumpbin /exports` confirming the export surface (BPE-8), and HUM-13 loading it in CANoe. **Until HUM-13 passes, the ABI is designed, reviewed and plausible — not proven.**
+**Stage 5 — CODE COMPLETE AND REVIEWED CLEAN; HARD GATE STILL OPEN.** `src/module/exports.cpp` and `src/module/exports.def` are committed on `main`. The table carries the reserved `CDLL_VERSION_NAME`/`CDLL_VERSION` sentinel row plus exactly one real operation, `restifyGetVersion`. REV-3 passed with zero Must-fix. **Both architectures now build for real:** CI's x86 and x64 legs were green on every merged PR, which closes BPE-8's build half — v14's "no build run evidenced" is superseded. What remains unevidenced is the `dumpbin /exports` confirmation that the export surface is exactly `caplDllGetTable4`, and HUM-13. **Until HUM-13 passes, the ABI is designed, reviewed, built and plausible — not proven.**
 
-**Stage 6 — WRITTEN AND REVIEWED CLEAN; NEVER EXECUTED.** `.github/workflows/ci.yml` exists (untracked) and satisfies every BPE-9 requirement including all three carry-over traps. `code-reviewer` passed it with zero Must-fix items, and an earlier pass (REV-4) already caught and closed two real defects. But **`.github/` is untracked, so this workflow has never run a single time.** A CI pipeline that has never executed sits squarely in this project's most reliable defect category (§13).
+**Stage 6 — EXECUTED. CI IS LIVE AND GREEN ON BOTH ARCHITECTURES.** `.github/workflows/ci.yml` is committed, has run repeatedly, and has gated three merges. **The first runs were red, exactly as §13 predicted**, and exposed two genuine defects that no amount of static review had found: the `VCPKG_ROOT` clobbering bug (`ilammy/msvc-dev-cmd` writing through `GITHUB_ENV`) and BPE-25's baseline/tool-pin mismatch. Both are fixed and merged. This also closed Stage 4's x86 test-evidence gap permanently — `make test ARCH=x86` now runs on every push.
 
-**Three follow-ups outstanding, all non-blocking:** BPE-17 (stale `lib/x64/` residue), BPE-16 (`version-string` note), and the new BPE-18 (missing CHANGELOG entries, plus a stale count in an existing entry).
+**Stage 7 — EXECUTED AND CLOSED OUT.** The branching flow, `auto-pr.yml`, the `stage-branch` skill and the scoped-push `settings.json` change are all live; `github-actions[bot]` opens draft PRs without human intervention. Three units of work have been through the full flow: PR #1 (`chore/bpe-21-auto-pr`), PR #2 (`chore/bpe-23-comment-discipline`) and `chore/bpe-26-untrack-lib-readme`. The closeout, and the two defects the first real exercise exposed, are in §7.13.
 
-**Stage 7 — NEW, DESIGNED AND SETTLED, NOT STARTED.** The branching and automation strategy (below) is fully designed with every open question answered except HUM-21's exact `settings.json` wording. Nothing is implemented: no branch, no `auto-pr.yml`, no skill, no permission change.
+**Stage 3 — UNCONFIRMED.** Unchanged, and now the *only* remaining blocker of consequence. It gates HUM-13 and therefore the Stage 5 gate, and nothing else.
 
-**Next:** commit and push (HUM-12) — that single act is what first executes CI and produces the project's first independent build evidence, including the x86 test run that Stage 4 could not evidence. Then confirm Stage 3 and close the Stage 5 gate.
+**Follow-ups outstanding:** BPE-16 (`version-string` note), BPE-17 (stale `lib/x64/` residue), BPE-27 (`auto-pr.yml` base-branch gap — §7.13), and HUM-23 (the actual GitHub configuration — §7.14; HUM-20's verification is done and found it absent). **BPE-19 closed** as absorbed by BPE-24 + CPP-17. **BPE-18 — verify before closing:** `CHANGELOG.md` gained entries across PRs #1 and #2; confirm the CI workflow entry, the `version.lib` entry and the 14→19 count correction are all present rather than assuming they are.
+
+**Next:** HUM-23 (branch protection on `main` — cheap, blocks Stage 10, §7.14), then **Stage 8 on `stage/08-core-pure-logic`,** which does not depend on HUM-23. HUM-12 is **done** — it is what made Stages 6 and 7 real.
 
 ---
 
@@ -94,8 +96,11 @@ Documentation practice is deliberately not a numbered stage — see §6a.
 - **Tests run outside CANoe.** The CAPL export glue is the documented exception (`cpp-testing-conventions`) — it can only be verified inside a real CANoe instance, which is why `src/module` is excluded from the test compile and why HUM-13 is irreplaceable.
 - **No version number is ever typed by hand.** `vcpkg.json`'s `version-string` is manifest boilerplate and is not an exception — it feeds nothing. `restifyGetVersion` reads the DLL's *own* version resource at runtime (`GetModuleHandleExA` / `GetFileVersionInfoA`), so even the version string CAPL sees derives from the Git tag through `version.rc` rather than from a literal.
 - **Every export-table append gets a `CHANGELOG.md` `[Unreleased]` entry in the same change.** BPE-18 exists because the adjacent rule — *build and CI changes also get an entry* — was the half that slipped.
+- **Comment discipline.** Inline comments explain **why**, never **what** — three tiers, with multi-line blocks permitted only as named editing traps. The rule lives in exactly one place, `.claude/skills/project-docs/SKILL.md`; every coding agent carries a pointer, never a copy. See §6b.
+- **Plan changes are recorded in the unit of work's own `docs/work/<slug>/plans/plan.md` and folded into this document as the last commit on the branch, before the merge.** This document is never edited mid-flight. **An ID is spent when it is written into §12, not when it is spoken.** See §7.10.
+- **`builtin-baseline` must be the commit the pinned vcpkg tag dereferences to.** `vcpkg.json` pins registry content, `VCPKG_PINNED_TAG` pins the tool, and the pair is coherent only when the baseline *is* the pinned tag's commit. Both were individually correct and the pair was invalid for weeks (BPE-25, §7.13). Now asserted mechanically in both `ci.yml` and `setup-dev-env.ps1`.
 - **No stage work is committed to `main` directly.** From Stage 7 onward all work happens on a branch and reaches `main` only through a PR — see Stage 7 for topology, naming, merge criteria and automation.
-- **Agents cannot `git tag`, and cannot push to `main`.** Stage 7 narrows the blanket `git push` deny to the working-branch prefixes only (pending HUM-21); `main` and `git tag` stay denied.
+- **Agents cannot `git tag`, and cannot push to `main`.** HUM-21 is **applied**: the blanket `git push` deny is narrowed to the working-branch prefixes, while `main`, bare `git push`, force-push, tag-push and branch-deletion forms stay denied. The structural control is GitHub branch protection, not `settings.json` — **"the server refuses, and the client discourages."**
 
 ---
 
@@ -213,7 +218,36 @@ This surfaced a real latent bug that could not manifest until a real `main()`-pr
 
 **The obligation, stated in the form that would have caught BPE-18.** "Every export-table append gets a CHANGELOG entry" was followed — `restifyGetVersion` is documented correctly. What slipped is the *adjacent* rule: user-visible build, CI and packaging changes need an entry too. A rule scoped to one file type does not generalise itself.
 
-The Makefile deliberately takes the opposite approach for its hardest-won findings — the `/SUBSYSTEM:CONSOLE` requirement and the `make -n` quirk are long inline comments, because both are traps a future reader hits *while editing that exact recipe*. Rationale belongs where it will be read at the moment it is needed; that is a judgement per case, not a uniform rule. BPE-19 is the counterweight: the same instinct applied without restraint produces comment bloat.
+The Makefile deliberately takes the opposite approach for its hardest-won findings — the `/SUBSYSTEM:CONSOLE` requirement and the `make -n` quirk are long inline comments, because both are traps a future reader hits *while editing that exact recipe*. Rationale belongs where it will be read at the moment it is needed; that is a judgement per case, not a uniform rule. BPE-19 is the counterweight: the same instinct applied without restraint produces comment bloat — see **§6b**, where that counterweight became a binding, loaded rule rather than an observation stored where no coding agent reads it.
+
+---
+
+## 6b. Comment discipline — standing, not a stage
+
+**Why §6b and not a numbered stage.** §6a's argument applies verbatim: this is a standing obligation attached to other work, and encoding it as a stage would imply it finishes. It sits beside §6a deliberately — §6a already carried the half-statement of this rule in its closing "BPE-19 is the counterweight" sentence, and splitting the two across separate documents would recreate the duplication both warn against. Folded in from the former standalone `docs/work/comment-discipline/plans/plan.md`, which is superseded and now carries only a pointer here — the same lifecycle the branching-strategy document followed into §7.
+
+**The defect this fixed was storage, not judgement.** The project had already diagnosed comment bloat: §6a named it, BPE-19 existed for it, BPE-13 promised a Stage 15 sweep. All of that was recorded in the one document that, by design, only `planner` reads. Meanwhile **none** of the four coding-agent definitions and none of the skills contained the word "comment" as a rule. A policy stored where it cannot fire is not a policy. The evidence at the time: `ci.yml` carried a 66-line header before `name:`; `auto-pr.yml` a 39-line header stating "this file does not restate plan.md §7.5" and then restating it 25 lines later; `exports.cpp` ran roughly 150 comment lines against 100 lines of C++.
+
+**Where the rule lives — exactly one file.** `.claude/skills/project-docs/SKILL.md` holds the full rule: three tiers, banned list, redirect table, protected-comments list. Each of `cpp-implementer`, `build-pipeline-engineer`, `test-engineer` and `code-reviewer` carries **one pointer bullet** and no substance. Duplicating the rule into four agent files would violate the rule it installs, and agent-file duplication is one of this project's two named historical drift instances. **The rule is deliberately not restated here either** — this section records what still constrains future work; `project-docs` is where the rule is read.
+
+**The load-bearing detail, recorded because it is invisible and fatal.** `project-docs`'s `description:` frontmatter decides when the skill loads. Left scoped to README/examples/CHANGELOG, the rule would exist and never fire on a `.cpp` or `.yml` edit. **Rewriting that `description:` — not the body text — is what makes this work**, and REV-14 re-checked it specifically. Any future skill carrying a cross-cutting rule inherits this exact failure mode.
+
+**Two decisions not to re-litigate.**
+
+- **Extend `project-docs`; do not create a new skill.** A second skill about where explanatory material belongs, sitting beside an existing skill about where explanatory material belongs, is precisely the antipattern both `project-docs` and §6a exist to prevent. Scoping it under `msvc-build-conventions` or `capl-export-contract` fails differently: the rule covers `.cpp`, `.yml`, `Makefile` and tests alike, and "a rule scoped to one file type does not generalise itself" (§6a).
+- **Archival `docs/` are topic-scoped, never stage-scoped.** Stages dissolve; topics do not. Someone hitting the `LIBCMTD` false positive in 2027 searches for `/MT` or `LIBCMT`, never for "Stage 6". `development-environment.md` already spans Stage 2 and Stage 4 material correctly, because both are "how this environment is provisioned". Per-stage documents would fragment the `/MT` story across three stages and produce seventeen mostly-empty files. Each section takes a one-line `(found during Stage N, TASK-ID)` breadcrumb, so stage attribution survives without fragmenting the topic.
+
+**Protected comments — never stripped under this rule.** The `Makefile`'s `/SUBSYSTEM:CONSOLE` and `make -n` trap comments (§6a blesses them: traps a reader hits *while editing that exact recipe*); `exports.cpp`'s CAPL naming-convention statement (§5 requires it to live in the file being edited — trim it, never remove it); and `ci.yml`'s `LIBCMTD` two-part-check explanation, which is the exact bug REV-4 caught.
+
+**Where the evicted material went — this list is the fold-in's exit condition.**
+
+- **`docs/ci-pipeline.md` (new, BPE-24)** — the `ilammy/msvc-dev-cmd` → `GITHUB_ENV` `VCPKG_ROOT` clobber (trap 4, the only genuinely CI-only and previously undocumented one); the `LIBCMTD` two-part-check rationale; the image-version cache-key reasoning; the tag-collision branch-filter reasoning; and the never-call-`setup-dev-env.ps1`-from-CI rationale added at REV-14.
+- **`docs/development-environment.md` (existing)** — traps 1–3 (shallow clone, shared install root, unpinned tool) were already documented there; `ci.yml` now points rather than restates.
+- **A new file rather than extending `development-environment.md`**, because §5 holds that the local and CI paths "share the pin, never the mechanism and never the output". Folding CI-only material into a document scoped to local provisioning would blur the one distinction that document exists to keep sharp.
+
+**The disposition-list discipline — now standing practice for any future trim.** Every removed comment block is reported alongside the diff with exactly one disposition: `captured → <file>#<section>`, `already covered → <file>#<section>`, or `dropped as redundant → <reason>` — the last permitted only when the fact is recoverable from the code itself or from a loaded skill, without which it becomes an escape hatch that swallows the rule. `code-reviewer` verifies each disposition **against the actual target file** and files a failure as **Must fix**, not Nice-to-have: lost rationale is unrecoverable once the branch diff ages out, and filing this category as a nice-to-have is exactly what happened to BPE-19. Review is the only moment it is cheaply checkable.
+
+**Status.** HUM-22 approved the wording; BPE-23 installed it; BPE-24 and CPP-17 trimmed `ci.yml`, `auto-pr.yml`, `Makefile` and `exports.cpp`; REV-14 passed with two Must-fix items, both resolved (`cf9e74b`, `25f6033`). The work **landed on `main` in PR #2 (`334d5d4`)**. **BPE-19 closes as absorbed by BPE-24 + CPP-17.** Still deferred to BPE-13 at Stage 15: `setup-dev-env.ps1` and everything under `docs/`.
 
 ---
 
@@ -244,7 +278,7 @@ The Makefile deliberately takes the opposite approach for its hardest-won findin
 
 **Optional follow-up from REV-3 (nice-to-have, not required):** `CopyOwnVersionString` mixes Win32 resource lookup with pure buffer/bounds logic. The pure sliver — empty-buffer check, truncation check, `memcpy` plus NUL — could be extracted to `src/core/` so the truncation branch becomes reachable from GoogleTest. The current exclusion is already well-justified inline, so this is a "could", not a "should". Tracked as CPP-16 / TEST-12 and naturally folds into Stage 8, when `src/core/` gains its first real files and the extraction costs almost nothing. Do not do it as standalone work now.
 
-### Stage 6 — CI baseline — WRITTEN AND REVIEWED CLEAN; NEVER EXECUTED
+### Stage 6 — CI baseline — EXECUTED; CI GREEN ON BOTH ARCHITECTURES (see §3 and §7.13)
 
 **BPE-9 — WRITTEN. `.github/workflows/ci.yml` exists and meets every stated requirement:**
 
@@ -262,9 +296,9 @@ The Makefile deliberately takes the opposite approach for its hardest-won findin
 
 **REV-4 — CLEAN, ZERO MUST-FIX.** Two genuine defects were caught and fixed before this pass: the `/MT` substring-matching bug that would have passed a debug-CRT lib, and a missing clarification on the vcpkg-tool-checkout cache key not being triplet-scoped. Both are applied and were re-verified clean in the latest full pass.
 
-**What is still missing, and it is the important part: the workflow has never run.** `.github/` is untracked. Every claim above is a claim about YAML that GitHub has never parsed, on a runner that has never existed. This project's single most reliable defect predictor is "static review does not substitute for execution", with seven recorded instances — and CI is dense with exactly the failure modes that only appear at runtime: action version resolution, PATH and environment inheritance between steps, cache key behaviour, `vcvarsall` propagation into later steps, and `make` availability on the runner image.
+**What was still missing at review time, and it was the important part: the workflow had never run.** This paragraph is kept as the historical record of the risk as it stood before HUM-12 pushed — CI's runtime failure modes (action version resolution, PATH and environment inheritance between steps, cache key behaviour, `vcvarsall` propagation, `make` availability on the runner image) are exactly the class §13 tracks, and this stage is now that prediction's best evidence: see §7.13 for what actually broke.
 
-**Therefore Stage 6 is not done when the file is written. It is done when both matrix legs are green.** Concretely: HUM-12 pushes it, the first run is observed, and any failures are routed back to `build-pipeline-engineer`. Budget for a fix cycle rather than treating a red first run as a setback — a first CI run that passes untouched would be the surprise.
+**Stage 6 was not done when the file was written; it became done when both matrix legs went green — which they have.** HUM-12 pushed it, the first run was observed (red, per §7.13), and the fix cycle routed back through `build-pipeline-engineer` as anticipated here.
 
 **Caching — purely a performance concern, never a correctness one.** Because no committed binary is involved, caching can be added, tuned or removed without affecting correctness. Keys include the triplet and the runner image version, so when GitHub bumps the toolset the key changes, the cache misses, and dependencies rebuild against the new compiler — correct by construction rather than by anyone remembering to invalidate. GitHub evicts entries after 7 days without access and this project pushes in bursts, so cold builds will be common: minutes, not a correctness risk.
 
@@ -272,7 +306,7 @@ The Makefile deliberately takes the opposite approach for its hardest-won findin
 
 **BPE-19 — NEW, optional/stylistic.** The `version.lib` rationale is explained twice at length, in both `exports.cpp` and the Makefile, at more words than the fact warrants. Trim toward one substantive explanation plus a pointer. Explicitly a nice-to-have from REV-4 and not a defect; §6a's "rationale belongs where it will be read" principle is right, but it has a ceiling.
 
-**Human approval gate: YES — reframed.** Approve the workflow *and* the push, then treat the gate as satisfied only once both matrix legs are observed green. Approving unexecuted YAML is approving an intention.
+**Human approval gate: SATISFIED.** The workflow and the push were approved, and both matrix legs have been observed green repeatedly across three merged units of work.
 
 ### Stage 7 — Development workflow: branching, auto-PR, and scoped push permissions
 
@@ -435,7 +469,7 @@ Keep and extend `deny`:
 
 Once a PR is open, each push runs the matrix twice — once for `push`, once for `pull_request`. **Free on this public repo**; the cost is two same-named entries in the Checks tab.
 
-**BPE-20 is now OPTIONAL AND DEFERRED, and its motivation has shifted.** The former standalone strategy framed it as "do before Stage 7 work begins", justified mainly by wasted runner minutes. That justification is near-zero here, because GitHub Actions minutes are free on public repositories. What survives is the **tag collision**: an unfiltered `push:` also fires on tag pushes, so Stage 14's `v1.0.0` tag would trigger both `ci.yml` and `release.yml` with no answer to which is authoritative. Adding a `branches:` filter to `push` fixes that, because a branch filter means tag pushes stop matching. **Best decided at Stage 14 alongside BPE-11, not a prerequisite for anything in this stage.** If taken:
+**BPE-20 was taken, not deferred.** v14 deferred it to Stage 14; it shipped in PR #1, was reviewed under REV-13, and is live. The `branches:` filter below is **current code, not a proposal** — the "if taken" framing has been removed. Its original motivation stands: an unfiltered `push:` also fires on tag pushes, so Stage 14's `v1.0.0` tag would otherwise trigger both `ci.yml` and `release.yml` with no answer as to which is authoritative. The branch filter makes tag pushes stop matching. The live configuration:
 
 ```yaml
 on:
@@ -445,7 +479,7 @@ on:
     branches: [main]
 ```
 
-**Implementation trap if BPE-20 is ever taken:** do **not** unify the push and `pull_request` runs into one concurrency group to dedupe them. With `cancel-in-progress: true` they would cancel each other, and **a cancelled run is not a successful required check** — branch protection would block the merge. Keep the existing ref-based group; the two events carry different refs and never collide.
+**Standing implementation trap:** do **not** unify the push and `pull_request` runs into one concurrency group to dedupe them. With `cancel-in-progress: true` they would cancel each other, and **a cancelled run is not a successful required check** — branch protection would block the merge. Keep the existing ref-based group; the two events carry different refs and never collide.
 
 **One thing to verify rather than assume:** when two runs report the same check name against the same commit, branch protection should evaluate the latest status for that context. That is believed correct, but it is exactly the runtime behaviour this project keeps being surprised by (§13). Confirm it on the first real PR.
 
@@ -463,17 +497,18 @@ on:
 - **`fetch-depth: 0` must be in `release.yml` too.** `ci.yml` has it; `release.yml` does not exist yet. Without it `git describe` degrades silently rather than failing loudly — flag for BPE-11.
 - **Stage 14's approval gate is a GitHub *Environment* with required reviewers**, under Settings → Environments. Different from branch protection and configured separately, also by hand.
 
-#### 7.8 What "done enough to land on `main`" means, and the manual GitHub configuration (HUM-20)
+#### 7.8 What "done enough to land on `main`" means, and the manual GitHub configuration (HUM-20 verified it; HUM-23 applies it — §7.14)
 
 `main` is **gate-passed, CI-green work only.** A stage branch merges when all of the following hold, in this order:
 
-1. **Both CI matrix legs green on the PR** — `build + test (x86)` and `build + test (x64)`. Non-negotiable; mechanically enforced by branch protection.
+1. **Both CI matrix legs green on the PR** — `build + test (x86)` and `build + test (x64)`. Non-negotiable in principle; **not yet mechanically enforced — branch protection on `main` is currently absent (§7.14, HUM-23), so this is a convention followed by the human merging, not a server-side gate.**
 2. **`code-reviewer` clean on the branch**, reviewed against `git diff main...HEAD` (three-dot — the PR diff, i.e. what this branch introduces, excluding what `main` gained meanwhile), zero Must-fix. Should-fix may be deferred to a `chore/` branch if explicitly recorded; nice-to-haves need no ceremony.
 3. **The stage's human gate has passed, where it has one.** For Stages 10/11/12 (HUM-14/15/16) and any future export-table append, the gate is verified **against the branch's CI artifact, before merge** — the human downloads `restifycapl-x86`/`restifycapl-x64` from the PR's workflow run and loads it in CANoe. Verifying after merge would put unverified export-table rows on `main`, which is the exact thing this strategy exists to prevent.
 4. **`CHANGELOG.md` `[Unreleased]` entry present in the branch**, per §5 — both halves of the rule (export-table appends *and* user-visible build/CI/packaging changes; BPE-18 exists because the second half was missed).
-5. **Branch is up to date with `main`** (enforced by protection).
+5. **Branch is up to date with `main`** — the plan's intent, **not currently enforced by protection** (§7.14, HUM-23); until then, this is the merging human's own check, and §7.10's interim mitigation applies to the fold-in commit specifically.
+6. **The branch's working plan has been folded into `plan.md`**, including any renumbering of task IDs and section numbers, per §7.10. This is the branch's last commit, before it is marked Ready for review.
 
-Stages without a human gate (8, 9, 15) merge on 1 + 2 + 4 + 5.
+Stages without a human gate (8, 9, 15) merge on 1 + 2 + 4 + 5 + 6.
 
 **Merge method.**
 - `stage/*` → **merge commit (`--no-ff`)**. Preserves the implement → review → fix cycle, which this project treats as evidence, and preserves the reviewed SHA. It inflates `git describe --tags --long`'s commit count slightly versus squashing; harmless, since the count only needs to be valid and monotonically increasing per `msvc-build-conventions`.
@@ -482,7 +517,7 @@ Stages without a human gate (8, 9, 15) merge on 1 + 2 + 4 + 5.
 
 **Review happens once, on the branch, before merge — not again after.** Nothing changes on merge but the merge commit. **One exception:** if the merge required non-trivial conflict resolution — above all in `src/module/exports.cpp` — re-run `code-reviewer` on the resolved result before pushing the merge. A hand-resolved export table has never been reviewed by anyone.
 
-**HUM-20 — manual GitHub configuration. No agent can do any of this.** There is no GitHub admin access in this session at all.
+**HUM-23 — manual GitHub configuration, the table below. No agent can do any of this.** There is no GitHub admin access in this session at all. HUM-20 verified the current state (§7.14): none of this is configured yet except the Actions-PR setting.
 
 Settings → Branches → ruleset targeting `main`:
 
@@ -516,6 +551,7 @@ Also required:
 | Review | `code-reviewer` | **On the branch, before merge. Once, not twice.** Against `git diff main...HEAD`. |
 | Human gate (where applicable) | **Human** | CANoe, against the PR's uploaded artifact. |
 | Mark ready for review | **Human** | |
+| Fold the working plan into `plan.md` | The branch's implementing agent | **Last commit on the branch**, before Ready for review. The implementing agent does this, not `plan-writer` — `plan-writer` has `Write` but not `Edit` and would have to re-emit the whole document. See §7.10. |
 | Merge | **Human only** | `--no-ff` for `stage/*`, squash for the rest. No agent, no automation. |
 | Tag a release | **Human only** | Still denied to agents. |
 
@@ -527,11 +563,11 @@ Also required:
 
 Two mitigations, both required:
 - **Serialize export-table work. Never have two open PRs that both touch `src/module/exports.cpp`.** Stages 10 → 11 → 12 → 13 run one at a time. If Stage 11's logic must start early, stack it off Stage 10 (7.2) and keep its export-table append as the last commit.
-- **"Require branches to be up to date before merging"** (7.8), so a stale base cannot reach `main` at all.
+- **"Require branches to be up to date before merging"** (7.8), so a stale base cannot reach `main` at all. **Not currently active — branch protection on `main` is absent (§7.14).** Not urgent today since no export-table stage has started, but a hard blocker before Stage 10; HUM-23 must land first.
 
 **Merging `main` into a stage branch can reintroduce this.** When refreshing a long-lived branch, if `main` has gained export-table rows, the conflict must be resolved so `main`'s rows stay **before** the branch's — always. Resolving "mine first" is the exact reordering defect above, wearing a conflict marker.
 
-**Narrowing the push deny is the largest single expansion of agent capability in this project's history.** Until now the guarantee was absolute — no agent could push anything. It becomes conditional, enforced by string patterns on a command that has many equivalent spellings. Three mitigations, in descending order of strength: GitHub branch protection with bypass disabled (structural, server-side, the only real one); the explicit deny of bare `Bash(git push)` and the `main`/force/tag forms; and the convention that merges are human. **Do not record this as "agents still cannot touch `main`" — record it as "the server refuses, and the client discourages."**
+**Narrowing the push deny is the largest single expansion of agent capability in this project's history.** Until now the guarantee was absolute — no agent could push anything. It becomes conditional, enforced by string patterns on a command that has many equivalent spellings. Three mitigations, in descending order of strength: GitHub branch protection with bypass disabled (structural, server-side, the only real one — **currently absent; see §7.14, HUM-23**); the explicit deny of bare `Bash(git push)` and the `main`/force/tag forms; and the convention that merges are human. **Do not record this as "agents still cannot touch `main`" — record it as "the server refuses, and the client discourages," and note that today the server side of that sentence is not yet installed.**
 
 **`auto-pr.yml` will not have run when it is reviewed.** It joins Stage 5's DLLs and Stage 6's workflow in §13's standing category — seven recorded instances of static review failing to substitute for execution. The two most likely first-run failures are the "Allow GitHub Actions to create and approve pull requests" setting being off, and workflow permissions being repo-default read-only. Budget a fix cycle.
 
@@ -541,7 +577,26 @@ Two mitigations, both required:
 
 **Long-lived branches blocked on CANoe gates will drift.** Stages 10–13 each wait on a human with CANoe; days or weeks of `main` movement accumulate. Mitigated by regular merge-from-`main` refreshes — which is also why 7.2 forbids rebase as the refresh mechanism.
 
-**`plan.md` becomes a conflict hotspot if every stage branch edits it.** Keep plan revisions on their own `docs/plan-vNN` branch. Stage branches should not edit `plan.md`; record stage status in the PR body and fold it into the next plan revision.
+**`plan.md` maintenance — revised in v15; supersedes v14's rule.** The v14 rule — *"stage branches should not edit `plan.md`; keep plan revisions on their own `docs/plan-vNN` branch"* — is **withdrawn**. It optimized the wrong variable. Two branches conflict over `plan.md` only if they are open at the same time, and requiring a dedicated branch for every revision is the most reliable way to create a long-lived open branch that overlaps with everything else. `docs/plan-v15` demonstrated this end to end: cut from `33acd51` before `chore/bpe-23` had merged, held open across two further units of work, it became a **sibling wholesale rewrite** of `main`'s own v14, double-booked the task ID `BPE-26`, and was abandoned without merging. The rule's real cost was never friction — it is that this document spent the whole of Stage 7 claiming CI had never run.
+
+**The replacement is the lifecycle this project was already using, with its one open end closed.** `docs/work/branching-strategy/` and `docs/work/comment-discipline/` both followed *standalone → folded into the main plan → reduced to a pointer*; `docs/work/bpe-26-untrack-lib-readme/` carried a line-level fold-in specification for this file inside its own working document. What was missing was a deadline: comment-discipline's fold-in was scheduled for *"the next plan version bump"*, that bump never happened, and §6b was absent from this document across two merged PRs. **Deferral without a deadline is what produced the backlog that forced a wholesale v15.**
+
+Four conditions:
+
+1. **During active work, the unit of work's own `docs/work/<slug>/plans/plan.md` is the working document.** Deviations, revised decisions and in-flight discoveries are recorded there. **This document is not edited mid-flight** — the parts not being worked on are already done and must not absorb churn.
+2. **The fold-in is the last commit on the branch, before the PR is marked Ready for review.** It reconciles the working document into this one: new or corrected sections, status updates, §12 task-table rows, cross-reference fixes, **and any renumbering** of section numbers and task IDs. Renumbering belongs here because this is the one moment both documents are open together, and the only moment a collision is structurally visible. **Where an ID or section number is contested, the one already on `main` wins and the unmerged claimant is renumbered.** And: **an ID is spent when it is written into §12, not when it is spoken** — any ID minted during a branch's work, *including one used to gate that branch's own merge*, must reach §12 in the fold-in commit. An ID that gated a merge but never reached this document is indistinguishable from a free ID to the next session, and will be reused. This has happened once, to `REV-15` (§7.11).
+3. **Disposition of the working document**, chosen at fold-in: *reduced to a pointer* when the material is standing and now lives here (branching-strategy, comment-discipline), or *left in place as the detailed record* when this document takes only a summary subsection (BPE-26). Either is correct; choosing nothing is not. An abandoned branch's working document is **marked abandoned, not deleted** — a recorded rejected option is worth keeping, per Stage 2's own precedent.
+4. **Trivial work needs no working document.** If the unit of work has no plan, edit `plan.md` directly in its own commit on the active branch. This discipline protects the document from churn; it is not ceremony for a one-line correction.
+
+**A wholesale version bump is now the exception, not the routine.** With every branch folding in its own delta, this document stays current and no catch-up backlog forms. Reserve the wholesale rewrite for genuine restructures — and when one is needed, cut its branch from current `main` and merge it in the same working session. **A plan branch that cannot be merged the day it is opened should not be opened yet.**
+
+**Conflict resolution: re-author, never pick a side.** Two conflicting hunks here are two status claims written at different times; the correct text is whatever is true now.
+
+**What is deliberately accepted.** A time-boxed window in which the working document and this one disagree, closing at merge. And a residual possibility of a `plan.md` conflict, whose cost is one hand-resolved prose conflict with no runtime consequence — nothing in this file compiles, links, or is loaded by CANoe. **That asymmetry against `src/module/exports.cpp`, where a silent mis-merge reorders an already-shipped export row and breaks CAPL scripts at runtime, is exactly why the export table keeps strict serialization and this document does not.** The two files are not comparable and must not share a rule.
+
+**Unchanged.** No agent pushes to `main`. This document still reaches `main` only through a PR under §7.8's criteria. **The "no admin bypass" branch-protection backstop this paragraph used to also claim is not currently in place — see §7.14; HUM-23 is the fix.** Until then, §7.8's criteria are enforced by convention and human review, not mechanically. **This removes a PR cycle, not a gate.**
+
+**Two guardrails.** A fold-in describes work that has not merged yet — write the state that will be true at merge, and **never record a human gate (HUM-13/14/15/16/18) as passed before it has actually passed.** And **`code-reviewer` does not review `plan.md` prose**; it is out of scope for a review whose subject is the export contract, the build, or `/MT`. §7.8 criterion 2 does not apply to a plan-only branch.
 
 **This strategy does not retroactively fix anything already on `main`.** If HUM-13 fails, the fix is a `fix/` branch like any other — meaning the first real exercise of this workflow could be an export-contract fix, the highest-stakes possible debut. That is why BPE-21/22 deliberately go first on a `chore/` branch: exercise the workflow where the stakes are a YAML file.
 
@@ -551,18 +606,27 @@ Two mitigations, both required:
 
 | ID | Task | Owner | Gate |
 |---|---|---|---|
-| **HUM-21** | Approve the exact `settings.json` allow/deny wording, **and make the edit by hand** | Human only | **OPEN — blocks BPE-22 and all agent-driven branching** |
-| **HUM-20** | GitHub config: branch protection, required checks, "Allow Actions to create PRs" ON, workflow permissions, auto-delete branches, bypass ON | Human only | Partly blocked until the first CI run |
-| **BPE-21** | `.github/workflows/auto-pr.yml` as specified in 7.5 | `build-pipeline-engineer` | **Human approval: YES** |
-| **BPE-22** | `.claude/skills/stage-branch/SKILL.md` | `build-pipeline-engineer` | No; blocked on HUM-21 |
-| **BPE-20** | `ci.yml` `branches:` filter | `build-pipeline-engineer` | **Optional/deferred — revisit at Stage 14 for the tag collision** |
-| **REV-13** | Review BPE-21 + BPE-22 together, plus the applied `settings.json` diff | `code-reviewer` | — |
-| **BPE-26** | Untrack `lib/README` from git — see §7.12 | `build-pipeline-engineer` | No |
-| **REV-15** | Review BPE-26 against the §7.12 acceptance checks | `code-reviewer` | — |
+| **HUM-21** | Scoped-push `settings.json` wording, edited by hand | Human only | **DONE — applied** |
+| **HUM-20** | GitHub config: branch protection, required checks, "Allow Actions to create PRs" ON, workflow permissions, auto-delete branches, bypass ON | Human only | **VERIFIED 2026-09-21 — see §7.14; config found absent** |
+| **HUM-23** | Apply the missing GitHub configuration found by HUM-20 — see §7.14 | Human only | **OPEN — blocker before Stage 10** |
+| **BPE-21** | `.github/workflows/auto-pr.yml` as specified in 7.5 | `build-pipeline-engineer` | **DONE — live, opens draft PRs unattended** |
+| **BPE-22** | `.claude/skills/stage-branch/SKILL.md` | `build-pipeline-engineer` | **DONE** |
+| **BPE-20** | `ci.yml` `branches:` filter | `build-pipeline-engineer` | **DONE — taken in PR #1, not deferred** |
+| **BPE-25** | `vcpkg.json` baseline/tool-pin reconciliation + drift guard | `build-pipeline-engineer` | **DONE — see §7.13** |
+| **BPE-26** | Untrack `lib/README` from git — see §7.12 | `build-pipeline-engineer` | **DONE** |
+| **BPE-27** | `auto-pr.yml` base-branch gap + PR-checklist fold-in line + `stage-branch` rebase exception — see §7.13 | `build-pipeline-engineer` | **OPEN — human approval: YES** (touches CI) |
+| **REV-13** | BPE-21 + BPE-22 + BPE-20 + applied `settings.json` diff | `code-reviewer` | **CLEAN — 0 Must-fix, 0 Should-fix** |
+| **REV-15** | BPE-26 against §7.12's acceptance checks | `code-reviewer` | **CLEAN** |
+| **REV-16** | PR #2 confirmatory review after its rebase | `code-reviewer` | **CLEAN** |
+| **REV-17** | PR #1 full-branch review — BPE-21 + BPE-22 + BPE-20 + `VCPKG_ROOT` fix + BPE-25 | `code-reviewer` | **CLEAN — gated the merge of `2123c80`** |
 
-**Sequence:** HUM-12 (push, the plan's current next action) → observe first CI run → HUM-20 → HUM-21 → BPE-21 + BPE-22 on `chore/bpe-21-auto-pr` — **the workflow's first exercise of itself, deliberately while the stakes are a YAML file and not an export table** → REV-13 → human merge → Stage 8 on `stage/08-core-pure-logic`.
+**Two recorded renumbers.** `BPE-26` was claimed by two different tasks — untracking `lib/README` (merged to `main`, named in commit `91e0561`) and the `auto-pr.yml` base-branch gap. The merged claimant keeps the ID; the other becomes **`BPE-27`**. `REV-15` was likewise double-spent: the PR #1 full-branch review was conducted under that label in-session but never written into this document, so a later session correctly read the slot as free and allocated it to BPE-26's review, which merged. BPE-26 keeps `REV-15`; the PR #1 review is retroactively **`REV-17`**.
 
-**Human approval gate: YES.** It touches CI, `.claude/settings.json`, and what gets shipped. Treat the gate as satisfied only once the bot has actually opened a PR and its CI run has been observed green — per §13, written-and-reviewed is not executed.
+**`REV-17` predating `REV-16` is not an anomaly.** REV IDs in this document have never been chronological — `REV-5` through `REV-12` are pre-allocated to Stages 10–17, work that has not started. They are allocation slots, not a timeline.
+
+**Sequence (historical):** HUM-12 → first CI run (red) → `VCPKG_ROOT` fix + BPE-25 → REV-13, REV-17 → PR #1 merged → PR #2 rebased → REV-14, REV-16 → PR #2 merged → BPE-26 + REV-15 merged → v15 → HUM-20 verified (§7.14). **Next:** HUM-23 → BPE-27 → Stage 8 on `stage/08-core-pure-logic`.
+
+**Human approval gate: SATISFIED.** It touched CI, `.claude/settings.json` and what gets shipped, and the gate's own standard was "only once the bot has actually opened a PR and its CI run has been observed green." Both happened. Per §13, written-and-reviewed is not executed — and this stage is now the project's best evidence for that, in both directions.
 
 #### 7.12 `lib/README`: from tracked-on-purpose to untracked (BPE-26)
 
@@ -579,7 +643,47 @@ Two mitigations, both required:
 
 **The decision.** `lib/README` is not needed in the repository. It stays generated locally and on disk, unchanged in content or mechanism; it leaves git's index (`git rm --cached`) and `.gitignore` gains an explicit `lib/README` entry. The one fact from its static prose not already duplicated in `msvc-build-conventions` — zlib's import library being named `zs.lib`, not `zlib.lib` — was added to that skill's zlib bullet so nothing load-bearing is lost.
 
-**A narrow, recorded exception to §7.10.** §7.10 says stage branches should not edit `plan.md`, to keep it from becoming a conflict hotspot. `chore/bpe-26-untrack-lib-readme` edits it anyway, because the stale tracked-on-purpose rationale lives here and must be corrected in the same change that reverses the decision. This is safe only because `docs/plan-v15` — a separate, not-yet-merged plan revision — is deliberately held back to branch off `main` only after this branch merges, so no two branches edit `plan.md` concurrently.
+**The precedent that prompted §7.10's revision.** Under v14's rule this branch's `plan.md` edit was an exception requiring justification, and that justification was *"`docs/plan-v15` is deliberately held back to branch off `main` only after this branch merges."* That hold is exactly what left `docs/plan-v15` stale until it was abandoned. Under §7.10 as revised in v15, editing this document on the branch that changes the decision is **the normal path** — the fold-in — and needs no exception. Recorded here because this branch is the worked example that produced the rule.
+
+#### 7.13 Stage 7 closeout — the first real exercise, and the two defects it exposed
+
+**The first real exercise worked, and cost two defects.** `ci.yml` and `auto-pr.yml` both ran for the first time; the bot opened draft PRs unattended. The automation was sound. What the exercise exposed was one defect in a *prior* stage's dependency pinning and one gap between this stage's design and its implementation. The in-flight material — the live-PR table and the C0–C5 closeout sequence — is deliberately not preserved: that work is done, and a document that tells a reader to go do it would be §13's "plausibly resembles the truth" failure in its purest form.
+
+**Defect 1 — `builtin-baseline` newer than the pinned tool (BPE-25).** Both PRs' CI failed identically on both triplets: `no version database entry for curl at 8.22.0` and `no version database entry for gtest at 1.18.0`, each followed by a list of **older** available versions. `vcpkg.json`'s baseline was `386d7c478221b7ee0c97bfe6ea61dcf65121d564`; `VCPKG_PINNED_TAG` `2026.07.29` dereferences to `9e593bb18ea69cc5095e012465dcd675a822ed0d`. **The baseline was the newer of the two.** vcpkg reads baseline *versions* from the baseline commit but resolves them against the *version database of the checked-out worktree*, pinned at the older tag.
+
+Three things outlast the fix:
+
+- **The `curl` override was not the cause.** `gtest` failed too and has no override. Anything that starts by editing the `overrides` block is treating a symptom.
+- **It was never a CI bug.** `Set-VcpkgPinnedVersion` checks out the same tag locally, so a clean `setup-dev-env.ps1` run reproduces it exactly. BPE-15's 19/0/0 verification predated the tool pin; CI was merely the first clean-cache environment to exercise the combination. **A green local run and a red CI run were both honest.**
+- **The invariant, now in §5:** `builtin-baseline` must be the commit the pinned tag dereferences to. Asserted mechanically in both `ci.yml` and `setup-dev-env.ps1` — that assertion, not the version edit, is the part with lasting value.
+
+The accepted route was the **downgrade** — curl to 8.21.0#1, gtest to 1.17.0#3, confirmed by a real run on 2026-09-21 at 23 OK / 0 WARN / 0 FAIL — taken deliberately in exchange for a reproducible pair, and the `curl` override removed as a redundant second pin source.
+
+**Defect 2 — the stacking rule is not implementable by the bot (BPE-27).** §7.2 says a stacked branch should target its PR at its parent, and that GitHub retargets automatically when the parent lands. **`auto-pr.yml` hardcodes `--base main`**, so the bot cannot do the first half, and the second only fires when a PR's *base* branch is deleted — `main` never is. Worse for the general case: because `chore/*` merges are **squash** (§7.8), the parent's commits never become ancestors of `main` under their original SHAs, so a stacked child stays diff-polluted after its parent lands whatever the base says. **§7.2's stacking rule survives contact with merge-commit parents and does not survive contact with squash parents.** That is the durable lesson, and it is the one that will matter when Stage 11 stacks on Stage 10 with the export table at stake instead of a YAML file.
+
+**BPE-27** amends §7.2, `auto-pr.yml` and `.claude/skills/stage-branch/SKILL.md` to state that the bot always opens against `main`, that a human retargets by hand if an interim clean diff is wanted, and that a squash-merged parent requires the rebase recipe below, scoped explicitly to human execution. It also adds a *plan fold-in done* line to the PR-body checklist scaffold, so §7.8 criterion 6 appears in the PR rather than depending on memory. Note while amending that retargeting a PR's base to a non-`main` branch silently costs it its `pull_request` CI runs, since `ci.yml` filters that trigger to `branches: [main]`; `push` runs on `chore/**` continue, so required checks still report.
+
+**The rebase exception, recorded as precedent.** A stacked branch whose parent squash-merged **may** be rebased — human-only — because merging `main` in is the *more* dangerous option there: both sides present different content for files absent from the merge base, and hand-resolving two YAML files is the exact artifact class §13 keeps burning this project on. The licence is narrow and carries a mechanical proof obligation: **`git diff <pre-rebase-tip> HEAD` must print nothing** before pushing, proving the rebase rewrote SHAs and dropped duplicated commits without altering a single byte. Where the rebased branch touched `src/module/exports.cpp`, a confirmatory review must additionally verify the `CAPL_DLL_INFO_LIST4` rows are byte-identical to `main`'s. **Both are required; neither alone is sufficient.** This was exercised once, on PR #2, with REV-16 as the confirmatory review. `.claude/skills/stage-branch/SKILL.md` otherwise says *never rebase*, and that stands for agents and for ordinary refreshes.
+
+**What the closeout changed about earlier claims.** BPE-20 was taken, not deferred (§7.6). §7.6's open question — whether branch protection evaluates the latest status when two runs report the same check name against one commit — was exercised across PR #1's several reports; **record the observed answer against HUM-20 rather than leaving it open.** Note, given §7.14: that observation was made without branch protection actually active on `main`, so it describes GitHub's Checks-tab behaviour in general, not confirmed enforcement behaviour — the latter still needs re-confirming once HUM-23 lands.
+
+#### 7.14 HUM-20 verified — branch protection on `main` is absent (blocker before Stage 10)
+
+**Verified 2026-09-21, in the GitHub UI, by the human:**
+
+| Setting | State |
+|---|---|
+| Branch protection / ruleset on `main` | **ABSENT — no rule exists at all** |
+| "Allow GitHub Actions to create and approve pull requests" | **ON** — confirmed working; it is why `auto-pr.yml` functions |
+| "Automatically delete head branches" | **OFF** |
+
+**§7.10's "only real mitigation" for the scoped-push relaxation does not currently exist.** §7.10 calls GitHub branch protection with bypass disabled the structural control behind "the server refuses, and the client discourages" — the server half is not there. The exposure this leaves is narrow, not the ordinary case: agent pushes are still caught client-side by the `settings.json` deny list (HUM-21), so routine `stage/*`/`chore/*`/`fix/*`/`docs/*` work is unaffected. What is genuinely unprotected is that nothing server-side currently stops a force-push to `main`, or a deletion of `main`, by anyone with write access who is not going through the deny-listed client. This is a real gap, not a rhetorical one, and it is why HUM-23 is a human-only, non-deferrable task rather than routine cleanup.
+
+**The export-table hazard (§7.10) is down to one of its two required mitigations.** Serializing Stages 10–13 (never two open PRs touching `exports.cpp`) is a convention and still holds regardless of GitHub configuration. "Require branches to be up to date before merging" is a branch-protection setting and, with protection absent, does not exist. **Not urgent today** — Stage 8 does not touch the export table — **but a hard blocker before Stage 10**, which is the first stage that does.
+
+**A second interaction, not previously named: the fold-in rule (§7.10) assumes the same missing setting.** §7.10's fold-in model works by writing the reconciled state as the branch's last commit; without "require branches up to date before merging," a branch that has drifted behind `main` can merge anyway, and a fold-in commit written against a stale `main` can silently **drop** content `main` gained in the meantime rather than surfacing as a visible merge conflict — the same failure shape, one layer quieter, that produced the abandoned `docs/plan-v15` branch this revision replaces. **Interim mitigation, until HUM-23 lands: merge `main` into a branch immediately before writing its fold-in commit**, every time, rather than trusting protection to catch a stale base.
+
+**HUM-23 is cheap and unblocks the enforcement everything else in this stage assumes** — seven settings in one GitHub UI pass (§7.8's table) plus one checkbox for auto-delete. It is placed first in §7.11's sequence for that reason: nothing about it requires Stage 8 to happen first, and leaving it undone longer only widens the window described above.
 
 ---
 
@@ -662,7 +766,7 @@ Trigger: hand-assembling JSON in CAPL proves genuinely cumbersome. Dead code las
 
 ## 12. Task index by agent
 
-### `build-pipeline-engineer` — 22 tasks
+### `build-pipeline-engineer` — 25 tasks
 
 | ID | Stage | Task | Status |
 |---|---|---|---|
@@ -676,20 +780,25 @@ Trigger: hand-assembling JSON in CAPL proves genuinely cumbersome. Dead code las
 | BPE-15 | 4 | `vcpkg.json` manifest, per-triplet install roots, lib allow-list, tool pin | **DONE — EXECUTION-VERIFIED** |
 | BPE-16 | 4 | One-line note that `vcpkg.json`'s `version-string` is not a version source | **Non-blocking** |
 | BPE-17 | 4 | Make `Copy-TripletLibs` synchronising; clear stale `lib/x64/` residue | **Non-blocking** |
-| BPE-8 | 5 | Link/resource wiring for both DLLs; `dumpbin /exports` | **NEEDS EXECUTION EVIDENCE — no build run evidenced** |
-| BPE-9 | 6 | `ci.yml` — independent provisioning + build + `make test` both arches + artifacts + caching; `version.lib` in `SYSLIBS` | **WRITTEN, REVIEWED CLEAN — NEVER EXECUTED** |
-| BPE-18 | 6 | CHANGELOG entries for `ci.yml` and `version.lib`; correct stale 14→19 OK count | **NEW — open Should-fix, non-blocking** |
-| BPE-19 | 6 | Trim duplicated `version.lib` rationale in `exports.cpp` + Makefile | **NEW — optional/stylistic** |
+| BPE-8 | 5 | Link/resource wiring for both DLLs; `dumpbin /exports` | **Both architectures build green in CI; `dumpbin /exports` surface confirmation still outstanding** |
+| BPE-9 | 6 | `ci.yml` — independent provisioning + build + `make test` both arches + artifacts + caching; `version.lib` in `SYSLIBS` | **DONE — EXECUTED; first runs red, two defects found and fixed** |
+| BPE-18 | 6 | CHANGELOG entries for `ci.yml` and `version.lib`; correct stale 14→19 OK count | **Believed closed by the CHANGELOG additions in PRs #1/#2 — verify all three items** |
+| BPE-19 | 6 | Trim duplicated `version.lib` rationale in `exports.cpp` + Makefile | **CLOSED — absorbed by BPE-24 + CPP-17** |
 | BPE-10 | 9 | Link `libcurl.lib`, `zs.lib` and the system libs | |
 | BPE-11 | 14 | Release workflow — reuse `ci.yml` provisioning, tag extraction, approval gate, publish | |
 | BPE-12 | 14 | Generate the operation list from the export table | |
 | BPE-13 | 15 | Build-system cleanup pass | |
 | BPE-14 | 14 | Cut `CHANGELOG.md` `[Unreleased]` into a released section | |
-| BPE-21 | 7 | `auto-pr.yml` — bot-side draft PR, GITHUB_TOKEN, ahead-by + idempotency guards | **NEW — designed, not written** |
-| BPE-22 | 7 | `.claude/skills/stage-branch/SKILL.md` — branch creation + push procedure | **NEW — blocked on HUM-21** |
-| BPE-20 | 7 | `ci.yml` `branches:` filter — tag-collision fix | **NEW — optional/deferred to Stage 14** |
+| BPE-21 | 7 | `auto-pr.yml` — bot-side draft PR, GITHUB_TOKEN, ahead-by + idempotency guards | **DONE** |
+| BPE-22 | 7 | `.claude/skills/stage-branch/SKILL.md` — branch creation + push procedure | **DONE** |
+| BPE-20 | 7 | `ci.yml` `branches:` filter — tag-collision fix | **DONE** |
+| BPE-23 | 6b | `project-docs` comment rule + rewritten `description:`; pointer bullets in four agents; `code-reviewer` checklist item | **DONE** |
+| BPE-24 | 6b | `docs/ci-pipeline.md`; trim `ci.yml`, `auto-pr.yml`, `Makefile` headers; disposition list | **DONE** |
+| BPE-25 | 7 | `vcpkg.json` baseline/tool-pin reconciliation + drift guard in both provisioning paths | **DONE — verified by a real run** |
+| BPE-26 | 7 | Untrack `lib/README` from git | **DONE** |
+| BPE-27 | 7 | `auto-pr.yml` base-branch gap; PR-checklist fold-in line; `stage-branch` rebase exception | **OPEN — human approval: YES** |
 
-### `cpp-implementer` — 16 tasks
+### `cpp-implementer` — 17 tasks
 
 | ID | Stage | Task | Status |
 |---|---|---|---|
@@ -709,6 +818,7 @@ Trigger: hand-assembling JSON in CAPL proves genuinely cumbersome. Dead code las
 | CPP-13 | 13 | Append accessor operations + CHANGELOG entry | |
 | CPP-14 | 16 | Struct registry + mapping (conditional) | |
 | CPP-15 | 17 | CAPL-side request building (conditional) | |
+| CPP-17 | 6b | Trim `exports.cpp` comments (absorbs BPE-19's half) | **DONE — human-gated; export-table rows byte-identical** |
 
 ### `test-engineer` — 12 tasks
 
@@ -727,7 +837,7 @@ Trigger: hand-assembling JSON in CAPL proves genuinely cumbersome. Dead code las
 | TEST-10 | 16 | Struct mapping tests (conditional) | |
 | TEST-11 | 17 | Request-builder tests (conditional) | |
 
-### `code-reviewer` — 13 tasks
+### `code-reviewer` — 17 tasks
 
 | ID | Stage | Focus | Status |
 |---|---|---|---|
@@ -743,9 +853,12 @@ Trigger: hand-assembling JSON in CAPL proves genuinely cumbersome. Dead code las
 | REV-10 | 15 | Final consistency review incl. `project-docs` agreement | |
 | REV-11 | 16 | Contract append — struct mapping (conditional) | |
 | REV-12 | 17 | Contract append — request building (conditional) | |
-| REV-13 | 7 | `auto-pr.yml` + `stage-branch` skill + the applied `settings.json` diff | **NEW** |
+| REV-13 | 7 | `auto-pr.yml` + `stage-branch` skill + the applied `settings.json` diff | **CLEAN — 0 Must-fix, 0 Should-fix** |
+| REV-14 | 6b | Comment discipline — BPE-23 + BPE-24 + CPP-17, incl. rationale-migration Must-fix check | **CLEAN — 2 Must-fix resolved (`cf9e74b`, `25f6033`)** |
+| REV-16 | 7 | PR #2 confirmatory review after its rebase; export-table rows byte-identical | **CLEAN** |
+| REV-17 | 7 | PR #1 full-branch review — BPE-21 + BPE-22 + BPE-20 + `VCPKG_ROOT` fix + BPE-25 | **CLEAN — gated the merge of `2123c80`** |
 
-### Human — 21 tasks
+### Human — 23 tasks
 
 | ID | Stage | Task | Status |
 |---|---|---|---|
@@ -753,23 +866,25 @@ Trigger: hand-assembling JSON in CAPL proves genuinely cumbersome. Dead code las
 | HUM-19 | 2 | Re-run `setup-dev-env.ps1` for real to verify BPE-15 | **DONE — 19/0/0 both arches** |
 | HUM-10 | 3 | Install Vector CANoe/CANalyzer | **UNCONFIRMED — blocks HUM-13 only** |
 | HUM-11 | 3 | Build + load the official Vector sample unchanged in CANoe | **UNCONFIRMED — blocks HUM-13 only** |
-| HUM-12 | 4/5/6 | Commit and push Stage 4 + 5 + 6 work — **this is what first executes CI** | **NEXT ACTION** |
+| HUM-12 | 4/5/6 | Commit and push Stage 4 + 5 + 6 work — **this is what first executes CI** | **DONE — executed; this is what made Stages 6 and 7 real** |
 | HUM-13 | 5 | Load and call `restifyGetVersion` from a real `.can` script | **BLOCKED on Stage 3 — the Stage 5 gate** |
 | HUM-14 | 10 | Verify sync operations in CANoe | |
 | HUM-15 | 11 | Verify async operations in CANoe | |
 | HUM-16 | 12 | Verify CAPL associative-field syntax against the official CANoe help | |
 | HUM-17 | 14 | Create the release tag | |
 | HUM-18 | 14 | Verify the CI artifact in CANoe, then approve the publish | |
-| HUM-20 | 7 | GitHub config: branch protection, required checks, Actions-can-create-PRs, auto-delete branches | **NEW** |
-| HUM-21 | 7 | Approve exact `settings.json` scoped-push wording **and make the edit by hand** | **NEW — OPEN, blocks BPE-22** |
+| HUM-20 | 7 | GitHub config: branch protection, required checks, Actions-can-create-PRs, auto-delete branches | **VERIFIED 2026-09-21 — PARTIALLY CONFIGURED.** "Allow Actions to create PRs" ON. Branch protection/ruleset on `main`: ABSENT. Auto-delete head branches: OFF. See §7.14. |
+| HUM-21 | 7 | Approve exact `settings.json` scoped-push wording **and make the edit by hand** | **DONE — applied by hand** |
+| HUM-22 | 6b | Approve the exact comment-discipline rule wording | **APPROVED** |
+| HUM-23 | 7 | Apply the missing GitHub configuration: the §7.8 ruleset on `main` (7 settings), auto-delete head branches | **OPEN — human only. Blocker before Stage 10.** |
 
 ---
 
 ## 13. Risks
 
-**Static review does not substitute for execution — seven recorded instances, and two fresh candidates now standing unexecuted.** Recorded: (1) Polish-localized `cl.exe` banner defeating an English-only architecture check; (2) a `curl[schannel]` vcpkg feature name that no longer exists; (3) `%VSCMD_ARG_TGT_ARCH%` returning its own literal text; (4) `LNK1561` from `link.exe` refusing to infer an entry point from a `.lib`; (5) the `make -n` `CreateProcess` artifact; (6) the shared-install-root triplet collision; (7) the unfiltered lib copy. Items 6 and 7 both passed a clean static review and were found only by running the script.
+**Static review does not substitute for execution — nine recorded instances.** Recorded: (1) a Polish-localized `cl.exe` banner defeating an English-only architecture check; (2) a `curl[schannel]` vcpkg feature name that no longer exists; (3) `%VSCMD_ARG_TGT_ARCH%` returning its own literal text; (4) `LNK1561` from `link.exe` refusing to infer an entry point from a `.lib`; (5) the `make -n` `CreateProcess` artifact; (6) the shared-install-root triplet collision; (7) the unfiltered lib copy; **(8) BPE-25's `builtin-baseline`/tool-pin mismatch; (9) `ilammy/msvc-dev-cmd` clobbering `VCPKG_ROOT` through `GITHUB_ENV`.** Items 6 and 7 passed a clean static review and were found only by running the script; items 8 and 9 passed clean static reviews and were found only by running CI.
 
-**The two fresh candidates are Stage 5's unbuilt DLLs (BPE-8) and Stage 6's never-run workflow (BPE-9).** Both have passed clean reviews. On this project's record, that is weak evidence. CI is the more exposed of the two: action resolution, PATH and environment inheritance across steps, `vcvarsall` propagation, cache behaviour and `make` availability on the runner image are all runtime properties that no amount of YAML reading settles. **Plan for a fix cycle on the first CI run rather than treating red as a setback.**
+**v14's two "fresh candidates" have now both resolved — and both resolved the predicted way.** v14 named Stage 5's unbuilt DLLs and Stage 6's never-run workflow as standing candidates, and said *"plan for a fix cycle on the first CI run rather than treating red as a setback."* The first CI runs were red, two genuine defects surfaced, and neither was findable by reading YAML. **This prediction is now the best-evidenced claim in the document. Treat it as a planning input, not a caution.** Instance 8 carries an extra lesson of its own: the *causing* change (adding the tool pin) and the *failing* file (`vcpkg.json`, unchanged for weeks) were in different stages entirely — the same "failing step and causing step are different steps" shape as instance 6, stretched across time instead of across a script.
 
 Item 6 carries an extra lesson: **the failing step and the causing step were different steps.** Three x86 steps reported "Expected lib directory not found" while the `vcpkg install (x86-windows-static)` step immediately above them said `[OK]`. Both reports were accurate. Diagnosing it required running vcpkg directly and reading its own output about removing packages.
 
@@ -801,7 +916,7 @@ The RC2237 scare showed the inverse failure: a hand-reconstructed invocation pro
 
 **Bitness parity — structurally enforced for the build, continuously verified only once CI runs.** Only x64 test artifacts exist locally. `ci.yml` closes this on its first green run; until then the gap is real.
 
-**Documentation that plausibly resembles the truth.** Three instances now: the inverted transcript (corrected), the stale "14 OK" count, and the missing CI/`version.lib` entries. The first two are actively misleading; the third is merely absent, which is the better failure. BPE-18 closes all three.
+**Documentation that plausibly resembles the truth — four instances, and the fourth is a new shape.** The first three were the inverted transcript (corrected), the stale "14 OK" count, and the missing CI/`version.lib` entries. The fourth is **a double-spent task ID**: `REV-15` gated the merge of PR #1, was never written into this document, and was therefore correctly read as free by a later session and allocated to BPE-26's review. Unlike a stale status line, a double-spent ID produces two artifacts that *both* claim to be the same thing, and the collision is discoverable only by reading two documents side by side. **The root cause is identical in all four: the work happened, the record was deferred, the next actor read a document that was already false.** §7.10's fold-in rule and its "an ID is spent when it is written into §12" clause exist for exactly this; under them, PR #1 could not have merged without writing its review ID down, and the collision could not have occurred.
 
 **A changelog rule scoped to one file type does not generalise itself.** The export-table CHANGELOG rule was followed precisely. Build and CI changes — equally user-visible — were not covered by it and were missed. §5 now states both halves.
 
@@ -825,26 +940,24 @@ The RC2237 scare showed the inverse failure: a hand-reconstructed invocation pro
 
 ## 14. Operational loose ends
 
-1. **Three stages' worth of work is uncommitted.** `src/module/exports.cpp`, `src/module/exports.def` and `.github/` are untracked; `Makefile` and `CHANGELOG.md` are modified. Because nothing is committed, reviews still cannot prove "only these changes" via a clean diff boundary and must verify by content-reading instead. Committing restores that boundary — and pushing is what first executes CI.
-2. **BPE-18 should land in the same commit as the CI workflow,** not after it. A changelog entry that ships with its change is a different artifact from one added later.
-3. **`lib/x64/` residue** — see BPE-17. Gitignored, so it will not enter the commit.
-4. **BPE-8 has no execution evidence.** Running `make build-x86` and `make build-x64` locally is cheap, unblocked, and would have caught `LNK1561`-class problems before CI does.
-5. **The README execution-policy/switches expansion** has still not been through `code-reviewer`. Prose, not executable logic; let it ride along with the next review.
-6. **`docs/work/branching-strategy/` is untracked and now superseded.** Its `plans/plan.md` has been reduced to a stub pointing at Stage 7. The folder may simply be deleted instead — nothing in history depends on it, since it was never committed.
+1. **HUM-20 verification is done; HUM-23 is the open process item.** HUM-20 confirmed in the GitHub UI on 2026-09-21 that branch protection/ruleset on `main` is absent, "Allow Actions to create PRs" is ON, and auto-delete head branches is OFF (§7.14). HUM-23 applies the missing configuration: the §7.8 ruleset (required checks, bypass-disabled, up-to-date-before-merging, and the rest) plus auto-delete. §7.8's sequencing gotcha has passed — the checks have reported, so they are selectable. **§7.10's guarantee that a fold-in is authored against an up-to-date `main` leans on "require branches to be up to date"; that setting is currently off, so the guarantee is conventional, not mechanical, until HUM-23 lands.** While there, record §7.6's duplicate-check-name observation.
+2. **BPE-27 is open and touches CI** — see §7.13. Human approval required.
+3. **BPE-16 and BPE-17 remain non-blocking.** BPE-17's `lib/x64/` residue is gitignored and cannot enter a commit.
+4. **BPE-18 needs verifying rather than assuming** — confirm all three CHANGELOG items are present.
+5. **`docs/work/branching-strategy/`** is superseded and reduced to a pointer. **`docs/work/comment-discipline/`** may now be reduced to a pointer — §6b satisfies its §8 exit condition (the `docs/` destinations are listed, and REV-14's rationale-migration check passed).
+6. **`docs/plan-v15` the branch is abandoned and deleted, not merged.** Its surviving content is in §6b, §7.13 and §5's baseline invariant. It was a sibling wholesale rewrite of v14 from a shared v13 ancestor (`33acd51`); merging it would have regressed this document and would have published a closeout narrative describing work already finished. See §7.10.
+7. **The `dumpbin /exports` confirmation for BPE-8 is still unevidenced** and is cheap — one CI step, or one local run per architecture.
 
 ---
 
 ## 15. Execution order
 
-**1 (done) → 2 (done, verified) → 4 (done) → 5 Half A (done, reviewed clean) → 6 written (reviewed clean) → HUM-12 commit + push → 6 green → 7 (branching + automation) → 3 (unconfirmed) → 5 gate (HUM-13) → 8 → 9 → 10 → 11 → 12 → 13 → 14 → 15**, with Stages 16–17 only on demonstrated need.
+**1 → 2 → 4 → 5 Half A (executed, green) → 6 (executed, green) → 7 (executed, closed out) → HUM-20 verified (§7.14) → 8 → 9 → 10 → 11 → 12 → 13 → 14 → 15**, with Stages 16–17 only on demonstrated need.
 
-**The critical path has forked, and that is the main change in v13.** Stage 3 no longer gates everything. Two tracks now run in parallel:
+**Track A is complete.** Commit, push, first CI run, fix cycle, green on both architectures — done, and it closed the x86 evidence gap and BPE-8's build half along the way. **Track B (human, CANoe) is now the sole critical path for the Stage 5 gate:** HUM-10 → HUM-11 → HUM-13 → Stage 5 gate closed.
 
-- **Track A (no CANoe needed, actionable today):** commit and push → observe the first CI run → fix whatever it surfaces → Stage 6 green. This also closes the x86 test evidence gap and supplies BPE-8's build evidence.
-- **Track B (human, CANoe):** HUM-10 → HUM-11 → HUM-13 → Stage 5 gate closed.
+Stage 8 is unblocked and may begin immediately on `stage/08-core-pure-logic`, independently of HUM-23. But **no export-table append (Stage 10 onward) may proceed until both HUM-13 and HUM-23 have passed** — HUM-13 because appending to a table whose base layout has never been loaded by CANoe would multiply the unknowns in exactly the way Stage 5 exists to prevent; HUM-23 because "require branches up to date before merging" is the mechanical half of the export-table merge-hazard mitigation (§7.10, §7.14) and is currently missing.
 
-Stage 7 can begin once Track A is green; it does not need Track B. Stage 8 begins once Stage 7 has landed, on a branch. But **no export-table append (Stage 10 onward) may proceed until HUM-13 has passed** — appending to a table whose base layout has never been loaded by CANoe would multiply the unknowns in exactly the way Stage 5 exists to prevent.
+BPE-16, BPE-17, BPE-18 and BPE-27 are non-blocking and can happen at any time; BPE-27 needs human approval because it touches CI. HUM-23 is cheap and non-urgent for Stage 8/9 but is a hard blocker before Stage 10.
 
-BPE-16, BPE-17, BPE-18 and BPE-19 are non-blocking and can happen at any time; BPE-18 is best folded into the HUM-12 commit.
-
-**Status:** v14. Stages 1, 2 and 4 complete and execution-verified. Stage 5 code complete and reviewed clean, hard gate open on Stage 3. Stage 6 written and reviewed clean, never executed. Stage 7 designed and settled (Option A auto-PR, draft PRs, hand-written `gh` script, BPE-20 deferred), with HUM-21's exact `settings.json` wording the sole open decision. Next action: HUM-12.
+**Status:** v15. Stages 1, 2 and 4 complete and execution-verified. Stage 5 code complete and building on both architectures; hard gate open on Stage 3. **Stages 6 and 7 executed and closed out** — CI green on both legs, branching and auto-PR live, three units of work merged through the flow. Comment discipline is a loaded rule (§6b). `plan.md` maintenance is the fold-in model (§7.10). **HUM-20 verified: branch protection on `main` is absent (§7.14).** Open: HUM-23 (branch protection — blocker before Stage 10), BPE-27, BPE-16/17/18. Next action: **HUM-23, then Stage 8.**
