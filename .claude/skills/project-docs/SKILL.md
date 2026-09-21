@@ -1,9 +1,38 @@
 ---
 name: project-docs
-description: Conventions for README.md, examples/*.can, and CHANGELOG.md — what each document is for, who updates it, and when. Load this before touching README.md, anything under examples/, or CHANGELOG.md.
+description: Conventions for README.md, examples/*.can, and CHANGELOG.md — what each document is for, who updates it, and when — plus the project's comment-discipline rule for inline comments. Load this before touching README.md, anything under examples/, or CHANGELOG.md, and before any edit to src/, tests/, Makefile, or .github/workflows/.
 ---
 
 # Project documentation conventions
+
+## Comment discipline
+
+Inline comments explain **why**, never **what** or **how** — the code already says those. Three tiers, in order of preference:
+
+1. **No comment.** The default. A clear name beats a comment.
+2. **One line, WHY only.** When the reason for a non-obvious construct isn't recoverable from the code. One line, no wrapping.
+3. **A multi-line block — only as an editing trap.** Permitted *only* when a future editor of that exact construct would otherwise reintroduce a specific, previously-observed bug, or violate a one-way-door decision. Must state the trap in its first line, must be ≤ 10 lines, must contain no historical narrative and no rejected-options discussion. If you cannot name the bug it prevents, it is not tier 3.
+
+**Never write, anywhere in a source, build, or CI file:**
+
+- a file-header block summarising "what this does and does not do", or enumerating traps/decisions;
+- multi-paragraph rationale, or "why we chose Option A over Option B";
+- restatement of a `plan.md` section — point to it instead (`see plan.md §7.5`), never repeat it;
+- commit/PR archaeology ("the bug just fixed in `c11a5b6`", "found the hard way on the first real run");
+- the same rationale in two files. One substantive explanation plus a pointer from the other.
+
+**Where explanatory material goes instead.** The discriminator is: **is this still a decision, or is it now just a fact?**
+
+| Material | Home | Test |
+|---|---|---|
+| Rationale that still **constrains future work** — one-way doors, rejected options that must not be re-litigated, open trade-offs | `docs/work/<slug>/plans/plan.md` | *Could a future stage still decide this differently?* |
+| A **settled** bug: what broke, how it was found, why the fix has the shape it has | `docs/<topic>.md` (e.g. `development-environment.md`, `ci-pipeline.md`) | *Is this now simply a fact about the world?* |
+| The user-visible **fact** that something changed | `CHANGELOG.md` | — |
+| Contributor/agent **conventions** | `CLAUDE.md` or the relevant skill | — |
+
+Archival documents under `docs/` are **topic-scoped, never stage-scoped.** Each section carries a one-line breadcrumb — `(found during Stage 6, BPE-9)` — so stage attribution survives without fragmenting the topic.
+
+**Protected existing comments — do not strip these under this rule:** the `Makefile`'s `/SUBSYSTEM:CONSOLE` and `make -n` trap comments (tier 3, blessed by plan.md §6a), and `exports.cpp`'s CAPL naming-convention statement (required by plan.md §5 to live in the file being edited — trim it, but never remove it).
 
 ## Three documents, three audiences — do not let them duplicate each other
 

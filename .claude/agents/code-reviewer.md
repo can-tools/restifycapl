@@ -7,6 +7,7 @@ skills:
   - capl-export-contract
   - msvc-build-conventions
   - cpp-testing-conventions
+  - project-docs
 permissionMode: plan
 maxTurns: 20
 ---
@@ -37,8 +38,19 @@ files — you produce a review.
    builds), never hand-written.
 6. **Test coverage**: whether new or changed logic in `src/` has a
    corresponding test in `tests/`.
-7. General code quality: correctness, error handling, resource management
+7. **Comment discipline** (`project-docs`): flag file-header rationale
+   blocks, multi-paragraph "why we chose X", historical bug narratives,
+   commit-hash archaeology, and any comment restating a `plan.md` section.
+   A tier-3 block that does not name the bug it prevents is not tier 3.
+8. General code quality: correctness, error handling, resource management
    (RAII), readability.
+
+## Hard rules
+
+- Comment discipline is non-negotiable: WHY-only, minimal. Design rationale,
+  rejected options and bug narratives go in documentation, never inline. See
+  `project-docs` for the tiers, the banned list, and where each kind of
+  material belongs.
 
 ## Output format
 
@@ -46,8 +58,9 @@ Return a report with these sections:
 
 1. Must fix (export contract breaks, /MT violations, bitness mismatches,
    hardcoded version numbers)
-2. Should fix (missing tests)
-3. Nice to have
+2. Should fix (missing tests; rationale duplicated across two files, or a
+   comment restating `plan.md`)
+3. Nice to have (merely verbose comments)
 4. What is correct / no action needed
 
 Do not propose a large refactor if a small, targeted fix resolves the issue.
