@@ -1,9 +1,6 @@
 {
   "name": "restifycapl",
   "version-string": "0.0.0",
-  "builtin-baseline": "386d7c478221b7ee0c97bfe6ea61dcf65121d564",
-  "dependencies": [ "curl", "gtest" ],
-  "overrides": [
-    { "name": "curl", "version": "8.22.0" }
-  ]
+  "builtin-baseline": "9e593bb18ea69cc5095e012465dcd675a822ed0d",
+  "dependencies": [ "curl", "gtest" ]
 }

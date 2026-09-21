@@ -223,6 +223,42 @@ jobs:
             throw "bootstrap-vcpkg.bat ran but vcpkg.exe still not found under $env:VCPKG_ROOT"
           }
 
+      # BPE-25 drift guard: vcpkg.json's builtin-baseline is a commit in the
+      # SAME registry the pinned vcpkg TOOL (VCPKG_PINNED_TAG) checks out --
+      # two independent pins that must still name the same point, or version
+      # resolution breaks exactly the way it did in BPE-25 (baseline newer
+      # than the tool's own version database -> "no version database entry
+      # for curl/gtest at X.Y.Z"). Always runs, cache hit or not, since a
+      # cached tool checkout could just as easily be stale against a
+      # vcpkg.json edited since the cache was written. Fails loudly with an
+      # explanation rather than letting `vcpkg install` fail later with the
+      # much less obvious "no version database entry" message.
+      # NOTE: deliberately no PowerShell @"..."@ here-string for the error
+      # message below -- its closing "@ marker must sit at column 0, which
+      # conflicts with the YAML `run: |` block scalar's requirement that
+      # every continuation line stay indented at or beyond the block's
+      # established indentation (confirmed by actually parsing this file:
+      # an earlier version of this step using a here-string broke YAML
+      # parsing with "could not find expected ':'" a few lines below the
+      # opening @"). An array of strings joined with `n stays indented
+      # throughout and sidesteps the conflict entirely.
+      - name: Verify vcpkg tool pin matches vcpkg.json's builtin-baseline
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $baseline = (Get-Content -Raw 'vcpkg.json' | ConvertFrom-Json).'builtin-baseline'
+          $toolCommit = (git -C "$env:VCPKG_ROOT" rev-parse HEAD).Trim()
+          if ($baseline -ne $toolCommit) {
+            $lines = @(
+              "vcpkg.json's builtin-baseline ($baseline) does not match the pinned vcpkg TOOL's checked-out commit ($toolCommit, from VCPKG_PINNED_TAG=$env:VCPKG_PINNED_TAG).",
+              "These are two independent pins (WHICH port versions resolve vs. WHICH vcpkg.exe resolves them) that must name the same commit -- otherwise version resolution reads baseline versions from one commit but checks them against a version database pinned at a different (often older) commit, producing 'no version database entry' errors.",
+              "See BPE-25 and docs/development-environment.md's 'Pinning the vcpkg tool itself' section.",
+              "Fix by re-deriving the commit VCPKG_PINNED_TAG dereferences to (git ls-remote --tags https://github.com/microsoft/vcpkg.git <tag>) and setting vcpkg.json's builtin-baseline to that exact commit."
+            )
+            throw ($lines -join "`n")
+          }
+          Write-Host "vcpkg tool pin ($toolCommit) matches vcpkg.json's builtin-baseline."
+
       # Cache 2/2: this triplet's install root. Keyed on vcpkg.json content,
       # the triplet (x86 and x64 must never share a cache entry -- that
       # would just reintroduce trap 2 via the cache instead of the install

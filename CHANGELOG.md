@@ -34,6 +34,20 @@ hand-invented version numbers.
 
 ### Fixed
 
+- `vcpkg.json`: `builtin-baseline` was a newer vcpkg registry commit than
+  the pinned vcpkg tool (`VCPKG_PINNED_TAG` in `ci.yml` /
+  `$VcpkgPinnedTag` in `scripts/setup-dev-env.ps1`), so `vcpkg install`
+  resolved baseline versions (curl 8.22.0, gtest 1.18.0) that don't exist
+  in the older, checked-out version database, failing both triplets with
+  "no version database entry for curl/gtest at X.Y.Z" (BPE-25).
+  `builtin-baseline` is now pinned to
+  `9e593bb18ea69cc5095e012465dcd675a822ed0d`, the exact commit
+  `VCPKG_PINNED_TAG`'s tag (`2026.07.29`) dereferences to, and the
+  now-redundant `curl` version override was removed. This downgrades the
+  DLL's linked dependencies to libcurl 8.21.0#1 and (test-only) GoogleTest
+  1.17.0#3. A drift guard (CI step + `Assert-VcpkgBaselinePin` in
+  `scripts/setup-dev-env.ps1`) now fails loudly if these two pins ever
+  diverge again instead of only being documented.
 - `.github/workflows/ci.yml`: the vcpkg tool checkout step cloned
   unconditionally into `VCPKG_ROOT`, which `ilammy/msvc-dev-cmd@v1` had
   silently repointed at the VS-bundled vcpkg checkout already present on
