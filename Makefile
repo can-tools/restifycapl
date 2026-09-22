@@ -80,7 +80,7 @@ SRC_DIRS := src/core src/http src/registry src/mapping src/module
 SRCS     := $(wildcard $(addsuffix /*.cpp,$(SRC_DIRS)))
 OBJS     := $(patsubst src/%.cpp,$(BUILDDIR)/obj/%.obj,$(SRCS))
 
-INCLUDES := /I include /I include/vendor /I include/vendor/capl-dll-sdk
+INCLUDES := /I include /I include/vendor /I include/vendor/capl-dll-sdk /I src
 
 # /std:c++17, /EHsc and /MT are identical across architectures by design --
 # see msvc-build-conventions. /MT is mandatory; never change to /MD here.
@@ -174,7 +174,7 @@ TEST_OBJS        := $(TEST_LOGIC_OBJS) $(TEST_CASE_OBJS)
 # GoogleTest headers are architecture-agnostic and live alongside the other
 # vendored third-party headers; only the .lib binaries are per-architecture
 # (lib/gtest/x86, lib/gtest/x64 -- see msvc-build-conventions).
-TEST_INCLUDES := /I include /I include/vendor
+TEST_INCLUDES := /I include /I include/vendor /I src
 TEST_CXXFLAGS := /nologo /c /std:c++17 /EHsc /MT /W4 $(TEST_INCLUDES)
 TEST_LIBS     := gtest.lib gtest_main.lib $(LIBS)
 TEST_EXE      := $(TEST_BUILDDIR)/restifycapl-tests.exe

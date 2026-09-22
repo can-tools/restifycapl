@@ -66,5 +66,8 @@
       "Bash(git push * --delete*)",
       "Bash(git push * :*)"
     ]
+  },
+  "enabledPlugins": {
+    "handoff@handoff-marketplace": true
   }
 }

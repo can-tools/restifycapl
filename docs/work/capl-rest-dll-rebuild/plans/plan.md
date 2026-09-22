@@ -54,7 +54,7 @@ A developer machine and a CI runner are independent environments. Each provision
 
 **Follow-ups outstanding:** BPE-27 (`auto-pr.yml` base-branch gap — §7.13). **HUM-23 is done** — the GitHub configuration HUM-20 found absent on 2026-09-21 was applied and verified present via the GitHub REST API on 2026-09-22 (§7.14). **BPE-19 closed** as absorbed by BPE-24 + CPP-17. **BPE-16, BPE-17 and BPE-18 are closed** (`chore/bpe-16-17-18-cleanup`, 2026-09-22): BPE-16 added the one-line `version-string`-is-not-a-source note to `msvc-build-conventions`; BPE-17 deleted the stale `lib/x64/gmock.lib`/`gtest.lib` residue and made `Copy-TripletLibs` synchronising (prunes non-allow-listed `.lib` files from the destination before copying); BPE-18's "believed closed" framing turned out wrong on actual inspection — **all three CHANGELOG items were genuinely missing**, not just unverified: no `Added` entry existed for `ci.yml` itself, no entry existed for the `version.lib`/`SYSLIBS` addition, and the `setup-dev-env.ps1` entry still read the stale "14 OK, 0 WARN, 0 FAIL". All three were added/corrected. The same branch also bumped `actions/checkout`, `actions/cache` and `actions/upload-artifact` in `ci.yml` off the deprecated Node 20 runtime and SHA-pinned `ilammy/msvc-dev-cmd` (BPE-28, §12).
 
-**Next:** **Stage 8 on `stage/08-core-pure-logic`.** HUM-23 (branch protection on `main`, §7.14) landed 2026-09-22 and is no longer a precondition. HUM-12 is **done** — it is what made Stages 6 and 7 real.
+**Next:** **Stage 9 — HTTP layer and synchronous operations (§8)**, on a `stage/09-*` branch cut from `main` once Stage 8's PR has merged. Stage 9 is logic-only, has no human gate (§7.8) and appends nothing to the export table, so HUM-13 does not gate it. HUM-23 (branch protection on `main`, §7.14) landed 2026-09-22 and is no longer a precondition. HUM-12 is **done** — it is what made Stages 6 and 7 real.
 
 ---
 
@@ -92,6 +92,9 @@ Documentation practice is deliberately not a numbered stage — see §6a.
 - **Never return a raw text pointer** from a CAPL-exposed operation — always write into a caller-supplied buffer with its size. `restifyGetVersion` is the reference implementation of this shape.
 - **1-byte packing must cover the entire export table** through and including the terminating pointer.
 - **Dependency direction.** `src/core/` imports nothing from `src/http/`, `src/registry/`, `src/mapping/`. Only `src/module/` includes the CAPL SDK headers — currently `exports.cpp` is the only `.cpp` under `src/` at all, and it is the only file including those headers. `make test` compiles `src/core`, `src/http`, `src/registry`, `src/mapping` and deliberately excludes `src/module`.
+- **`Status` codes are absorbed, never renumbered — `src/core/status.h` owns the whole numbering space (Stage 8, CPP-18).** `0`/`-1`/`-2`/`-3` are the codes `restifyGetVersion` already ships and that CAPL scripts already depend on at runtime; the enum adopted them as-is rather than starting fresh. `-4..-9` are **reserved** for module-local glue codes and are currently empty. `VersionResourceUnavailable = -3` is declared in `src/core/status.h` but is unreachable from `src/core/` — only `src/module/` can produce it — and is declared there anyway so the numbering space has exactly one owner. `ParseError = -10` is a **forward reservation with no caller yet**, most likely claimed by Stage 9's sync-operations or Stage 12's flattening. Adding a code means appending a new value; re-minting an existing one breaks shipped CAPL scripts in exactly the way an export-table renumber would, and no compiler catches either.
+- **The `To*` / `Parse*` boundary is deliberate and stays that way (Stage 8, CPP-2).** The `To*` family takes `const nlohmann::json&` and is **strict**: a JSON string where a number was requested returns `TypeMismatch`, never a silent fallback. `ParseLong`/`ParseDouble` take `std::string_view` and are a **deliberately named lenient escape hatch for raw text** — "lenient" means accepting raw text at all, not tolerating garbage (a valid numeric prefix with a trailing tail is still `ParseError`). **The `To*` family never calls the `Parse*` family.** A later stage that wants coercion adds it explicitly at its own call site; it must not arrive by making a `To*` function quietly fall through.
+- **`data.items[0].name` path syntax is interim, not the target architecture (Stage 8, CPP-3).** Dot for object keys, brackets for array indices. Struct mapping — deferred per `CLAUDE.md`'s Scope, Stage 16 here — is the real destination for structured access and is free to supersede this syntax without archaeology. The caveat is stated in `json-path.h`'s own header, not only here, so it is read at the point of use. **The window is open only while nothing is exported:** once a `.can` example or a CAPL script uses this syntax it becomes a breaking change to alter, and Stages 12–13 are where that door closes.
 - **`lib/<arch>/` is product-linked; `lib/gtest/<arch>/` is test-only** and must never enter the DLL link line.
 - **Tests run outside CANoe.** The CAPL export glue is the documented exception (`cpp-testing-conventions`) — it can only be verified inside a real CANoe instance, which is why `src/module` is excluded from the test compile and why HUM-13 is irreplaceable.
 - **No version number is ever typed by hand.** `vcpkg.json`'s `version-string` is manifest boilerplate and is not an exception — it feeds nothing. `restifyGetVersion` reads the DLL's *own* version resource at runtime (`GetModuleHandleExA` / `GetFileVersionInfoA`), so even the version string CAPL sees derives from the Git tag through `version.rc` rather than from a literal.
@@ -196,7 +199,7 @@ Two options: have `Copy-TripletLibs` remove non-allow-listed `.lib` files from t
 
 This surfaced a real latent bug that could not manifest until a real `main()`-providing static library existed to link against: **`link.exe` infers the subsystem and entry point only from `main`/`WinMain` in `.obj` files passed directly on the command line, never transitively from a `.lib`.** With `main()` coming solely from `gtest_main.lib`, the link failed `LNK1561`. Root-caused with `/VERBOSE` and `dumpbin /symbols`, fixed with `/SUBSYSTEM:CONSOLE` on the test recipe only, and independently re-verified by a separate reviewer running its own `dumpbin` and `make test`.
 
-**What `make test` currently proves.** All of `src/core`, `src/http`, `src/registry`, `src/mapping` still contain only `.gitkeep` — `exports.cpp` is the only `.cpp` under `src/`, and it is deliberately excluded from the test compile. So the suite still compiles exactly one file. Green proves **the harness** — flags, include paths, GoogleTest linkage, subsystem, runner — and no project logic. Stage 8 is the first stage where `make test` proves anything about the product.
+**What `make test` currently proves.** All of `src/core`, `src/http`, `src/registry`, `src/mapping` still contain only `.gitkeep` — `exports.cpp` is the only `.cpp` under `src/` at all, and it is deliberately excluded from the test compile. So the suite still compiles exactly one file. Green proves **the harness** — flags, include paths, GoogleTest linkage, subsystem, runner — and no project logic. Stage 8 is the first stage where `make test` proves anything about the product.
 
 **x86 evidence gap — now addressable without CANoe.** Only `build/test/x64/` artifacts exist locally. `ci.yml` runs `make test ARCH=x86` on its x86 matrix leg, so the first green CI run closes this gap permanently. That makes pushing (HUM-12) worth more than routine hygiene.
 
@@ -628,17 +631,17 @@ Four conditions:
 | **REV-15** | BPE-26 against §7.12's acceptance checks | `code-reviewer` | **CLEAN** |
 | **REV-16** | PR #2 confirmatory review after its rebase | `code-reviewer` | **CLEAN** |
 | **REV-17** | PR #1 full-branch review — BPE-21 + BPE-22 + BPE-20 + `VCPKG_ROOT` fix + BPE-25 | `code-reviewer` | **CLEAN — gated the merge of `2123c80`** |
-| **REV-18** | BPE-27 — `auto-pr.yml` + `stage-branch/SKILL.md` + `CHANGELOG.md`, against `git diff main...HEAD` on `chore/bpe-27-auto-pr-base` | `code-reviewer` | **PENDING — recommended next** |
+| **REV-18** | BPE-27 — `auto-pr.yml` + `stage-branch/SKILL.md` + `CHANGELOG.md`, against `git diff main...HEAD` on `chore/bpe-27-auto-pr-base` | `code-reviewer` | **CLEAN — ZERO MUST-FIX; run post-merge. 1 Should-fix: the `chore/*` task-ID regex truncated multi-segment IDs (`chore/bpe-16-17-18-cleanup` → `BPE-16` only); fixed on `chore/rev18-chore-regex-fix`, squash-merged to `main` as `2886812` (PR #8)** |
 
 **Two recorded renumbers.** `BPE-26` was claimed by two different tasks — untracking `lib/README` (merged to `main`, named in commit `91e0561`) and the `auto-pr.yml` base-branch gap. The merged claimant keeps the ID; the other becomes **`BPE-27`**. `REV-15` was likewise double-spent: the PR #1 full-branch review was conducted under that label in-session but never written into this document, so a later session correctly read the slot as free and allocated it to BPE-26's review, which merged. BPE-26 keeps `REV-15`; the PR #1 review is retroactively **`REV-17`**.
 
 **`REV-17` predating `REV-16` is not an anomaly.** REV IDs in this document have never been chronological — `REV-5` through `REV-12` are pre-allocated to Stages 10–17, work that has not started. They are allocation slots, not a timeline.
 
-**Sequence (historical):** HUM-12 → first CI run (red) → `VCPKG_ROOT` fix + BPE-25 → REV-13, REV-17 → PR #1 merged → PR #2 rebased → REV-14, REV-16 → PR #2 merged → BPE-26 + REV-15 merged → v15 → HUM-20 verified (§7.14) → BPE-27 → HUM-23 applied and verified (§7.14). **Next:** Stage 8 on `stage/08-core-pure-logic`.
+**Sequence (historical):** HUM-12 → first CI run (red) → `VCPKG_ROOT` fix + BPE-25 → REV-13, REV-17 → PR #1 merged → PR #2 rebased → REV-14, REV-16 → PR #2 merged → BPE-26 + REV-15 merged → v15 → HUM-20 verified (§7.14) → BPE-27 → HUM-23 applied and verified (§7.14) → Stage 8 complete, reviewed clean (REV-19). **Next:** Stage 9 on a `stage/09-*` branch cut from `main` once Stage 8's PR merges — logic-only, no human gate, so HUM-13 does not gate it (§3, §15).
 
 **Human approval gate: SATISFIED.** It touched CI, `.claude/settings.json` and what gets shipped, and the gate's own standard was "only once the bot has actually opened a PR and its CI run has been observed green." Both happened. Per §13, written-and-reviewed is not executed — and this stage is now the project's best evidence for that, in both directions.
 
-**BPE-27's human approval gate: SATISFIED.** It touches CI (`auto-pr.yml`), so §7.8 criterion 2 (`code-reviewer`, still pending — REV-18) and the human-approval-before-proceeding requirement both apply. The approval was given explicitly: the branch's task was started on the user's direct instruction to begin BPE-27, satisfying the gate before any commit landed.
+**BPE-27's human approval gate: SATISFIED.** It touches CI (`auto-pr.yml`), so §7.8 criterion 2 (`code-reviewer`, **satisfied — REV-18**, clean with zero Must-fix, run post-merge; its one Should-fix fixed in `2886812`) and the human-approval-before-proceeding requirement both apply. The approval was given explicitly: the branch's task was started on the user's direct instruction to begin BPE-27, satisfying the gate before any commit landed.
 
 #### 7.12 `lib/README`: from tracked-on-purpose to untracked (BPE-26)
 
@@ -727,11 +730,25 @@ With the configuration now verified present, the three consequences above are re
 
 Stages 10–13 each append to the export table. Every append requires `code-reviewer`, a human gate, and a `CHANGELOG.md` `[Unreleased]` entry in the same change. Every appended operation follows the `restify<VerbNoun>` convention fixed at Stage 5.
 
-### Stage 8 — Core pure logic (level 0)
-**CPP-2** — `src/core/type-conversion.*`. **CPP-3** — `src/core/json-path.*`. Both depend on `json.hpp` only — zero I/O, zero CANoe knowledge, not yet exported.
-**TEST-2 / TEST-3** — `tests/core/` coverage: valid input, malformed/missing JSON fields, type mismatches.
-**CPP-16 / TEST-12 (optional, folded in here)** — if the `CopyOwnVersionString` buffer/bounds extraction from Stage 5 is taken up, this is where it belongs: `src/core/` is being populated anyway, and the truncation branch becomes testable at near-zero marginal cost. Skip without ceremony if it does not fit cleanly.
-These are the first real files to land in `src/` outside `src/module/`; the Makefile's `$(wildcard …)` picks them up automatically, and `make test` starts proving product logic rather than only the harness. **Human approval: no.**
+### Stage 8 — Core pure logic (level 0) — COMPLETE, REVIEWED CLEAN
+
+**Detailed record: `docs/work/stage-08-core-pure-logic/plans/plan.md`** — left in place as the detailed record per §7.10 condition 3, not reduced to a pointer. It carries the `Status` enum, `ResolvePath`'s segment-kind resolution table and `ValueToText`'s leaf-stringify table as **normative specifications**, which belong beside the code they specify rather than duplicated here. This entry is the summary; that document is the reference.
+
+**BPE-29 — DONE (`f6a214d`).** `/I src` added to the Makefile's `INCLUDES` and `TEST_INCLUDES`, so product source, export glue and tests can all write `#include "core/…"` regardless of their own location. Two variables, no new recipe, no architecture-conditional anything — the single parameterized rule is intact.
+
+**CPP-18 — DONE (`0a548be`).** `src/core/status.h` — the shared `Status` enum, header-only, included by all three core modules and by `exports.cpp`. It **absorbs** the already-shipped `0`/`-1`/`-2`/`-3` codes rather than renumbering them, and owns the numbering space including the `-4..-9` and `ParseError` reservations (§5).
+
+**CPP-2 — DONE (`14ed8d4`).** `src/core/type-conversion.{h,cpp}`: `ToLong`, `ToDouble`, `ToBool`, `ToText`, `ValueToText`, `ParseLong`, `ParseDouble`. **CPP-3 — DONE (`83b51ec`).** `src/core/json-path.{h,cpp}`: `ParsePath`, `ResolvePath`, `PathSegment`. Both depend on `json.hpp` only — zero I/O, zero CANoe knowledge, nothing exported.
+
+**CPP-16 — DONE (`202c7b0`) — no longer optional.** Stage 5's REV-3 follow-up is resolved in favour of doing it (D4 in the stage plan), and this entry's former "skip without ceremony" framing is withdrawn. `src/core/buffer-copy.{h,cpp}` holds the pure bounds-checked copy; `CopyOwnVersionString` in `src/module/exports.cpp` is rewired onto it and now uses `Status` symbols in place of the bare `0`/`-1`/`-2`/`-3` literals — a symbol introduction, not a renumbering. `exports.cpp` deliberately keeps its own early `-1` guard and early `buffer[0] = '\0'` ahead of the first Win32 call, plus all five `-3` resource-failure branches, unmoved: collapsing those into `CopyToBuffer` would have pushed the null check behind `GetModuleHandleExA` and stopped the `-3` paths clearing the caller's buffer. **Behaviour-preserving, and verified independently twice** — by the implementer, then by REV-19 re-deriving it from the diff rather than trusting that report.
+
+**TEST-2 / TEST-3 / TEST-12 — DONE (`70adc9f`, `b5aca63`, `3b17688`).** `tests/core/type-conversion_test.cpp` (45 cases), `tests/core/json-path_test.cpp` (24 cases), `tests/core/buffer-copy_test.cpp` (6 cases) — the last also deleting the placeholder `tests/core/sanity-test.cpp`, so the suite is now uniformly `_test.cpp`. **TEST-12 is no longer optional either.**
+
+**REV-19 — CLEAN, ZERO MUST-FIX.** Full-branch review of `git diff main...HEAD`. `CAPL_DLL_INFO_LIST4[]` and `exports.def` are untouched throughout — zero export-table changes. Two Should-fix notes: one applied (`763cd4e`, a comment trim in `exports.cpp`), one deliberately declined as "worth trimming if touched again" (a redundant rationale block in `status.h`'s file header) and explicitly not required.
+
+**74/74 tests passing on both x86 and x64; `make build-x86` and `make build-x64` both clean; `/W4` clean throughout.** These are the first real files to land in `src/` outside `src/module/`; the Makefile's `$(wildcard …)` picks them up automatically, so `make test` now proves product logic rather than only the harness.
+
+**Human approval gate: NO — and it held for the entire stage, including the CPP-16 rewiring**, confirmed by REV-19 rather than assumed: no export-table row added, renamed or reordered, `exports.def` untouched, no `/MT` change, nothing newly shipped. "No gate" was never "no review" — REV-19 was mandatory precisely because `exports.cpp` was in the diff.
 
 ### Stage 9 — HTTP layer and synchronous operations (logic only)
 **CPP-4** — `src/http/http-client.*` wrapping libcurl. **CPP-5** — `src/http/sync-operations.*`.
@@ -802,7 +819,7 @@ Trigger: hand-assembling JSON in CAPL proves genuinely cumbersome. Dead code las
 
 ## 12. Task index by agent
 
-### `build-pipeline-engineer` — 26 tasks
+### `build-pipeline-engineer` — 29 tasks
 
 | ID | Stage | Task | Status |
 |---|---|---|---|
@@ -834,15 +851,16 @@ Trigger: hand-assembling JSON in CAPL proves genuinely cumbersome. Dead code las
 | BPE-26 | 7 | Untrack `lib/README` from git | **DONE** |
 | BPE-28 | 6/7 | `ci.yml`: bump `actions/checkout`/`cache`/`upload-artifact` off deprecated Node 20; SHA-pin `ilammy/msvc-dev-cmd` | **DONE — verified via GitHub API that the new majors declare `node24` and change no input/default this workflow relies on; `msvc-dev-cmd` stays `v1` (no newer major exists) but is now SHA-pinned** |
 | BPE-27 | 7 | `auto-pr.yml` base-branch gap; PR-checklist fold-in line; `stage-branch` rebase exception | **DONE — see §7.13** |
+| BPE-29 | 8 | `Makefile`: `/I src` added to `INCLUDES` and `TEST_INCLUDES` | **DONE — `f6a214d`** |
 
-### `cpp-implementer` — 17 tasks
+### `cpp-implementer` — 18 tasks
 
 | ID | Stage | Task | Status |
 |---|---|---|---|
 | CPP-1 | 5 | `exports.cpp` + `exports.def` — one operation; fixes the CAPL naming convention permanently | **DONE — REVIEWED CLEAN** |
-| CPP-2 | 8 | `src/core/type-conversion.*` | |
-| CPP-3 | 8 | `src/core/json-path.*` | |
-| CPP-16 | 8 | *(optional)* extract `CopyOwnVersionString`'s pure buffer/bounds sliver to `src/core/` | **Nice-to-have** |
+| CPP-2 | 8 | `src/core/type-conversion.*` — seven functions, `To*` strict / `Parse*` lenient | **DONE — `14ed8d4`** |
+| CPP-3 | 8 | `src/core/json-path.*` — `ParsePath`/`ResolvePath`; interim path syntax (§5) | **DONE — `83b51ec`** |
+| CPP-16 | 8 | Extract `CopyOwnVersionString`'s pure buffer/bounds sliver to `src/core/buffer-copy.*`; rewire `exports.cpp` | **DONE — `202c7b0`; no longer optional (D4); behaviour-preserving, re-derived from the diff by REV-19** |
 | CPP-4 | 9 | `src/http/http-client.*` — must expose an injectable seam (see Stage 9) | |
 | CPP-5 | 9 | `src/http/sync-operations.*` | |
 | CPP-6 | 10 | Append sync operations + CHANGELOG entry | |
@@ -856,15 +874,16 @@ Trigger: hand-assembling JSON in CAPL proves genuinely cumbersome. Dead code las
 | CPP-14 | 16 | Struct registry + mapping (conditional) | |
 | CPP-15 | 17 | CAPL-side request building (conditional) | |
 | CPP-17 | 6b | Trim `exports.cpp` comments (absorbs BPE-19's half) | **DONE — human-gated; export-table rows byte-identical** |
+| CPP-18 | 8 | `src/core/status.h` — shared `Status` enum; absorbs the shipped `0`/`-1`/`-2`/`-3` codes | **DONE — `0a548be`** |
 
 ### `test-engineer` — 12 tasks
 
 | ID | Stage | Task | Status |
 |---|---|---|---|
 | TEST-1 | 4 | `tests/` skeleton + one passing test | **DONE — exe built and run (x64 only)** |
-| TEST-2 | 8 | `tests/core/` — type-conversion | |
-| TEST-3 | 8 | `tests/core/` — json-path | |
-| TEST-12 | 8 | *(optional)* truncation-branch coverage for the extracted buffer sliver | **Nice-to-have, paired with CPP-16** |
+| TEST-2 | 8 | `tests/core/` — type-conversion | **DONE — `70adc9f`, 45 cases** |
+| TEST-3 | 8 | `tests/core/` — json-path | **DONE — `b5aca63`, 24 cases** |
+| TEST-12 | 8 | Bounds/truncation coverage for the extracted buffer sliver; deletes the placeholder `sanity-test.cpp` | **DONE — `3b17688`, 6 cases; no longer optional (D4)** |
 | TEST-4 | 9 | libcurl fake/mock boundary — source-level seam, not link substitution | |
 | TEST-5 | 9 | `tests/http/` — http-client + sync-operations, incl. timeouts and errors | |
 | TEST-6 | 11 | `tests/http/` — async: ready-flag-cleared-after-read, request-ID correlation | |
@@ -874,7 +893,7 @@ Trigger: hand-assembling JSON in CAPL proves genuinely cumbersome. Dead code las
 | TEST-10 | 16 | Struct mapping tests (conditional) | |
 | TEST-11 | 17 | Request-builder tests (conditional) | |
 
-### `code-reviewer` — 17 tasks
+### `code-reviewer` — 18 tasks
 
 | ID | Stage | Focus | Status |
 |---|---|---|---|
@@ -894,7 +913,8 @@ Trigger: hand-assembling JSON in CAPL proves genuinely cumbersome. Dead code las
 | REV-14 | 6b | Comment discipline — BPE-23 + BPE-24 + CPP-17, incl. rationale-migration Must-fix check | **CLEAN — 2 Must-fix resolved (`cf9e74b`, `25f6033`)** |
 | REV-16 | 7 | PR #2 confirmatory review after its rebase; export-table rows byte-identical | **CLEAN** |
 | REV-17 | 7 | PR #1 full-branch review — BPE-21 + BPE-22 + BPE-20 + `VCPKG_ROOT` fix + BPE-25 | **CLEAN — gated the merge of `2123c80`** |
-| REV-18 | 7 | BPE-27 — `auto-pr.yml` base-branch gap + PR-body auto-fill + `stage-branch` skill amendment | **PENDING — recommended next** |
+| REV-18 | 7 | BPE-27 — `auto-pr.yml` base-branch gap + PR-body auto-fill + `stage-branch` skill amendment | **CLEAN — ZERO MUST-FIX (run post-merge); 1 Should-fix: `chore/*` task-ID regex truncated multi-segment IDs — fixed and squash-merged as `2886812` (PR #8)** |
+| REV-19 | 8 | Stage 8 full branch — `src/core/` modules, the `exports.cpp` rewiring, Makefile, tests | **CLEAN — ZERO MUST-FIX; export table byte-identical; 1 Should-fix applied (`763cd4e`), 1 declined** |
 
 ### Human — 23 tasks
 
@@ -995,8 +1015,8 @@ The RC2237 scare showed the inverse failure: a hand-reconstructed invocation pro
 
 **Track A is complete.** Commit, push, first CI run, fix cycle, green on both architectures — done, and it closed the x86 evidence gap and BPE-8's build half along the way. **Track B (human, CANoe) is now the sole critical path for the Stage 5 gate:** HUM-10 → HUM-11 → HUM-13 → Stage 5 gate closed.
 
-Stage 8 is unblocked and may begin immediately on `stage/08-core-pure-logic`. **HUM-23 has passed** (applied and verified 2026-09-22, §7.14) — "require branches up to date before merging" is now the mechanically enforced half of the export-table merge-hazard mitigation (§7.10, §7.14). **No export-table append (Stage 10 onward) may proceed until HUM-13 has also passed** — appending to a table whose base layout has never been loaded by CANoe would multiply the unknowns in exactly the way Stage 5 exists to prevent.
+Stage 8 is complete and reviewed clean (REV-19); **Stage 9 is next** — logic-only, no human gate, no export-table append, so HUM-13 does not gate it. It begins on a `stage/09-*` branch cut from `main` once Stage 8's PR has merged. **HUM-23 has passed** (applied and verified 2026-09-22, §7.14) — "require branches up to date before merging" is now the mechanically enforced half of the export-table merge-hazard mitigation (§7.10, §7.14). **No export-table append (Stage 10 onward) may proceed until HUM-13 has also passed** — appending to a table whose base layout has never been loaded by CANoe would multiply the unknowns in exactly the way Stage 5 exists to prevent.
 
 **BPE-16, BPE-17, BPE-18 and BPE-28 are done** (`chore/bpe-16-17-18-cleanup`, 2026-09-22 — see §14). **HUM-23 is done** (§7.14) — Stage 10's blocker list is now down to HUM-13 alone.
 
-**Status:** v15. Stages 1, 2 and 4 complete and execution-verified. Stage 5 code complete and building on both architectures; hard gate open on Stage 3. **Stages 6 and 7 executed and closed out** — CI green on both legs, branching and auto-PR live, three units of work merged through the flow. Comment discipline is a loaded rule (§6b). `plan.md` maintenance is the fold-in model (§7.10). **HUM-20 verified branch protection absent on 2026-09-21; HUM-23 applied and verified it present via the GitHub API on 2026-09-22 (§7.14).** **BPE-16/17/18/28 closed 2026-09-22** (§14). Open: HUM-13 (blocks the Stage 5 gate and any export-table append). Next action: **Stage 8.**
+**Status:** v15. Stages 1, 2 and 4 complete and execution-verified. Stage 5 code complete and building on both architectures; hard gate open on Stage 3. **Stages 6 and 7 executed and closed out** — CI green on both legs, branching and auto-PR live, three units of work merged through the flow. Comment discipline is a loaded rule (§6b). `plan.md` maintenance is the fold-in model (§7.10). **HUM-20 verified branch protection absent on 2026-09-21; HUM-23 applied and verified it present via the GitHub API on 2026-09-22 (§7.14).** **BPE-16/17/18/28 closed 2026-09-22** (§14). Open: HUM-13 (blocks the Stage 5 gate and any export-table append). Next action: **Stage 9** (after Stage 8's PR merges).

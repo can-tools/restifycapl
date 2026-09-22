@@ -20,24 +20,33 @@
 #include <windows.h>
 #include <winver.h>
 
+#include <cstdint>
 #include <cstring>
+#include <string_view>
 #include <vector>
+
+#include "core/buffer-copy.h"
+#include "core/status.h"
 
 #pragma comment(lib, "version.lib")
 // Needed for the VerQueryValue* calls below; see the Makefile's SYSLIBS comment.
 
 namespace {
 
+// unsigned long is 32 bits on both targets here -- see plan.md §6 CPP-16.
+static_assert(sizeof(unsigned long) == sizeof(std::uint32_t),
+              "restifyGetVersion assumes unsigned long is 32 bits");
+
 // Not unit-tested: CAPL/Win32 module glue, excluded per cpp-testing-conventions.
 //
 // Returns:
-//    0  success -- buffer holds the null-terminated version string.
-//   -1  invalid arguments (null buffer or zero size).
-//   -2  version string does not fit; buffer is left empty, never truncated.
-//   -3  embedded version resource could not be read.
+//   Status::Ok (0)                          success -- buffer holds the null-terminated version string.
+//   Status::InvalidArgument (-1)            invalid arguments (null buffer or zero size).
+//   Status::BufferTooSmall (-2)             version string does not fit; buffer is left empty, never truncated.
+//   Status::VersionResourceUnavailable (-3) embedded version resource could not be read.
 long CopyOwnVersionString(char* buffer, unsigned long bufferSize) {
   if (buffer == nullptr || bufferSize == 0) {
-    return -1;
+    return static_cast<long>(Status::InvalidArgument);
   }
   buffer[0] = '\0';
 
@@ -49,25 +58,25 @@ long CopyOwnVersionString(char* buffer, unsigned long bufferSize) {
           GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
           reinterpret_cast<LPCSTR>(&CopyOwnVersionString),
           &selfModule)) {
-    return -3;
+    return static_cast<long>(Status::VersionResourceUnavailable);
   }
 
   char modulePath[MAX_PATH];
   DWORD pathLen = GetModuleFileNameA(selfModule, modulePath, MAX_PATH);
   if (pathLen == 0 || pathLen >= MAX_PATH) {
-    return -3;
+    return static_cast<long>(Status::VersionResourceUnavailable);
   }
 
   DWORD verInfoHandle = 0;
   DWORD verInfoSize = GetFileVersionInfoSizeA(modulePath, &verInfoHandle);
   if (verInfoSize == 0) {
-    return -3;
+    return static_cast<long>(Status::VersionResourceUnavailable);
   }
 
   std::vector<BYTE> verInfoBlock(verInfoSize);
   if (!GetFileVersionInfoA(modulePath, verInfoHandle, verInfoSize,
                             verInfoBlock.data())) {
-    return -3;
+    return static_cast<long>(Status::VersionResourceUnavailable);
   }
 
   // Must match version.rc's `BLOCK "040904b0"` under StringFileInfo: lang
@@ -80,20 +89,17 @@ long CopyOwnVersionString(char* buffer, unsigned long bufferSize) {
                        reinterpret_cast<LPVOID*>(&versionText),
                        &versionTextLen) ||
       versionText == nullptr) {
-    return -3;
+    return static_cast<long>(Status::VersionResourceUnavailable);
   }
 
   // versionTextLen counts the terminating NUL for VerQueryValueA string
   // queries in the normal case; strnlen defends against a malformed
   // resource that omits it.
-  size_t textLen = strnlen(versionText, versionTextLen);
-  if (textLen + 1 > bufferSize) {
-    return -2;
-  }
-
-  memcpy(buffer, versionText, textLen);
-  buffer[textLen] = '\0';
-  return 0;
+  const std::size_t textLen = strnlen(versionText, versionTextLen);
+  const Status copyStatus = CopyToBuffer(std::string_view{versionText, textLen},
+                                          buffer,
+                                          static_cast<std::uint32_t>(bufferSize));
+  return static_cast<long>(copyStatus);
 }
 
 }  // namespace
@@ -105,9 +111,9 @@ long CopyOwnVersionString(char* buffer, unsigned long bufferSize) {
 //   long restifyGetVersion(char buffer[], dword bufferSize);
 //
 // Writes this DLL's build-version string (see CopyOwnVersionString above)
-// into the caller-supplied buffer. Returns 0 on success, or a negative
-// error code (see CopyOwnVersionString) -- most commonly -2 if the
-// caller's buffer is too small.
+// into the caller-supplied buffer. Returns Status::Ok (0) on success, or a
+// negative Status value (see CopyOwnVersionString) -- most commonly
+// Status::BufferTooSmall (-2) if the caller's buffer is too small.
 //
 // extern "C": avoids C++ name mangling tying this symbol to a specific
 // compiler version (capl-export-contract standing rule). CAPLPASCAL:

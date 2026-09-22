@@ -96,3 +96,6 @@ Testing/
 
 #local documentation
 docs/.locals/
+
+# Handoff - local calude sesson dump file
+HANDOFF.md
