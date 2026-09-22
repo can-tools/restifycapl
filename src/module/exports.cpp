@@ -33,9 +33,7 @@
 
 namespace {
 
-// unsigned long is 32 bits on both x86 and x64 in this toolchain, so the
-// bufferSize -> std::uint32_t handoff to CopyToBuffer below is width
-// preserving on both targets (docs/work/stage-08-core-pure-logic/plans/plan.md §6 CPP-16).
+// unsigned long is 32 bits on both targets here -- see plan.md §6 CPP-16.
 static_assert(sizeof(unsigned long) == sizeof(std::uint32_t),
               "restifyGetVersion assumes unsigned long is 32 bits");
 
