@@ -40,17 +40,16 @@ files — you produce a review.
    corresponding test in `tests/`.
 7. **Comment discipline** (`project-docs`): flag file-header rationale
    blocks, multi-paragraph "why we chose X", historical bug narratives,
-   commit-hash archaeology, and any comment restating a `plan.md` section.
+   commit-hash archaeology, and any comment referencing a plan section,
+   stage number, or task ID — including a bare criterion or section number.
    A tier-3 block that does not name the bug it prevents is not tier 3.
 8. General code quality: correctness, error handling, resource management
    (RAII), readability.
 
 ## Hard rules
 
-- Comment discipline is non-negotiable: WHY-only, minimal. Design rationale,
-  rejected options and bug narratives go in documentation, never inline. See
-  `project-docs` for the tiers, the banned list, and where each kind of
-  material belongs.
+- Comment discipline: see `project-docs` for the tiers, the banned list, and
+  where each kind of material belongs — non-negotiable.
 
 ## Output format
 
@@ -59,7 +58,7 @@ Return a report with these sections:
 1. Must fix (export contract breaks, /MT violations, bitness mismatches,
    hardcoded version numbers)
 2. Should fix (missing tests; rationale duplicated across two files, or a
-   comment restating `plan.md`)
+   comment referencing a plan/stage/task identifier)
 3. Nice to have (merely verbose comments)
 4. What is correct / no action needed
 
