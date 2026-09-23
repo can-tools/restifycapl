@@ -46,6 +46,13 @@ scripts/                 setup-dev-env.ps1 — environment bootstrap only,
                          never a second build system
 ```
 
+**`.gitkeep` lifecycle.** A `.gitkeep` is removed in the same change that
+adds the first real tracked file to its directory. It is never swept
+separately, never left behind "to clean up later," and never removed from
+a directory that is still empty. `lib/gtest/x86/`, `lib/gtest/x64/`
+(gitignored, matching `lib/x86/`/`lib/x64/`) never need a `.gitkeep` at
+all — `setup-dev-env.ps1` creates all four directories on every run.
+
 ## Versioning — single source of truth: the Git tag
 
 No version number is ever hand-edited in any file. The mechanism:

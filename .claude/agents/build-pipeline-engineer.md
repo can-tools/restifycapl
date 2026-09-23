@@ -56,6 +56,8 @@ Makefile targets and the GitHub Actions workflow that mirrors them.
 - Comment discipline: see `project-docs` for the tiers, the banned list, and
   where each kind of material belongs — non-negotiable, and covers YAML step
   preambles and Makefile section headers, not just source comments.
+- `.gitkeep` lifecycle: see `msvc-build-conventions`'s Directory conventions
+  section for the standing rule.
 
 ## Workflow
 
