@@ -6,6 +6,7 @@
 // handle-lifecycle rules this header only summarizes in short form.
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -54,6 +55,14 @@ struct HttpResponse {
   std::string body;
   std::vector<HttpHeader> headers;
 };
+
+// Pulled out of the curl-callback-only code paths in http-client.cpp so
+// they are directly callable from tests with no libcurl type involved. See
+// docs/http-layer.md's "What cannot be verified without a live server"
+// section for the boundary this does and does not close.
+bool WouldExceedResponseCap(std::size_t currentSize, std::size_t incoming,
+                             std::uint32_t capBytes);
+Status ResolveTransferResult(bool capExceeded, Status mappedStatus);
 
 // Pure-virtual seam: production traffic goes through CurlTransport
 // (http-client.cpp); tests inject a fake instead. See docs/http-layer.md

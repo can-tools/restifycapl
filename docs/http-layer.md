@@ -134,6 +134,40 @@ add a check for a combination that already behaves predictably.
   code path that derives it from anything else. `sync-operations` forwards
   it unmodified and contains no logic that could set it.
 
+## What cannot be verified without a live server (Stage 9, CPP-21)
+
+Everything below is exercised only through `FakeTransport` in `tests/http/`,
+or through the pure predicates extracted from `CurlTransport::Perform` and
+`WriteCallback` (`WouldExceedResponseCap`, `ResolveTransferResult` in
+`http-client.cpp`). None of it has been driven by a real `curl_easy_perform`
+call over an actual network, and nothing in this repository does that today
+-- see the deferred containerized-integration-testing initiative (OQ9).
+
+- **Every row of the `CURLcode` -> `Status` mapping** (`MapCurlCode`,
+  above). A unit test of the switch only proves the switch contains what it
+  contains; the claim worth testing is that libcurl actually reports each
+  of these codes for the matching real-world condition -- timeout,
+  malformed/unsupported-scheme URL, DNS failure, connection refused,
+  redirect limit -- and only a live transfer establishes that.
+- **libcurl's actual error reporting under Schannel specifically.** The TLS
+  branch of the mapping table assumes Schannel surfaces the `CURLE_SSL_*`
+  family the way this table expects; no self-signed, expired, or
+  wrong-host certificate has been driven through a real Schannel handshake
+  to confirm it.
+- **The real `CURLOPT_SSL_VERIFYPEER`/`VERIFYHOST` wiring.** The values set
+  per `skipTlsVerification` (above) are asserted only as the literal
+  arguments passed to `curl_easy_setopt`; whether they actually cause
+  libcurl/Schannel to accept or reject a given peer certificate is
+  unobservable through `FakeTransport`.
+- **`ResponseTooLarge` tripping through libcurl's write path.**
+  `WouldExceedResponseCap` is directly unit-tested, including the
+  unsigned-wraparound boundary, but that only proves the arithmetic; it
+  does not prove that `WriteCallback` returning a short byte count actually
+  makes `curl_easy_perform` abort the transfer the way this file assumes.
+- **`Status::Ok` with each HTTP status class (2xx, 4xx, 5xx) from a real
+  server**, confirming transport success and HTTP status stay on separate
+  channels.
+
 ## Blocking calls are prohibited in CANoe's realtime branch
 
 Vector's own documentation

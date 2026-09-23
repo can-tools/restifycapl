@@ -32,11 +32,10 @@ void EnsureCurlInitialized() {
 // Trap: do not add a case for CURLE_WRITE_ERROR here. The write callback
 // below returns a short byte count when the response cap is breached, and
 // libcurl reports that as this same generic code -- indistinguishable
-// from any other write failure. WriteContext::capExceeded is checked
-// before this function is ever consulted; if it is set, the result is
-// ResponseTooLarge regardless of what this mapping would say. Routing
-// CURLE_WRITE_ERROR through the catch-all below would misreport "body too
-// large" as a network failure.
+// from any other write failure. ResolveTransferResult (below) gives a cap
+// breach precedence over whatever this mapping returns, so routing
+// CURLE_WRITE_ERROR through the catch-all here would misreport "body too
+// large" as a network failure the moment that precedence is bypassed.
 Status MapCurlCode(CURLcode code) {
   switch (code) {
     case CURLE_OK:
@@ -110,12 +109,7 @@ std::size_t WriteCallback(char* ptr, std::size_t size, std::size_t nmemb, void* 
   auto* ctx = static_cast<WriteContext*>(userdata);
   const std::size_t incoming = size * nmemb;
 
-  // Widen capBytes up to size_t rather than narrowing body->size() down to
-  // it -- narrowing here would make the cap trip at a different input
-  // size on x86 than on x64, the same architecture-parity defect class
-  // buffer-copy.cpp's bufferSize check already guards against.
-  const std::size_t cap = static_cast<std::size_t>(ctx->capBytes);
-  if (incoming > cap || ctx->body->size() > cap - incoming) {
+  if (WouldExceedResponseCap(ctx->body->size(), incoming, ctx->capBytes)) {
     ctx->capExceeded = true;
     return 0;
   }
@@ -265,12 +259,9 @@ Status CurlTransport::Perform(const HttpRequest& request, HttpResponse& response
     curl_easy_setopt(handle, CURLOPT_HEADERDATA, &response.headers);
 
     const CURLcode result = curl_easy_perform(handle);
-
-    if (writeCtx.capExceeded) {
-      return Status::ResponseTooLarge;
-    }
-    if (result != CURLE_OK) {
-      return MapCurlCode(result);
+    const Status transferResult = ResolveTransferResult(writeCtx.capExceeded, MapCurlCode(result));
+    if (transferResult != Status::Ok) {
+      return transferResult;
     }
 
     long httpCode = 0;
@@ -284,6 +275,20 @@ Status CurlTransport::Perform(const HttpRequest& request, HttpResponse& response
 }
 
 }  // namespace
+
+bool WouldExceedResponseCap(std::size_t currentSize, std::size_t incoming,
+                             std::uint32_t capBytes) {
+  // Widen capBytes up to size_t rather than narrowing currentSize down to
+  // it -- narrowing here would make the cap trip at a different input
+  // size on x86 than on x64. incoming > cap is checked first so that
+  // cap - incoming below can never wrap around zero.
+  const std::size_t cap = static_cast<std::size_t>(capBytes);
+  return incoming > cap || currentSize > cap - incoming;
+}
+
+Status ResolveTransferResult(bool capExceeded, Status mappedStatus) {
+  return capExceeded ? Status::ResponseTooLarge : mappedStatus;
+}
 
 HttpTransport::~HttpTransport() = default;
 
