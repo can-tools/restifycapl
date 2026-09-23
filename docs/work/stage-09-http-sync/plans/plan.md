@@ -617,6 +617,52 @@ Required coverage, at minimum:
 
 ---
 
+### CPP-21 — Extract the response-cap predicate and the transfer-result precedence
+**Agent:** `cpp-implementer`
+**Files:** `src/http/http-client.h`, `src/http/http-client.cpp`, `docs/http-layer.md`
+
+Two pure helpers currently sit in an anonymous namespace in `http-client.cpp`, reachable only through `CurlTransport::Perform` and therefore only during a live network transfer. Neither depends on a libcurl type; both are trapped by placement rather than by design. Extract both to external linkage so they can be tested directly.
+
+```cpp
+bool   WouldExceedResponseCap(std::size_t currentSize, std::size_t incoming,
+                              std::uint32_t capBytes);
+Status ResolveTransferResult (bool capExceeded, Status mappedStatus);
+```
+
+`WriteCallback` calls the first in place of its inline comparison. `Perform` calls the second in place of its two sequential early returns, computing the mapped status eagerly — `MapCurlCode` is a pure switch with no side effects, so evaluating it unconditionally is behaviour-preserving.
+
+**The hazard, and the only condition under which this is safe.** This restructures early-return control flow in code that has already been written and reviewed — the same shape as the `CopyOwnVersionString` rewiring in the core-logic stage, where collapsing guards would have compiled cleanly, passed tests, and been wrong at runtime. That change was made safe by re-deriving its behaviour from the diff independently rather than trusting the implementer's own report, and this one carries the identical requirement.
+
+**Acceptance criteria**
+- **Behaviour-preserving, verified by re-deriving it from the diff — not by trusting this task's own report.** The cap must trip on exactly the same inputs as before, and `Perform` must return the same `Status` for every input class it can encounter, with the cap breach still taking precedence over any mapped transfer error.
+- No libcurl type appears in `http-client.h`. `curl/curl.h` still appears in `http-client.cpp` only; the one-translation-unit rule is untouched.
+- The widening rationale currently carried above the cap comparison — why `capBytes` is widened up to `size_t` rather than `body->size()` narrowed down to it — moves with the predicate, stays ≤10 lines, and carries no plan, stage, or task identifiers.
+- The trap comment above the `CURLcode` mapping still states the precedence trap accurately after the extraction.
+- No new file, no Makefile change, no new dependency. The test binary already compiles `src/http/*.cpp`.
+- `docs/http-layer.md` gains a **"What cannot be verified without a live server"** section naming the `CURLcode`→`Status` mapping, libcurl's actual error reporting under Schannel, and the real `CURLOPT_SSL_VERIFY*` wiring.
+- `/W4` clean on x86 and x64; `make all` green.
+
+---
+
+### TEST-13 — Direct coverage for the extracted predicate and precedence
+**Agent:** `test-engineer`
+**Files:** `tests/http/http-client_test.cpp` (extend)
+
+`WouldExceedResponseCap`:
+- exactly at the cap → does not exceed; one byte over → exceeds;
+- empty incoming into a full buffer; `capBytes == 0`; `currentSize` already at the cap with non-zero incoming;
+- **the wrap case explicitly** — `incoming` larger than `capBytes`, proving the `incoming > cap` guard prevents `cap - incoming` from wrapping. This single assertion is what the whole extraction exists for.
+
+`ResolveTransferResult`:
+- cap exceeded beats a mapped transfer error; cap exceeded beats `Status::Ok`; not exceeded passes the mapped status through unchanged.
+
+**Acceptance criteria**
+- **Every cap assertion runs in both the x86 and x64 test binaries** — `make test ARCH=x86` and `make test ARCH=x64`. This is what closes the architecture-parity risk the cap carries; a single-architecture run cannot see a width-dependent threshold.
+- No network call; no `DISABLED_` test; nothing `noexcept`; no dependency on `src/module/`.
+- Comments carry no plan, stage, or task identifiers.
+
+---
+
 ### BPE-31 — Remove dead `.gitkeep` files and install the standing rule
 **Agent:** `build-pipeline-engineer`
 **Files:** the `.gitkeep` files below; `.claude/skills/msvc-build-conventions/SKILL.md`; `.claude/agents/build-pipeline-engineer.md`
@@ -673,6 +719,7 @@ Checklist, in priority order:
 15. **`CHANGELOG.md` `[Unreleased]`** entry present for BPE-10 (§4a).
 16. **Comment discipline, against D16 — not the superseded rule.** No plan, stage, task ID or bare plan criterion number in any comment in the diff. Every multi-line block ≤10 lines and naming its trap. The 35% ceiling met in both new `src/http/` files. Check the **composition** of any reduction, not just the ratio: a drop achieved by deleting genuine one-line WHYs is a finding, not a pass.
 17. **REV-21's findings closed.** CPP-20, BPE-32 and BPE-30 landed; each disposition verified against its target file; BPE-32's eight settled edits applied as specified; `setup-dev-env.ps1 -?` and the `auto-pr.yml` PR body both verified by execution, not by inspection.
+18. **Testability boundary recorded, not silently dropped.** The extracted cap predicate and transfer-result precedence are directly unit-tested, and every cap assertion runs in both architectures' binaries. Everything deliberately left to a live server is named in `docs/http-layer.md` and in the `tests/http/` files, with no plan, stage or task identifiers in those comments. **A gap that is neither closed nor recorded is a Must-fix** — an untested path nobody wrote down is indistinguishable from one nobody noticed.
 
 ---
 
@@ -688,24 +735,26 @@ Checklist, in priority order:
 8. **CPP-4** — `http-client.{h,cpp}` **plus `docs/http-layer.md`**, per §5.0.
 9. **BPE-10 second visit** — now that real curl symbols are referenced, verify the link on both architectures and re-run the `/MT` two-part check. Expect this to be where something breaks.
 10. **CPP-5** — `sync-operations.{h,cpp}`.
-11. **TEST-4**, then **TEST-5** — fake transport, then offline coverage for both modules.
-12. **BPE-31** — `.gitkeep` Bucket A (verify `tests/mapping/` first), then Bucket B now that `src/http/` and `tests/http/` hold real files, then record Bucket C's reasons and install D17. **Last content change of the stage.**
-13. **Verification sweep** — `make test ARCH=x86`, `make test ARCH=x64`, `make all`. All green, `/W4` clean, before review.
-14. **REV-20** — `code-reviewer` on the full branch diff.
-15. **Fold-in commit** — the last commit on the branch, before the PR is marked Ready. It must:
+11. **TEST-4**, then **TEST-5** — fake transport, then offline coverage for both modules. Where a behaviour is reachable only through a live transfer, record it in the test file rather than asserting it against the fake: a test that tells the fake what to return and then checks the fake returned it proves nothing and reads as coverage.
+12. **CPP-21**, then **TEST-13** — extract the cap predicate and the transfer-result precedence, then cover them directly. Sequenced after TEST-5 deliberately, so the extraction lands as a small, separately reviewable diff rather than tangled into the test commit.
+13. **BPE-31** — `.gitkeep` Bucket A (verify `tests/mapping/` first), then Bucket B now that `src/http/` and `tests/http/` hold real files, then record Bucket C's reasons and install D17. **Last content change of the stage.**
+14. **Verification sweep** — `make test ARCH=x86`, `make test ARCH=x64`, `make all`. All green, `/W4` clean, before review.
+15. **REV-20** — `code-reviewer` on the full branch diff.
+16. **Fold-in commit** — the last commit on the branch, before the PR is marked Ready. It must:
     - rewrite master plan §8's Stage 9 entry to the finalized scope, recording that BPE-10 turned out to be header provisioning, a `.gitignore` update and one `CURL_STATICLIB` define — the link-line half it describes was already complete and needed no edit;
     - **delete the superseded sentence** *"Verify as a standalone console program against httpbin.org"* from the Stage 9 / TEST-5 entry, recording that live verification is deferred per OQ9;
     - correct the §12 ledger row for **BPE-10**, which currently reads *"Link `libcurl.lib`, `zs.lib` and the system libs"* and overstates the remaining scope;
-    - add §12 ledger rows for **CPP-19, CPP-20, BPE-30, BPE-31, BPE-32, REV-20, REV-21**, and mark **CPP-4, CPP-5, BPE-10, TEST-4, TEST-5** DONE. No HUM row is added; HUM-24 remains unspent;
+    - add §12 ledger rows for **CPP-19, CPP-20, CPP-21, BPE-30, BPE-31, BPE-32, TEST-13, REV-20, REV-21**, and mark **CPP-4, CPP-5, BPE-10, TEST-4, TEST-5** DONE. No HUM row is added; HUM-24 remains unspent;
     - record in §5 that `-18..-23` are now spent, `-24` and `-25..-29` reserved, and that `ParseError = -10` is assigned to Stage 12 rather than speculative;
     - record D15's TLS switch as a standing API property with its safe-by-default requirement, so Stage 10 does not expose it to CAPL by reflex;
+    - **record that R4's mitigation was completed by extraction rather than deferred** — the cap's architecture-parity risk is closed by a direct unit test running in both binaries, not merely claimed by a plan that assigned it to a test which could not reach the code. Record alongside it that §11(b) now carries concrete required coverage originating from a real finding made while writing the tests, not a general aspiration;
     - amend §6b to record that the comment rule now bans plan, stage and task identifiers **in comments**, with three categories exempt from mechanical flagging but **not** from editing; that `planner` now carries the constraint; and that this is a deliberate trade against the traceability those citations provided;
     - record that §6b's Stage-15/BPE-13 deferral of `setup-dev-env.ps1` is **narrowed** — comment discipline pulled forward into Stage 9, while provisioning logic, pinning, allow-list and `/MT` checks stay deferred, and `docs/` is untouched;
-    - record D17's `.gitkeep` rule as living in `msvc-build-conventions`, and `docs/http-layer.md` as the topic home for HTTP-layer rationale;
+    - record D17's `.gitkeep` rule as living in `msvc-build-conventions`, and `docs/http-layer.md` as the topic home for HTTP-layer rationale **and for the testability boundary**;
     - record the disposition of this working document — **recommendation: left in place as the detailed record**, since §5's normative blocks belong beside the code they specify;
     - record the obligations this stage creates for later ones: the realtime-branch caveat must reach Stage 10's export-table description text and Stage 12's `.can` examples, and OQ6's response-store question is Stage 11's to answer from scratch;
-    - record §11(b)'s deferred containerized-integration-testing initiative as an unscheduled future stage.
-16. **Human-only, no agent action:** push the branch, review and merge the auto-opened PR, confirm CI green on both legs. No agent runs any `git push`, and no agent performs any sub-step of this item, optional or otherwise.
+    - record §11(b)'s deferred containerized-integration-testing initiative as an unscheduled future stage, now carrying a named required-coverage list.
+17. **Human-only, no agent action:** push the branch, review and merge the auto-opened PR, confirm CI green on both legs. No agent runs any `git push`, and no agent performs any sub-step of this item, optional or otherwise.
 
 ---
 
@@ -731,7 +780,9 @@ The gate exists for changes to the export contract, to `/MT`, to what gets publi
 
 **R3 — Something throws inside CANoe's process.** `src/http/` allocates far more than `src/core/` did — a multi-megabyte response body is a realistic `std::bad_alloc` site, especially on x86 with ~2 GB of user address space. An escaping exception or a `noexcept` that turns it into `std::terminate` takes CANoe down with it. *Mitigation:* D13, the size cap (D4/OQ4), REV-20 item 9.
 
-**R4 — The size cap fires at different inputs on x86 and x64.** Exactly Stage 8's R3 in a new module: a `size_t`-based threshold comparison makes `ResponseTooLarge` architecture-dependent, and a single-architecture test run cannot see it. *Mitigation:* CPP-4's fixed-width-types criterion, TEST-5's both-binaries requirement, REV-20 item 7.
+**R4 — The size cap fires at different inputs on x86 and x64.** A `size_t`-based threshold comparison makes `ResponseTooLarge` architecture-dependent, and a single-architecture test run cannot see it. The cap check guards an unsigned subtraction — `currentSize > cap - incoming`, safe only because `incoming > cap` is tested first — which is the defect class review reads past and execution catches.
+
+*Mitigation, and note the shape it had to take.* CPP-4's fixed-width-types criterion and REV-20 item 7 cover the static half. The behavioural half was originally assigned to TEST-5, and **that assignment turned out to be unsatisfiable**: the comparison lived in an anonymous-namespace callback reachable only through a real network transfer, so the fake transport could not reach it, and asserting it against the fake would have proved only that the fake returned what it was told. CPP-21 extracts the comparison as a pure predicate with no libcurl dependency, and TEST-13 exercises it directly — including the wrap case — **in both the x86 and x64 binaries**. The risk is closed by that test, not by the plan having named one.
 
 **R5 — A blocking sync call is used from the Simulation Setup realtime branch.** Vector prohibits it outright (V1), it runs on a high-priority thread, and with `0`-means-default timeouts the worst case is a stalled measurement rather than a hang — but it is still a stalled measurement. *Mitigation:* §5.4's no-infinite-timeout property, D8's header documentation, and the Stage 10/12 obligations recorded in the fold-in commit. **This risk is not closed by Stage 9; it is closed by Stage 11.**
 
@@ -777,9 +828,17 @@ Carried forward as an open sub-question Stage 11 must answer explicitly rather t
 **(b) Automated integration / E2E testing against a live containerized server — deferred, unscheduled, unplanned (OQ9).**
 Stage 9 performs **no** live verification. The governing principle behind this deferral, recorded because it is broader than this stage: **integration and E2E tests must never be human-only — they must be automated, running both in local development and in CI.** A manually-run `DISABLED_` test and a hand-compiled console program were both rejected on those grounds, not on effort.
 
-The intended mechanism is containerization: a self-hosted test HTTP/HTTPS server spun up in a Docker container and exercised by an automated integration suite in both local dev and CI, with no dependency on httpbin.org or any external network. That would cover what the fake structurally cannot — the real `CurlTransport`, real Schannel, the real static link, and D15's actual `CURLOPT_SSL_VERIFY*` wiring against both a valid-certificate and a self-signed peer (R11's uncovered layer).
+The intended mechanism is containerization: a self-hosted test HTTP/HTTPS server spun up in a Docker container and exercised by an automated integration suite in both local dev and CI, with no dependency on httpbin.org or any external network.
 
 Concretely noted so the size of this is not underestimated: **Docker would be a new toolchain dependency — nothing containerized exists in this repository today.** It touches local developer setup (`scripts/setup-dev-env.ps1`), CI (`.github/workflows/ci.yml`), and the "never a second build system" constraint in `msvc-build-conventions`. Likely owner of the tooling decision: **`build-pipeline-engineer`**, with `test-engineer` owning the suite itself. This needs its own dedicated planning pass and has **not** been scheduled or assigned a stage number.
+
+**Required coverage, carried forward from Stage 9's testability boundary.** These were identified while writing Stage 9's tests — not guessed at in advance — and are deliberately unverified until this stage exists. They are the concrete exit criteria for it:
+
+- **Every row of the `CURLcode`→`Status` mapping, driven by a real server condition** rather than a synthesised code: timeout (slow endpoint), TLS failure (self-signed, expired, and wrong-host certificates, **under Schannel specifically**), network failure (connection refused, DNS failure, redirect limit exceeded), malformed and unsupported-scheme URLs, and the documented catch-all. *Why this cannot be done sooner:* a direct unit test of the mapping asserts only that the switch contains what the switch contains. The claim worth testing is that libcurl actually reports those codes in this configuration, and only a live transfer establishes it.
+- **`ResponseTooLarge` through a real oversized transfer**, confirming the cap trips through libcurl's write path and not merely in the extracted predicate. CPP-21/TEST-13 prove the arithmetic; only a live transfer proves the wiring.
+- **`Status::Ok` with each HTTP status class** (2xx, 4xx, 5xx) from a real server, confirming that transport success and HTTP status remain separate channels — the decision Stage 10 freezes into the export contract.
+- **`skipTlsVerification` actually acting:** `false` **rejects** a self-signed certificate; `true` **accepts** it. This is the only proof that `CURLOPT_SSL_VERIFYPEER`/`VERIFYHOST` are wired to the values §5.3 specifies. The fake cannot observe it, and the default-false unit test proves only that the flag travels, not that it does anything.
+- **Both architectures.**
 
 **This supersedes the master plan's Stage 9 line** *"Verify as a standalone console program against httpbin.org"*, which is not followed and is deleted in the fold-in commit.
 
@@ -803,4 +862,3 @@ Concretely noted so the size of this is not underestimated: **Docker would be a 
 ---
 
 **Plan complete and approved.** The next action is implementation from §8 step 1. The main session commits `docs/vector-capl-dll-docs/` at §8 step 6, since `plan-writer` has no `Bash`.
-</content>
