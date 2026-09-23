@@ -141,7 +141,10 @@ number found anywhere as a bug.
   script copies from both source directories, so both files end up
   together under `lib/gtest/<arch>/`.
 - Windows system libs, always link all of them: crypt32, bcrypt, secur32,
-  ws2_32, normaliz, wldap32, advapi32.
+  ws2_32, normaliz, wldap32, advapi32, iphlpapi (libcurl's IPv6 scope-ID
+  handling needs iphlpapi; the linker error only surfaces once a real
+  curl symbol is referenced, so confirm this list by linking, not by
+  inspection, after any dependency refresh).
 - `scripts/setup-dev-env.ps1` writes the resolved versions into `lib/README`
   on every run. That file is local, generated and deliberately untracked
   (see `.gitignore`) — per-environment output, not a repo document. Never
