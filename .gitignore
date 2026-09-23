@@ -38,8 +38,9 @@
 # (developer machine, CI runner) provisions its own from the source-level
 # pin in vcpkg.json, built by that environment's own toolchain. Committing
 # a .lib would mean CI links against a binary produced on someone's laptop.
-# Vendored SOURCE is still committed (include/vendor/json.hpp,
-# include/vendor/capl-dll-sdk/) -- only compiled output is not.
+# include/vendor/ splits two ways: hand-vendored, pinned source
+# (json.hpp, capl-dll-sdk/) is committed; source that vcpkg provisions
+# (gtest/, curl/) is ignored below, same as the .lib files it builds.
 
 # Provisioned dependency trees -- populated by vcpkg via
 # scripts/setup-dev-env.ps1 (local) or the CI provisioning step. NOTHING
@@ -52,6 +53,7 @@ lib/x64/
 lib/gtest/
 lib/README
 include/vendor/gtest/
+include/vendor/curl/
 
 # Executables
 *.exe

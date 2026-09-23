@@ -32,7 +32,7 @@
          triplets. Manifest mode installs everything vcpkg.json lists in
          one command; there is no per-package argument any more.
       6. Copy the resulting curl/zlib .lib files into lib/x86/ and
-         lib/x64/.
+         lib/x64/, and the curl headers into include/vendor/curl/.
       7. Copy the resulting GoogleTest .lib files (installed by the same
          manifest-mode command as step 5, since gtest is also listed in
          vcpkg.json) into lib/gtest/x86/ and lib/gtest/x64/ (kept separate
@@ -111,6 +111,7 @@ $LibGtestX64Dir = Join-Path $RepoRoot 'lib\gtest\x64'
 $VendorDir    = Join-Path $RepoRoot 'include\vendor'
 $SdkDir       = Join-Path $VendorDir 'capl-dll-sdk'
 $GtestVendorDir = Join-Path $VendorDir 'gtest'
+$CurlVendorDir  = Join-Path $VendorDir 'curl'
 $JsonHppDst   = Join-Path $VendorDir 'json.hpp'
 
 # nlohmann/json v3.11.3 amalgamated single header, pinned per
@@ -962,6 +963,31 @@ function Copy-TripletLibs {
     Add-Result -Step "lib copy ($Triplet)" -Status 'OK' -Message "Copied $($libs.Count) .lib file(s) to $DestDir : $(($libs.Name) -join ', ')"
 }
 
+function Copy-CurlHeaders {
+    <#
+        Curl headers are architecture-agnostic, same reasoning as
+        Copy-GTestHeaders: copied once from whichever triplet's install
+        succeeded, not once per architecture.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$InstalledRoot,
+        [Parameter(Mandatory)][string]$Triplet,
+        [Parameter(Mandatory)][string]$DestDir
+    )
+
+    $srcIncludeDir = Join-Path $InstalledRoot "$Triplet\include\curl"
+    if (-not (Test-Path -LiteralPath $srcIncludeDir)) {
+        Add-Result -Step 'curl headers' -Status 'FAIL' -Message "Expected header directory not found: $srcIncludeDir"
+        return $false
+    }
+
+    New-Item -ItemType Directory -Force -Path $DestDir | Out-Null
+    Copy-Item -Path (Join-Path $srcIncludeDir '*') -Destination $DestDir -Recurse -Force
+    $count = @(Get-ChildItem -LiteralPath $DestDir -Filter '*.h' -Recurse -File).Count
+    Add-Result -Step 'curl headers' -Status 'OK' -Message "Copied $count header file(s) from $srcIncludeDir to $DestDir (source triplet: $Triplet)."
+    return $true
+}
+
 function Get-InstalledCurlVersion {
     param(
         [Parameter(Mandatory)][string]$VcpkgExe,
@@ -1005,9 +1031,14 @@ Invoke-Step -Name 'vcpkg / curl' -Body {
     $okX86 = Install-ManifestTriplet -VcpkgExe $vcpkgExe -Triplet 'x86-windows-static' -InstallRoot $VcpkgInstalledRootX86 -StepLabel 'vcpkg install (x86-windows-static)'
     $okX64 = Install-ManifestTriplet -VcpkgExe $vcpkgExe -Triplet 'x64-windows-static' -InstallRoot $VcpkgInstalledRootX64 -StepLabel 'vcpkg install (x64-windows-static)'
 
+    $headersCopied = $false
+
     if ($okX86) {
         Copy-TripletLibs -InstalledRoot $VcpkgInstalledRootX86 -Triplet 'x86-windows-static' -DestDir $LibX86Dir
         $script:CurlVersionX86ForReadme = Get-InstalledCurlVersion -VcpkgExe $vcpkgExe -Triplet 'x86-windows-static' -InstallRoot $VcpkgInstalledRootX86
+        if (-not $headersCopied) {
+            $headersCopied = Copy-CurlHeaders -InstalledRoot $VcpkgInstalledRootX86 -Triplet 'x86-windows-static' -DestDir $CurlVendorDir
+        }
     } else {
         Add-Result -Step 'lib copy (x86-windows-static)' -Status 'SKIP' -Message 'Skipped: manifest install for this triplet failed.'
     }
@@ -1015,8 +1046,15 @@ Invoke-Step -Name 'vcpkg / curl' -Body {
     if ($okX64) {
         Copy-TripletLibs -InstalledRoot $VcpkgInstalledRootX64 -Triplet 'x64-windows-static' -DestDir $LibX64Dir
         $script:CurlVersionX64ForReadme = Get-InstalledCurlVersion -VcpkgExe $vcpkgExe -Triplet 'x64-windows-static' -InstallRoot $VcpkgInstalledRootX64
+        if (-not $headersCopied) {
+            $headersCopied = Copy-CurlHeaders -InstalledRoot $VcpkgInstalledRootX64 -Triplet 'x64-windows-static' -DestDir $CurlVendorDir
+        }
     } else {
         Add-Result -Step 'lib copy (x64-windows-static)' -Status 'SKIP' -Message 'Skipped: manifest install for this triplet failed.'
+    }
+
+    if (-not $headersCopied) {
+        Add-Result -Step 'curl headers' -Status 'FAIL' -Message 'Neither triplet installed successfully; include/vendor/curl/ was not populated.'
     }
 
     if (($script:CurlVersionX86ForReadme -ne 'unknown') -and ($script:CurlVersionX64ForReadme -ne 'unknown') -and `

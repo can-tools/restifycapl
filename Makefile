@@ -80,15 +80,24 @@ OBJS     := $(patsubst src/%.cpp,$(BUILDDIR)/obj/%.obj,$(SRCS))
 
 INCLUDES := /I include /I include/vendor /I include/vendor/capl-dll-sdk /I src
 
+# Required by curl.h when linking the static libcurl.lib: without it, curl.h
+# declares every entry point __declspec(dllimport) and the link fails with
+# LNK2019 on __imp_curl_*. Defined once here so the product and test compile
+# paths below cannot drift.
+CURL_DEFINES := /D CURL_STATICLIB
+
 # /std:c++17, /EHsc and /MT are identical across architectures by design --
 # see msvc-build-conventions. /MT is mandatory; never change to /MD here.
-CXXFLAGS := /nologo /c /std:c++17 /EHsc /MT /W4 $(INCLUDES)
+CXXFLAGS := /nologo /c /std:c++17 /EHsc /MT /W4 $(INCLUDES) $(CURL_DEFINES)
 
 # Windows system libs required transitively by libcurl -- link all of them,
 # always (see msvc-build-conventions). version.lib is also pulled in via
 # exports.cpp's own #pragma comment; listed here too so the product's full
-# external-import-lib set stays visible in one place.
-SYSLIBS := crypt32.lib bcrypt.lib secur32.lib ws2_32.lib normaliz.lib wldap32.lib advapi32.lib version.lib
+# external-import-lib set stays visible in one place. iphlpapi.lib resolves
+# if_nametoindex, pulled in by this libcurl build's IPv6 scope-ID handling --
+# missing it produces LNK2019 on __imp__if_nametoindex only once a real curl
+# symbol is referenced, confirmed by a real link.
+SYSLIBS := crypt32.lib bcrypt.lib secur32.lib ws2_32.lib normaliz.lib wldap32.lib advapi32.lib iphlpapi.lib version.lib
 LIBS    := libcurl.lib zs.lib $(SYSLIBS)
 
 VERSION_RC  := src/module/version.rc
@@ -173,7 +182,7 @@ TEST_OBJS        := $(TEST_LOGIC_OBJS) $(TEST_CASE_OBJS)
 # vendored third-party headers; only the .lib binaries are per-architecture
 # (lib/gtest/x86, lib/gtest/x64 -- see msvc-build-conventions).
 TEST_INCLUDES := /I include /I include/vendor /I src
-TEST_CXXFLAGS := /nologo /c /std:c++17 /EHsc /MT /W4 $(TEST_INCLUDES)
+TEST_CXXFLAGS := /nologo /c /std:c++17 /EHsc /MT /W4 $(TEST_INCLUDES) $(CURL_DEFINES)
 TEST_LIBS     := gtest.lib gtest_main.lib $(LIBS)
 TEST_EXE      := $(TEST_BUILDDIR)/restifycapl-tests.exe
 

@@ -32,6 +32,12 @@ hand-invented version numbers.
 
 ### Changed
 
+- Product and test builds now actually link libcurl: `curl/curl.h` is
+  provisioned into `include/vendor/curl/` by both `scripts/setup-dev-env.ps1`
+  and CI, `CURL_STATICLIB` is defined for both compile paths so the static
+  import resolves, and `iphlpapi.lib` is linked alongside the existing
+  Windows system libs to satisfy libcurl's `if_nametoindex` reference. The
+  libcurl/zs link line itself was already in place and needed no change.
 - `Makefile`: `SYSLIBS` now includes `version.lib`, required by
   `CopyOwnVersionString`'s `GetFileVersionInfo` calls; applies identically to
   both architectures via the shared parameterized rule (Stage 6, BPE-9).
