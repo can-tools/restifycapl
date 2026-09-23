@@ -47,7 +47,6 @@
 # and lib/README is per-environment GENERATED output, rewritten in full by
 # the "lib skeleton + README" step of setup-dev-env.ps1 on every run. It is
 # local reference output, not a repo document -- do not re-add it to git.
-# See plan.md Stage 7 (BPE-26) for the decision and its rationale.
 lib/x86/
 lib/x64/
 lib/gtest/

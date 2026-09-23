@@ -1,7 +1,8 @@
 # auto-pr.yml -- bot-side draft PR opener for restifycapl (CAPL REST DLL).
-# Implements the requirements contract in plan.md §7.5; see that section
-# for design rationale, and HUM-20 for the required repo setting
-# ("Allow GitHub Actions to create and approve pull requests" -> ON).
+# Opens a draft PR on the first push to a stage/chore/fix/docs branch, with
+# a merge checklist tailored to whether the branch is plan-only and whether
+# it touches src/module/exports.cpp. Requires the repo setting "Allow
+# GitHub Actions to create and approve pull requests" -> ON.
 
 name: Auto PR
 
@@ -29,7 +30,7 @@ jobs:
       # `gh pr create` fails outright ("No commits between main and
       # <branch>") on a harmless just-cut branch, so skip creation instead.
       # The full response is persisted so the body-composition step below
-      # can reuse it without a second API call (plan.md §7.5).
+      # can reuse it without a second API call.
       - name: "Guard 1: branch ahead of main?"
         id: ahead
         run: |
@@ -75,7 +76,7 @@ jobs:
           body_file="$RUNNER_TEMP/pr-body.md"
 
           # Exactly two classes -- do not extend this into a per-prefix
-          # decision matrix mirroring §7.8; see plan.md §7.5.
+          # decision matrix.
           plan_only=$(jq -r '
             (.files // []) as $f
             | ($f | length > 0) and
@@ -86,7 +87,7 @@ jobs:
 
           # Only stage/ and chore/ branch names carry a structural stage
           # number or task ID; fix/** and docs/** keep the original line
-          # (see plan.md §7.5 -- mapping those to a stage is human judgement).
+          # (mapping those to a stage is human judgement).
           case "${BRANCH}" in
             stage/*)
               stage_num=$(printf '%s' "${BRANCH}" | sed -E 's#^stage/([0-9]+(-[0-9]+)?)-.*#\1#')
@@ -103,14 +104,13 @@ jobs:
 
           # Composed once, at PR creation, from this push's diff -- a later
           # push that grows src/ changes or adds exports.cpp does not update
-          # this body (accepted limitation, see plan.md §7.5).
+          # this body (accepted limitation).
           {
             echo '## Merge checklist'
             echo
             if [ "${plan_only}" = "true" ]; then
-              echo 'Plan-only branch: per plan.md §7.8, criteria 2 (`code-reviewer`), 3 (human'
-              echo 'gate) and 4 (CHANGELOG) do not apply -- see the guardrail in §7.10.'
-              echo 'Criteria 1 (CI green) and 5 (up to date with `main`) still apply.'
+              echo 'Plan-only branch: the `code-reviewer`, human-gate and `CHANGELOG.md` items'
+              echo 'below do not apply. CI green and up-to-date-with-`main` still apply.'
               echo
             fi
             echo '- [ ] CI green on both legs (`build + test (x86)`, `build + test (x64)`)'
@@ -118,7 +118,7 @@ jobs:
             echo '- [ ] Human gate passed against the PR CI artifact, if this branch has one'
             echo '- [ ] `CHANGELOG.md` `[Unreleased]` entry present'
             echo '- [ ] Branch up to date with `main`'
-            echo '- [ ] Plan folded into `plan.md`, incl. any renumbering (§7.8 criterion 6)'
+            echo '- [ ] Plan folded into `plan.md`, incl. any task-ID/section renumbering (last commit before marking Ready for review)'
             echo
             echo "${todo_line}"
 
@@ -126,9 +126,9 @@ jobs:
               echo
               echo '---'
               echo
-              echo '⚠️ This branch touches `src/module/exports.cpp`. Per plan.md §7.10: never'
-              echo 'have two open PRs that both touch this file, and verify the human gate'
-              echo 'against the CI artifact from this PR before merge.'
+              echo '⚠️ This branch touches `src/module/exports.cpp`. Never have two open PRs that'
+              echo 'both touch this file, and verify the human gate against the CI artifact from'
+              echo 'this PR before merge.'
             fi
 
             if [ -s "$RUNNER_TEMP/subjects.txt" ]; then
@@ -144,7 +144,7 @@ jobs:
           } > "$body_file"
 
       # No `|| true` past both guards -- a failure here is real (most
-      # likely HUM-20's repo setting being off) and must be visibly red.
+      # likely the repo setting being off) and must be visibly red.
       - name: Create draft PR
         if: steps.ahead.outputs.proceed == 'true' && steps.existing.outputs.proceed == 'true'
         run: |

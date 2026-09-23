@@ -59,8 +59,8 @@ else
   VER_COMMIT_COUNT := $(shell git rev-list --count $(LAST_TAG)..HEAD)
 endif
 
-# Release builds (Stage 13 CI) override these four from the tag; local dev
-# builds fall through to the placeholders. Never fed anything but small
+# Release builds override these four from the tag; local dev builds fall
+# through to the placeholders. Never fed anything but small
 # integers here -- FILEVERSION/PRODUCTVERSION are four 16-bit fields that
 # wrap silently above 65535.
 VER_MAJOR ?= 0
@@ -69,11 +69,9 @@ VER_BUILD ?= 0
 VER_REV   ?= $(VER_COMMIT_COUNT)
 
 # ------------------------------------------------------------------------------
-# Sources. At Stage 4 (this stage) none of src/module/*.cpp etc. exist yet
-# -- that lands in Stage 5 (CPP-1) onward. $(wildcard ...) is re-evaluated on
-# every `make` invocation (not cached across runs), so real sources are
-# picked up automatically the moment they exist; nothing here needs editing
-# when they do.
+# Sources. $(wildcard ...) is re-evaluated on every `make` invocation (not
+# cached across runs), so real sources are picked up automatically the
+# moment they exist; nothing here needs editing when they do.
 # ------------------------------------------------------------------------------
 
 SRC_DIRS := src/core src/http src/registry src/mapping src/module
