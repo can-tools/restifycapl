@@ -377,3 +377,59 @@ TEST(HttpClient, ConcurrentPerformCallsThroughFakeCompleteCleanly) {
   EXPECT_EQ(responseB.body, "ok");
   EXPECT_EQ(transport.CallCount(), 2);
 }
+
+// ---------------------------------------------------------------------------
+// WouldExceedResponseCap -- pure arithmetic, no transport involved. Covers
+// the boundary directly rather than through a real transfer.
+// ---------------------------------------------------------------------------
+
+TEST(WouldExceedResponseCap, ExactlyAtCapDoesNotExceed) {
+  EXPECT_FALSE(WouldExceedResponseCap(60, 40, 100));
+}
+
+TEST(WouldExceedResponseCap, OneByteOverCapExceeds) {
+  EXPECT_TRUE(WouldExceedResponseCap(60, 41, 100));
+}
+
+TEST(WouldExceedResponseCap, EmptyIncomingIntoBufferAlreadyAtCapDoesNotExceed) {
+  EXPECT_FALSE(WouldExceedResponseCap(100, 0, 100));
+}
+
+TEST(WouldExceedResponseCap, ZeroCapBytes) {
+  EXPECT_FALSE(WouldExceedResponseCap(0, 0, 0));
+  EXPECT_TRUE(WouldExceedResponseCap(0, 1, 0));
+}
+
+TEST(WouldExceedResponseCap, CurrentSizeAlreadyAtCapWithNonZeroIncomingExceeds) {
+  EXPECT_TRUE(WouldExceedResponseCap(100, 1, 100));
+}
+
+// The one assertion the CPP-21 extraction exists to make directly testable:
+// without the incoming > cap short-circuit, cap - incoming underflows to a
+// huge std::size_t and currentSize > (huge value) is false, so a chunk far
+// larger than the cap would be reported as not exceeding it.
+TEST(WouldExceedResponseCap, IncomingLargerThanCapExceedsWithoutWrappingTheSubtraction) {
+  EXPECT_TRUE(WouldExceedResponseCap(0, 200, 100));
+  EXPECT_TRUE(WouldExceedResponseCap(99, 200, 100));
+}
+
+// ---------------------------------------------------------------------------
+// ResolveTransferResult -- cap-exceeded takes precedence over whatever the
+// CURLcode mapping produced.
+// ---------------------------------------------------------------------------
+
+TEST(ResolveTransferResult, CapExceededBeatsMappedTransferError) {
+  EXPECT_EQ(ResolveTransferResult(true, Status::NetworkError), Status::ResponseTooLarge);
+}
+
+TEST(ResolveTransferResult, CapExceededBeatsOk) {
+  EXPECT_EQ(ResolveTransferResult(true, Status::Ok), Status::ResponseTooLarge);
+}
+
+TEST(ResolveTransferResult, NotExceededPassesOkThrough) {
+  EXPECT_EQ(ResolveTransferResult(false, Status::Ok), Status::Ok);
+}
+
+TEST(ResolveTransferResult, NotExceededPassesMappedErrorThrough) {
+  EXPECT_EQ(ResolveTransferResult(false, Status::NetworkError), Status::NetworkError);
+}
