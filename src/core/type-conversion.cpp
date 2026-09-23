@@ -52,8 +52,8 @@ Status ToLong(const nlohmann::json& value, std::int32_t& out) {
   // Branch on nlohmann's own storage kind rather than converting through
   // get<int64_t>()/get<uint64_t>() indiscriminately -- narrowing across
   // those two storage kinds is not range-checked by nlohmann itself, so
-  // doing it here would reintroduce the exact size_t-style overflow hazard
-  // constraint §3.6 forbids, just one level down.
+  // doing it here would reintroduce the same overflow hazard this function
+  // already guards against, just one level down.
   if (value.is_number_unsigned()) {
     const std::uint64_t raw = value.get<std::uint64_t>();
     if (raw > static_cast<std::uint64_t>(std::numeric_limits<std::int32_t>::max())) {
@@ -131,7 +131,7 @@ Status ValueToText(const nlohmann::json& value, std::string& out) {
     return Status::Ok;
   }
   if (value.is_boolean() || value.is_number()) {
-    // nlohmann's own serializer -- locale-independent, per constraint §3.7.
+    // nlohmann's own serializer -- locale-independent.
     out = value.dump();
     return Status::Ok;
   }

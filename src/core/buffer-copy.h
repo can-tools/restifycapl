@@ -1,11 +1,10 @@
 // buffer-copy.h -- bounds-checked copy of C++ text into a caller-owned raw
-// buffer (src/core, level 0, see
-// docs/work/stage-08-core-pure-logic/plans/plan.md §6 CPP-16).
+// buffer (src/core, level 0).
 //
-// Filed separately from type-conversion.h (plan.md D2a): type-conversion.h
-// holds only functions whose direction is JSON/text in, C++ value out;
-// this header holds the one function whose direction is the opposite --
-// C++ value out to a raw caller-owned buffer. It has exactly one consumer,
+// Filed separately from type-conversion.h: type-conversion.h holds only
+// functions whose direction is JSON/text in, C++ value out; this header
+// holds the one function whose direction is the opposite -- C++ value out
+// to a raw caller-owned buffer. It has exactly one consumer,
 // src/module/exports.cpp's restifyGetVersion.
 #pragma once
 

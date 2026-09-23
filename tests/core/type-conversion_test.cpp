@@ -1,4 +1,4 @@
-// TEST-2 (Stage 8, plan.md §6) -- coverage for src/core/type-conversion.*.
+// Coverage for src/core/type-conversion.*.
 
 #include "core/type-conversion.h"
 
@@ -58,9 +58,9 @@ TEST(ToLong, OneBelowInt32MinIsOverflow) {
   EXPECT_EQ(ToLong(value, out), Status::NumericOverflow);
 }
 
-// Same source runs under both `make test ARCH=x86` and `make test ARCH=x64`
-// (plan.md §6 TEST-2); this case is the architecture-parity check for
-// constraint §3.6 -- int32_t range checks must not vary with pointer width.
+// Same source runs under both `make test ARCH=x86` and `make test ARCH=x64`;
+// this case is the architecture-parity check -- int32_t range checks must
+// not vary with pointer width.
 TEST(ToLong, BeyondInt64RangeIsOverflow) {
   json value = 1e300;
   std::int32_t out = kSentinelLong;
@@ -205,7 +205,8 @@ TEST(ToText, ArrayIsTypeMismatch) {
 }
 
 // ---------------------------------------------------------------------------
-// ValueToText -- §5.3, one test per row.
+// ValueToText -- one test per row of its behavior table (see
+// docs/type-conversion.md).
 // ---------------------------------------------------------------------------
 
 TEST(ValueToText, NullBecomesLiteralNullText) {
@@ -280,8 +281,8 @@ TEST(ParseLong, TooLargeIsNumericOverflow) {
   EXPECT_EQ(ParseLong("99999999999", out), Status::NumericOverflow);
 }
 
-// Pinned by a plan amendment (plan.md §6 TEST-2): a fractional text value
-// must report NotIntegral, never be conflated with ParseError.
+// A fractional text value must report NotIntegral, never be conflated with
+// ParseError.
 TEST(ParseLong, FractionalTextIsNotIntegral) {
   std::int32_t out = kSentinelLong;
   EXPECT_EQ(ParseLong("3.5", out), Status::NotIntegral);
@@ -320,7 +321,7 @@ TEST(ParseDouble, TooLargeIsNumericOverflow) {
 }
 
 // ---------------------------------------------------------------------------
-// Locale independence (constraint §3.7).
+// Locale independence.
 //
 // ValueToText goes through nlohmann's own serializer and ParseDouble through
 // std::from_chars, neither of which consult the global C/C++ locale -- this
