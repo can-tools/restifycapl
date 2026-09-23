@@ -404,7 +404,7 @@ TEST(WouldExceedResponseCap, CurrentSizeAlreadyAtCapWithNonZeroIncomingExceeds) 
   EXPECT_TRUE(WouldExceedResponseCap(100, 1, 100));
 }
 
-// The one assertion the CPP-21 extraction exists to make directly testable:
+// The assertion that makes the wraparound guard directly testable:
 // without the incoming > cap short-circuit, cap - incoming underflows to a
 // huge std::size_t and currentSize > (huge value) is false, so a chunk far
 // larger than the cap would be reported as not exceeding it.
