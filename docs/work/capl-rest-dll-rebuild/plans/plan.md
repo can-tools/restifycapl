@@ -54,7 +54,9 @@ A developer machine and a CI runner are independent environments. Each provision
 
 **Follow-ups outstanding:** BPE-27 (`auto-pr.yml` base-branch gap — §7.13). **HUM-23 is done** — the GitHub configuration HUM-20 found absent on 2026-09-21 was applied and verified present via the GitHub REST API on 2026-09-22 (§7.14). **BPE-19 closed** as absorbed by BPE-24 + CPP-17. **BPE-16, BPE-17 and BPE-18 are closed** (`chore/bpe-16-17-18-cleanup`, 2026-09-22): BPE-16 added the one-line `version-string`-is-not-a-source note to `msvc-build-conventions`; BPE-17 deleted the stale `lib/x64/gmock.lib`/`gtest.lib` residue and made `Copy-TripletLibs` synchronising (prunes non-allow-listed `.lib` files from the destination before copying); BPE-18's "believed closed" framing turned out wrong on actual inspection — **all three CHANGELOG items were genuinely missing**, not just unverified: no `Added` entry existed for `ci.yml` itself, no entry existed for the `version.lib`/`SYSLIBS` addition, and the `setup-dev-env.ps1` entry still read the stale "14 OK, 0 WARN, 0 FAIL". All three were added/corrected. The same branch also bumped `actions/checkout`, `actions/cache` and `actions/upload-artifact` in `ci.yml` off the deprecated Node 20 runtime and SHA-pinned `ilammy/msvc-dev-cmd` (BPE-28, §12).
 
-**Next:** **Stage 9 — HTTP layer and synchronous operations (§8)**, on a `stage/09-*` branch cut from `main` once Stage 8's PR has merged. Stage 9 is logic-only, has no human gate (§7.8) and appends nothing to the export table, so HUM-13 does not gate it. HUM-23 (branch protection on `main`, §7.14) landed 2026-09-22 and is no longer a precondition. HUM-12 is **done** — it is what made Stages 6 and 7 real.
+**Stage 9 is complete and reviewed clean (REV-20, zero Must-fix) — HTTP layer and synchronous operations, logic-only, no export-table append, so HUM-13 did not gate it.** See §8's Stage 9 entry for the full record.
+
+**Next:** **Stage 10 — expose synchronous REST to CAPL**, the first export-table append. It cannot proceed until HUM-13 has passed. HUM-23 (branch protection on `main`, §7.14) landed 2026-09-22. HUM-12 is **done** — it is what made Stages 6 and 7 real.
 
 ---
 
@@ -92,7 +94,7 @@ Documentation practice is deliberately not a numbered stage — see §6a.
 - **Never return a raw text pointer** from a CAPL-exposed operation — always write into a caller-supplied buffer with its size. `restifyGetVersion` is the reference implementation of this shape.
 - **1-byte packing must cover the entire export table** through and including the terminating pointer.
 - **Dependency direction.** `src/core/` imports nothing from `src/http/`, `src/registry/`, `src/mapping/`. Only `src/module/` includes the CAPL SDK headers — currently `exports.cpp` is the only `.cpp` under `src/` at all, and it is the only file including those headers. `make test` compiles `src/core`, `src/http`, `src/registry`, `src/mapping` and deliberately excludes `src/module`.
-- **`Status` codes are absorbed, never renumbered — `src/core/status.h` owns the whole numbering space (Stage 8, CPP-18).** `0`/`-1`/`-2`/`-3` are the codes `restifyGetVersion` already ships and that CAPL scripts already depend on at runtime; the enum adopted them as-is rather than starting fresh. `-4..-9` are **reserved** for module-local glue codes and are currently empty. `VersionResourceUnavailable = -3` is declared in `src/core/status.h` but is unreachable from `src/core/` — only `src/module/` can produce it — and is declared there anyway so the numbering space has exactly one owner. `ParseError = -10` is a **forward reservation with no caller yet**, most likely claimed by Stage 9's sync-operations or Stage 12's flattening. Adding a code means appending a new value; re-minting an existing one breaks shipped CAPL scripts in exactly the way an export-table renumber would, and no compiler catches either.
+- **`Status` codes are absorbed, never renumbered — `src/core/status.h` owns the whole numbering space (Stage 8, CPP-18).** `0`/`-1`/`-2`/`-3` are the codes `restifyGetVersion` already ships and that CAPL scripts already depend on at runtime; the enum adopted them as-is rather than starting fresh. `-4..-9` are **reserved** for module-local glue codes and are currently empty. `VersionResourceUnavailable = -3` is declared in `src/core/status.h` but is unreachable from `src/core/` — only `src/module/` can produce it — and is declared there anyway so the numbering space has exactly one owner. **The space as of Stage 9:** `-10..-17` spent by Stage 8; **`-18..-23` spent by Stage 9's HTTP layer** (`NetworkError`, `Timeout`, `TlsError`, `TransportInitFailed`, `InvalidUrl`, `ResponseTooLarge`); **`-24` reserved for the HTTP layer, `-25..-29` reserved for Stage 11's async layer** — do not mint from that range earlier. **`ParseError = -10`'s forward reservation is now resolved to Stage 12** (`json-flatten`), not Stage 9: `sync-operations` deliberately does not parse response bodies, returning raw text for the mapping layer to interpret. Adding a code means appending a new value; re-minting an existing one breaks shipped CAPL scripts in exactly the way an export-table renumber would, and no compiler catches either.
 - **The `To*` / `Parse*` boundary is deliberate and stays that way (Stage 8, CPP-2).** The `To*` family takes `const nlohmann::json&` and is **strict**: a JSON string where a number was requested returns `TypeMismatch`, never a silent fallback. `ParseLong`/`ParseDouble` take `std::string_view` and are a **deliberately named lenient escape hatch for raw text** — "lenient" means accepting raw text at all, not tolerating garbage (a valid numeric prefix with a trailing tail is still `ParseError`). **The `To*` family never calls the `Parse*` family.** A later stage that wants coercion adds it explicitly at its own call site; it must not arrive by making a `To*` function quietly fall through.
 - **`data.items[0].name` path syntax is interim, not the target architecture (Stage 8, CPP-3).** Dot for object keys, brackets for array indices. Struct mapping — deferred per `CLAUDE.md`'s Scope, Stage 16 here — is the real destination for structured access and is free to supersede this syntax without archaeology. The caveat is stated in `json-path.h`'s own header, not only here, so it is read at the point of use. **The window is open only while nothing is exported:** once a `.can` example or a CAPL script uses this syntax it becomes a breaking change to alter, and Stages 12–13 are where that door closes.
 - **`lib/<arch>/` is product-linked; `lib/gtest/<arch>/` is test-only** and must never enter the DLL link line.
@@ -104,6 +106,9 @@ Documentation practice is deliberately not a numbered stage — see §6a.
 - **`builtin-baseline` must be the commit the pinned vcpkg tag dereferences to.** `vcpkg.json` pins registry content, `VCPKG_PINNED_TAG` pins the tool, and the pair is coherent only when the baseline *is* the pinned tag's commit. Both were individually correct and the pair was invalid for weeks (BPE-25, §7.13). Now asserted mechanically in both `ci.yml` and `setup-dev-env.ps1`.
 - **No stage work is committed to `main` directly.** From Stage 7 onward all work happens on a branch and reaches `main` only through a PR — see Stage 7 for topology, naming, merge criteria and automation.
 - **Agents cannot `git tag`, and cannot push to `main`.** HUM-21 is **applied**: the blanket `git push` deny is narrowed to the working-branch prefixes, while `main`, bare `git push`, force-push, tag-push and branch-deletion forms stay denied. The structural control is GitHub branch protection, not `settings.json` — **"the server refuses, and the client discourages."**
+- **TLS verification is per-request-switchable and safe by default (Stage 9, D15/CPP-4).** `RequestOptions::skipTlsVerification` is a `bool` defaulting to `false`; `false` sets `CURLOPT_SSL_VERIFYPEER=1`/`VERIFYHOST=2`, `true` sets both to `0`. Both options are always set explicitly, in both branches — setting one without the other is the classic half-disabled-TLS bug. There is **no global switch, environment variable, build-time define, or derived value** that can influence the field, and `sync-operations` forwards it unmodified with no branch that reads it. **This is a standing API property, not an implementation detail: Stage 10 must not expose it to CAPL by reflex.** Any future path that can disable verification without the immediate caller asking for it is a defect, because the failure is invisible — everything appears to work, including against a hostile peer.
+- **Synchronous HTTP operations are unsafe in CANoe's realtime branch, by Vector's own rule.** The CAPL DLL documentation states that in the Simulation Setup realtime branch *"file accesses and other blocking calls are prohibited"* and dynamic memory management is not recommended; functions called there run on a high-priority thread. A synchronous HTTP call is a blocking call and libcurl allocates freely, so `sync-operations` is Measurement-Setup/test-node only. This caveat must travel with the code: it is in `sync-operations.h` and `docs/http-layer.md` now, and **Stage 10 must carry it into the export-table description text, Stage 12 into the `.can` examples.** It is also why Stage 11's async layer is the only conforming way to call REST from a simulation node — not a convenience.
+- **A `.gitkeep` is removed in the same change that adds the first real tracked file to its directory (Stage 9, D17/BPE-31).** Never swept separately, never left behind "to clean up later," never removed from a directory that is still empty. The rule's substance lives in `msvc-build-conventions`'s Directory conventions section, which already owns directory semantics; `build-pipeline-engineer` carries a one-line pointer.
 
 ---
 
@@ -231,7 +236,13 @@ The Makefile deliberately takes the opposite approach for its hardest-won findin
 
 **The defect this fixed was storage, not judgement.** The project had already diagnosed comment bloat: §6a named it, BPE-19 existed for it, BPE-13 promised a Stage 15 sweep. All of that was recorded in the one document that, by design, only `planner` reads. Meanwhile **none** of the four coding-agent definitions and none of the skills contained the word "comment" as a rule. A policy stored where it cannot fire is not a policy. The evidence at the time: `ci.yml` carried a 66-line header before `name:`; `auto-pr.yml` a 39-line header stating "this file does not restate plan.md §7.5" and then restating it 25 lines later; `exports.cpp` ran roughly 150 comment lines against 100 lines of C++.
 
-**Where the rule lives — exactly one file.** `.claude/skills/project-docs/SKILL.md` holds the full rule: three tiers, banned list, redirect table, protected-comments list. Each of `cpp-implementer`, `build-pipeline-engineer`, `test-engineer` and `code-reviewer` carries **one pointer bullet** and no substance. Duplicating the rule into four agent files would violate the rule it installs, and agent-file duplication is one of this project's two named historical drift instances. **The rule is deliberately not restated here either** — this section records what still constrains future work; `project-docs` is where the rule is read.
+**Where the rule lives — exactly one file.** `.claude/skills/project-docs/SKILL.md` holds the full rule: three tiers, banned list, redirect table, worked patterns, protected-comments list. Each of `cpp-implementer`, `build-pipeline-engineer`, `test-engineer`, `code-reviewer` and — since Stage 9 — `planner` carries **one pointer bullet** and no substance. Duplicating the rule into agent files would violate the rule it installs, and agent-file duplication is one of this project's two named historical drift instances. **The rule is deliberately not restated here either** — this section records what still constrains future work; `project-docs` is where the rule is read.
+
+**Stage 9 amended the rule in three ways, after a measured regression (BPE-30, REV-21, CPP-20, BPE-32).** The first fix had held for `.cpp` files — they sat at 7–14% comments — but the *headers* had regrown to 74%, 73%, 62% and 51%, because two stage plans had instructed that normative tables be written "verbatim into" a header. **The defect was in the planning instruction, not in the implementer's compliance**, which is why `planner` now carries the constraint and why `cpp-implementer`'s "match existing style" step was scoped to exclude comment volume — the existing headers were the bad examples it was being pointed at.
+
+1. **Identifiers are banned in comments.** Any reference to a plan section, stage number or task ID — including bare criterion/section numbers that only resolve against a plan document — is out. A comment must stand on its own. **This reverses the rule's own earlier wording**, which instructed pointing at `plan.md §7.5` rather than restating it; every instance in the tree had been written in compliance, so the rule was corrected first and the sweep run second. The trade is deliberate and recorded: traceability moves from inline citations to `docs/<topic>.md` and the `docs/work/<slug>/plans/` documents.
+2. **Three categories are exempt from *mechanical flagging*, not from the rule:** program output read by a user at runtime, PowerShell comment-based help (`Get-Help` consumes it), and generated artefacts such as auto-filled PR bodies. A grep cannot tell these from developer-facing comments and a wrong edit breaks a working feature — but they are not immune. Each goes to human judgment under the same principle: **the citation never survives; what varies is only whether there is substance worth inlining in its place.** Eight instances were resolved this way across `setup-dev-env.ps1`, `auto-pr.yml` and `ci.yml`. One of them, `auto-pr.yml`'s *"criteria 2, 3 and 4 do not apply"*, carried no `§`, no task ID and no `plan.md` at all — a dependency on §7.8's **numbering** that had survived two prior passes and would have silently falsified every generated PR body if §7.8 were renumbered.
+3. **Plans specify tier and line budget, never "verbatim".** Stage 9's own §5.0 is the worked application: each normative block is assigned one home — inline as a named trap, or `docs/<topic>.md` — with a 35% comment ceiling on the new source files as a tripwire.
 
 **The load-bearing detail, recorded because it is invisible and fatal.** `project-docs`'s `description:` frontmatter decides when the skill loads. Left scoped to README/examples/CHANGELOG, the rule would exist and never fire on a `.cpp` or `.yml` edit. **Rewriting that `description:` — not the body text — is what makes this work**, and REV-14 re-checked it specifically. Any future skill carrying a cross-cutting rule inherits this exact failure mode.
 
@@ -240,17 +251,20 @@ The Makefile deliberately takes the opposite approach for its hardest-won findin
 - **Extend `project-docs`; do not create a new skill.** A second skill about where explanatory material belongs, sitting beside an existing skill about where explanatory material belongs, is precisely the antipattern both `project-docs` and §6a exist to prevent. Scoping it under `msvc-build-conventions` or `capl-export-contract` fails differently: the rule covers `.cpp`, `.yml`, `Makefile` and tests alike, and "a rule scoped to one file type does not generalise itself" (§6a).
 - **Archival `docs/` are topic-scoped, never stage-scoped.** Stages dissolve; topics do not. Someone hitting the `LIBCMTD` false positive in 2027 searches for `/MT` or `LIBCMT`, never for "Stage 6". `development-environment.md` already spans Stage 2 and Stage 4 material correctly, because both are "how this environment is provisioned". Per-stage documents would fragment the `/MT` story across three stages and produce seventeen mostly-empty files. Each section takes a one-line `(found during Stage N, TASK-ID)` breadcrumb, so stage attribution survives without fragmenting the topic.
 
-**Protected comments — never stripped under this rule.** The `Makefile`'s `/SUBSYSTEM:CONSOLE` and `make -n` trap comments (§6a blesses them: traps a reader hits *while editing that exact recipe*); `exports.cpp`'s CAPL naming-convention statement (§5 requires it to live in the file being edited — trim it, never remove it); and `ci.yml`'s `LIBCMTD` two-part-check explanation, which is the exact bug REV-4 caught.
+**Protected comments — protection covers substance, not identifiers.** These stay; any stage or task identifier they carry does not. The `Makefile`'s `/SUBSYSTEM:CONSOLE` and `make -n` trap comments (§6a blesses them: traps a reader hits *while editing that exact recipe* — the `make -n` one runs to roughly 19 lines, a named, bounded exception to tier 3's own ≤10-line limit, kept because the bug it documents is real and non-obvious); `exports.cpp`'s CAPL naming-convention statement (§5 requires it to live in the file being edited — trim it, never remove it, though its own `(Stage 5)` tag came out under the identifier ban); and `ci.yml`'s `LIBCMTD` two-part-check explanation, which is the exact bug REV-4 caught.
 
 **Where the evicted material went — this list is the fold-in's exit condition.**
 
 - **`docs/ci-pipeline.md` (new, BPE-24)** — the `ilammy/msvc-dev-cmd` → `GITHUB_ENV` `VCPKG_ROOT` clobber (trap 4, the only genuinely CI-only and previously undocumented one); the `LIBCMTD` two-part-check rationale; the image-version cache-key reasoning; the tag-collision branch-filter reasoning; and the never-call-`setup-dev-env.ps1`-from-CI rationale added at REV-14.
 - **`docs/development-environment.md` (existing)** — traps 1–3 (shallow clone, shared install root, unpinned tool) were already documented there; `ci.yml` now points rather than restates.
 - **A new file rather than extending `development-environment.md`**, because §5 holds that the local and CI paths "share the pin, never the mechanism and never the output". Folding CI-only material into a document scoped to local provisioning would blur the one distinction that document exists to keep sharp.
+- **Four topic documents added by Stage 9**, same topic-scoped rule: **`docs/http-layer.md`** — the HTTP layer's option policy, `CURLcode` mapping table, handle lifecycle, timeout policy, D15's TLS rationale, and a **"What cannot be verified without a live server"** section; **`docs/status-codes.md`**, **`docs/type-conversion.md`** and **`docs/json-path.md`** — the normative tables evicted from `src/core/`'s headers by CPP-20, which is what took those headers from 74%/73%/62%/51% back into band.
 
 **The disposition-list discipline — now standing practice for any future trim.** Every removed comment block is reported alongside the diff with exactly one disposition: `captured → <file>#<section>`, `already covered → <file>#<section>`, or `dropped as redundant → <reason>` — the last permitted only when the fact is recoverable from the code itself or from a loaded skill, without which it becomes an escape hatch that swallows the rule. `code-reviewer` verifies each disposition **against the actual target file** and files a failure as **Must fix**, not Nice-to-have: lost rationale is unrecoverable once the branch diff ages out, and filing this category as a nice-to-have is exactly what happened to BPE-19. Review is the only moment it is cheaply checkable.
 
-**Status.** HUM-22 approved the wording; BPE-23 installed it; BPE-24 and CPP-17 trimmed `ci.yml`, `auto-pr.yml`, `Makefile` and `exports.cpp`; REV-14 passed with two Must-fix items, both resolved (`cf9e74b`, `25f6033`). The work **landed on `main` in PR #2 (`334d5d4`)**. **BPE-19 closes as absorbed by BPE-24 + CPP-17.** Still deferred to BPE-13 at Stage 15: `setup-dev-env.ps1` and everything under `docs/`.
+**Status.** HUM-22 approved the wording; BPE-23 installed it; BPE-24 and CPP-17 trimmed `ci.yml`, `auto-pr.yml`, `Makefile` and `exports.cpp`; REV-14 passed with two Must-fix items, both resolved (`cf9e74b`, `25f6033`). The work **landed on `main` in PR #2 (`334d5d4`)**. **BPE-19 closes as absorbed by BPE-24 + CPP-17.**
+
+**Stage 9 carried the second pass** (BPE-30 rule and agent fixes, REV-21 audit, CPP-20 `src/` fixes, BPE-32 build-file and script fixes), and **narrowed BPE-13's deferral rather than leaving it whole**: `scripts/setup-dev-env.ps1` was pulled into scope **for comment discipline only** — identifiers, volume, banned categories — while its provisioning logic, vcpkg pinning, allow-list filtering and `/MT` checks stay deferred to BPE-13 at Stage 15. **Everything under `docs/` remains deferred to BPE-13 in full.** The `.ps1` turned out to be the cheap half of that scope: 1435 lines at ~17% comments, already in band, with the findings concentrated in identifiers rather than volume.
 
 ---
 
@@ -750,21 +764,44 @@ Stages 10–13 each append to the export table. Every append requires `code-revi
 
 **Human approval gate: NO — and it held for the entire stage, including the CPP-16 rewiring**, confirmed by REV-19 rather than assumed: no export-table row added, renamed or reordered, `exports.def` untouched, no `/MT` change, nothing newly shipped. "No gate" was never "no review" — REV-19 was mandatory precisely because `exports.cpp` was in the diff.
 
-### Stage 9 — HTTP layer and synchronous operations (logic only)
-**CPP-4** — `src/http/http-client.*` wrapping libcurl. **CPP-5** — `src/http/sync-operations.*`.
-**BPE-10** — Link `libcurl.lib` and `zs.lib` from the matching `lib/<arch>/`, plus all Windows system libs in `SYSLIBS` (now including `version.lib`).
-**TEST-4** — Build the libcurl fake/mock boundary. No real network calls in the suite.
+### Stage 9 — HTTP layer and synchronous operations (logic only) — COMPLETE, REVIEWED CLEAN
 
-**Design constraint from the Makefile.** `TEST_LIBS` is `gtest.lib gtest_main.lib $(LIBS)`, so the test executable links the **real** libcurl. Harmless today, but it means **the mock cannot be a link-time substitution** — a fake `libcurl.lib` cannot simply be swapped in. The seam must be a C++ abstraction inside `http-client.*` that tests inject through. Settle this in **CPP-4's design**, before TEST-4 tries to test around a shape that does not admit a fake.
+**Detailed record: `docs/work/stage-09-http-sync/plans/plan.md`** — left in place as the detailed record, not reduced to a pointer. It carries the `CURLcode`→`Status` mapping, the libcurl option policy, the handle-lifecycle rules, the timeout policy and §5.0's comment-disposition table as **normative specifications**, and its §11 carries a named required-coverage list for deferred live testing. This entry is the summary; that document is the reference.
 
-**TEST-5** — Coverage including **simulated timeouts and error responses**. Verify as a standalone console program against httpbin.org. **Human approval: no.**
+**CPP-19 — DONE.** `src/core/status.h` extended with the HTTP block `-18..-23`, `-24` and `-25..-29` reserved (§5). Every pre-existing value byte-identical.
+
+**BPE-10 — DONE, and its scope was not what this entry originally described.** The link-line half — `libcurl.lib`, `zs.lib` and `SYSLIBS` — was **already complete and needed no edit**; because nothing referenced a curl symbol, the linker had simply been discarding both libraries, so Stage 9 is the first time that line was exercised. What was actually missing, found by reading the tree rather than trusting the description: **curl headers were provisioned nowhere** (`setup-dev-env.ps1` copied gtest's headers and `json.hpp` but had no curl step, so `#include <curl/curl.h>` could not compile locally or in CI); **`.gitignore` needed `include/vendor/curl/`** alongside the existing `include/vendor/gtest/` entry, and its neighbouring "vendored SOURCE is still committed" comment had to be corrected to distinguish hand-vendored pinned source from vcpkg-provisioned source; and **`CURL_STATICLIB` was defined nowhere in the repo**, without which `curl.h` declares every entry point `__declspec(dllimport)` and the static link fails on `__imp_curl_easy_init` — a symptom that reads like a missing library and sends people hunting in `LIBS`, where nothing was wrong. One `Makefile` change only: the define, reaching both `CXXFLAGS` and `TEST_CXXFLAGS` from a single variable. **`iphlpapi.lib` was added to `SYSLIBS`** — a real link dependency of static libcurl that the documented system-lib list did not name.
+
+**CPP-4 — DONE.** `src/http/http-client.{h,cpp}`: `HttpRequest`/`HttpResponse`/`RequestOptions`, an injectable `HttpTransport` seam, and a file-local `CurlTransport`. **`curl/curl.h` appears in exactly one translation unit**; no header under `src/` and no test file names a libcurl type. The seam is a C++ abstraction because it had to be: `TEST_LIBS` is `gtest.lib gtest_main.lib $(LIBS)`, so the test executable links the **real** libcurl and a fake `libcurl.lib` can never be substituted at link time. That was settled in CPP-4's design before TEST-4 tried to test around a shape that would not admit a fake.
+
+**CPP-5 — DONE.** `src/http/sync-operations.{h,cpp}` — generic executor plus verb helpers. No JSON parsing (§5), no response retained between calls, `RequestOptions` forwarded unmodified.
+
+**TEST-4 / TEST-5 — DONE.** `tests/http/fake-transport.h` plus coverage for both modules. Offline only — no network call is reachable from `make test`, and no test is `DISABLED_` or environment-gated.
+
+**CPP-21 / TEST-13 — DONE; these exist because TEST-5 found a real testability gap and reported it instead of faking coverage.** The response-cap comparison and the `ResponseTooLarge`-beats-`CURLE_WRITE_ERROR` precedence lived in an anonymous-namespace callback reachable only through a live transfer, so the fake could not reach them — and asserting them against the fake would have proved only that the fake returned what it was told. **The two gaps were not the same gap:** the cap comparison carries no libcurl type at all and was trapped by placement, so CPP-21 extracted it as `WouldExceedResponseCap` and `ResolveTransferResult` with no change to the one-translation-unit rule, and TEST-13 covers them directly — including the wrap case — in **both** architectures' binaries. The `CURLcode`→`Status` table genuinely does need libcurl types in a test, and a direct unit test of it would assert only that the switch contains what the switch contains; the claim worth testing is that libcurl reports those codes in this configuration under Schannel, which only a live transfer establishes. That half is deferred (see §11). Because the extraction restructured early returns in already-reviewed code — the CPP-16 hazard shape — its behaviour-preservation was **independently re-derived from the diff rather than trusted from the implementer's report**.
+
+**BPE-30 / REV-21 / CPP-20 / BPE-32 — DONE.** The second comment-discipline pass; see §6b for what changed and why the driver was a planning instruction rather than implementer non-compliance.
+
+**BPE-31 — DONE.** `.gitkeep` files disposed in three buckets and D17 installed as standing practice (§5).
+
+**REV-20 — CLEAN, ZERO MUST-FIX**; one Should-fix found and fixed. Confirmed: export-table diff empty; `Status` numbering correct; D15's default-false wiring correct and forwarded unmodified; architecture parity with the wraparound guard **independently re-derived**; lifecycle correct (no `DllMain` init, no `curl_global_cleanup`, one handle per request); zero `noexcept`, no unguarded throws; §5.0's dispositions honoured with `docs/http-layer.md` spot-checked; no network reachable from tests; no response store; the realtime-branch caveat present; REV-21's findings closed and spot-checked **against the actual target documents**, not against the report claiming them. **The `/MT` check was best-effort (a binary-string scan) and REV-20 says so — CI's real `dumpbin /directives` pass remains the authoritative one** (§14).
+
+**139/139 tests passing on both x86 and x64; `make all` clean; `/W4` clean.**
+
+**Human approval gate: NO — and it held.** No export-table row added, renamed or reordered; `exports.def` untouched; no `/MT` change; nothing newly published. `exports.cpp` appears in the diff for comment edits only. BPE-32's `ci.yml` and `auto-pr.yml` edits touch comments and message strings, nothing that changes what is built, tested or shipped.
+
+**Obligations this stage creates.** Stage 10 must carry the realtime-branch caveat into the export-table description text (§5). Stage 11 owns the response-store design **from scratch** — Stage 9 deliberately built none and did not prefigure one, including whether synchronous responses need caching there once Stage 12/13's accessors exist. Stage 12 must carry the realtime-branch caveat into the `.can` examples. The path syntax window (§5) is still open and closes at Stages 12–13.
 
 ### Stage 10 — Expose synchronous REST to CAPL (first contract append)
 **CPP-6** — Append sync operations; rebuild both architectures; add the `CHANGELOG.md` entry. **REV-5**. **HUM-14** — Verify in CANoe. **Human approval gate: YES.**
 
+**Carried in from Stage 9:** the export-table description text for every sync operation must state that these calls block and are Measurement-Setup/test-node only, never the Simulation Setup realtime branch (§5). **`RequestOptions::skipTlsVerification` must not be exposed to CAPL by reflex** — if it is ever exported it needs a name that says what it does and its own approval, not a parameter slot that quietly exists (§5).
+
 ### Stage 11 — Asynchronous layer with response state designed correctly up front
 **CPP-7** — `src/http/async-operations.*`: background dispatch, readiness check, wait-for-result. Response-state semantics settled **now, not retrofitted** — ready flag cleared once read, request ID tying a response to the call that produced it. 04-FLOW §5 item 3 records the previous iteration identified this early but never confirmed implementation. Shared state is global within the DLL with per-module synchronization; **one active response at a time** by deliberate design.
 **TEST-6** — coverage for ready-flag-cleared-after-read and request-ID correlation across consecutive requests.
+
+**Carried in from Stage 9:** the response store is **this stage's to design from scratch** — Stage 9 built none and deliberately did not prefigure one, so nothing constrains the shape. Answer explicitly, rather than discovering it at Stage 12: **do synchronous responses also need caching in that store** once the typed accessors exist? Stage 10 can export sync operations without one, because the body is copied straight into the caller's CAPL `char[]`. Note also that Vector's documentation *forbids* calling CAPL callbacks from a DLL's own threads and prescribes a CAPL `on timer` poll guarded by a mutex in the DLL — so the polling design here is mandated, not chosen, and `src/http/` was kept free of any VIA interaction precisely so this layer can run it on a background thread.
 **CPP-8** — Append async operations; CHANGELOG entry. **REV-6**. **HUM-15** — Verify in CANoe. **Human approval gate: YES.**
 
 ### Stage 12 — JSON flattening (highest user value — ship before struct mapping)
@@ -772,6 +809,8 @@ Stages 10–13 each append to the export table. Every append requires `code-revi
 **TEST-7** — coverage including deeply nested objects, arrays, empty/malformed documents.
 **HUM-16 — Mandatory before any `.can` example is written:** verify associative-field syntax against the official CANoe help (`Help → CAPL → General → Associative Fields`). The correct form has **no extra keyword before the type** — `char[30] name[char[]];`. An invented keyword was copied across many docs and example files last time.
 **CPP-10** — Append flattening operations; CHANGELOG entry. **CPP-11** — `examples/*.can`, only after HUM-16. **REV-7**. **Human approval gate: YES.**
+
+**Carried in from Stage 9:** the `.can` examples must carry the realtime-branch caveat for any synchronous call they demonstrate (§5). `ParseError = -10`'s forward reservation resolves **here** — `sync-operations` deliberately does not parse, so `json-flatten` is its first caller.
 
 ### Stage 13 — Typed JSON accessors
 **CPP-12** — `src/mapping/json-accessors.*`: typed point reads, array helpers, optional cache.
@@ -815,11 +854,21 @@ Trigger: Stage 13's typed accessors prove insufficient for a concrete use case. 
 ### Stage 17 (CONDITIONAL) — CAPL-side request-body building
 Trigger: hand-assembling JSON in CAPL proves genuinely cumbersome. Dead code last time. **CPP-15** / **TEST-11** / **REV-12**. **Human approval gate: YES.**
 
+### Deferred, unscheduled — automated integration testing against a containerized server
+
+**Not a numbered stage yet, deliberately** — it has no number because it has not been planned, and §4's "no gaps, no letter suffixes" rule is better served by an honest unnumbered entry than by a placeholder.
+
+Raised during Stage 9 (OQ9). The governing principle, which is broader than any one stage: **integration and E2E tests must never be human-only — they must be automated, running both in local development and in CI.** A manually-run `DISABLED_` test and a hand-compiled console program against httpbin.org were both rejected on those grounds, not on effort. The intended mechanism is a self-hosted test HTTP/HTTPS server in a Docker container, exercised by an automated suite with no dependency on any external network.
+
+**Scope honestly: Docker would be a new toolchain dependency — nothing containerized exists in this repository today.** It touches `scripts/setup-dev-env.ps1`, `ci.yml`, and `msvc-build-conventions`'s "never a second build system" constraint. Likely owner of the tooling decision is `build-pipeline-engineer`, with `test-engineer` owning the suite.
+
+**The required-coverage list is not an aspiration — it was derived from a real testability boundary hit while writing Stage 9's tests, and lives in `docs/work/stage-09-http-sync/plans/plan.md` §11(b) with a *why-not-sooner* clause on each item.** In summary: every row of the `CURLcode`→`Status` mapping driven by a **real server condition** rather than a synthesised code (timeout, TLS failure under Schannel specifically, connection refused, DNS failure, redirect limit, malformed and unsupported-scheme URLs, and the catch-all); `ResponseTooLarge` through a real oversized transfer, confirming the wiring that CPP-21's predicate cannot; `Status::Ok` with each HTTP status class from a real server; and `skipTlsVerification` **actually acting** — `false` rejecting a self-signed certificate, `true` accepting it, which is the only proof that `CURLOPT_SSL_VERIFY*` are wired to the values specified. Both architectures. `docs/http-layer.md`'s "What cannot be verified without a live server" section carries the same boundary next to the code, so it survives whether or not this entry is ever scheduled.
+
 ---
 
 ## 12. Task index by agent
 
-### `build-pipeline-engineer` — 29 tasks
+### `build-pipeline-engineer` — 32 tasks
 
 | ID | Stage | Task | Status |
 |---|---|---|---|
@@ -837,7 +886,10 @@ Trigger: hand-assembling JSON in CAPL proves genuinely cumbersome. Dead code las
 | BPE-9 | 6 | `ci.yml` — independent provisioning + build + `make test` both arches + artifacts + caching; `version.lib` in `SYSLIBS` | **DONE — EXECUTED; first runs red, two defects found and fixed** |
 | BPE-18 | 6 | CHANGELOG entries for `ci.yml` and `version.lib`; correct stale 14→19 OK count | **DONE — verified, not assumed: all three items were actually still missing/stale, all three added/corrected** |
 | BPE-19 | 6 | Trim duplicated `version.lib` rationale in `exports.cpp` + Makefile | **CLOSED — absorbed by BPE-24 + CPP-17** |
-| BPE-10 | 9 | Link `libcurl.lib`, `zs.lib` and the system libs | |
+| BPE-10 | 9 | Provision curl headers to `include/vendor/curl/` (local + CI); `.gitignore` entry and comment correction; one `CURL_STATICLIB` define reaching both compile paths; `iphlpapi.lib` added to `SYSLIBS`. The link-line half was already complete and needed no edit | **DONE** |
+| BPE-30 | 9 | Correct the comment rule (identifier ban, three exempt categories, worked patterns); scope `cpp-implementer`'s "match existing style"; add the constraint to `planner`; collapse duplicated substance in four agent files | **DONE** |
+| BPE-31 | 9 | `.gitkeep` disposition in three buckets; D17 installed in `msvc-build-conventions` | **DONE** |
+| BPE-32 | 9 | Apply the audit's build-file and script fixes, incl. eight settled identifier instances across `setup-dev-env.ps1`, `auto-pr.yml`, `ci.yml`; `-?` help and PR-body rendering verified by execution | **DONE** |
 | BPE-11 | 14 | Release workflow — reuse `ci.yml` provisioning, tag extraction, approval gate, publish | |
 | BPE-12 | 14 | Generate the operation list from the export table | |
 | BPE-13 | 15 | Build-system cleanup pass | |
@@ -853,7 +905,7 @@ Trigger: hand-assembling JSON in CAPL proves genuinely cumbersome. Dead code las
 | BPE-27 | 7 | `auto-pr.yml` base-branch gap; PR-checklist fold-in line; `stage-branch` rebase exception | **DONE — see §7.13** |
 | BPE-29 | 8 | `Makefile`: `/I src` added to `INCLUDES` and `TEST_INCLUDES` | **DONE — `f6a214d`** |
 
-### `cpp-implementer` — 18 tasks
+### `cpp-implementer` — 21 tasks
 
 | ID | Stage | Task | Status |
 |---|---|---|---|
@@ -861,8 +913,11 @@ Trigger: hand-assembling JSON in CAPL proves genuinely cumbersome. Dead code las
 | CPP-2 | 8 | `src/core/type-conversion.*` — seven functions, `To*` strict / `Parse*` lenient | **DONE — `14ed8d4`** |
 | CPP-3 | 8 | `src/core/json-path.*` — `ParsePath`/`ResolvePath`; interim path syntax (§5) | **DONE — `83b51ec`** |
 | CPP-16 | 8 | Extract `CopyOwnVersionString`'s pure buffer/bounds sliver to `src/core/buffer-copy.*`; rewire `exports.cpp` | **DONE — `202c7b0`; no longer optional (D4); behaviour-preserving, re-derived from the diff by REV-19** |
-| CPP-4 | 9 | `src/http/http-client.*` — must expose an injectable seam (see Stage 9) | |
-| CPP-5 | 9 | `src/http/sync-operations.*` | |
+| CPP-4 | 9 | `src/http/http-client.*` — injectable `HttpTransport` seam; `curl/curl.h` in one translation unit only; `docs/http-layer.md` | **DONE** |
+| CPP-5 | 9 | `src/http/sync-operations.*` — no JSON parsing, no response store, `RequestOptions` forwarded unmodified | **DONE** |
+| CPP-19 | 9 | `src/core/status.h` — HTTP block `-18..-23`; `-24` and `-25..-29` reserved | **DONE** |
+| CPP-20 | 9 | Comment-discipline fixes across `src/core/`, `src/module/`, `tests/core/`; four topic docs created | **DONE** |
+| CPP-21 | 9 | Extract `WouldExceedResponseCap` and `ResolveTransferResult`; behaviour-preservation independently re-derived from the diff | **DONE** |
 | CPP-6 | 10 | Append sync operations + CHANGELOG entry | |
 | CPP-7 | 11 | `src/http/async-operations.*` + response-state semantics | |
 | CPP-8 | 11 | Append async operations + CHANGELOG entry | |
@@ -876,7 +931,7 @@ Trigger: hand-assembling JSON in CAPL proves genuinely cumbersome. Dead code las
 | CPP-17 | 6b | Trim `exports.cpp` comments (absorbs BPE-19's half) | **DONE — human-gated; export-table rows byte-identical** |
 | CPP-18 | 8 | `src/core/status.h` — shared `Status` enum; absorbs the shipped `0`/`-1`/`-2`/`-3` codes | **DONE — `0a548be`** |
 
-### `test-engineer` — 12 tasks
+### `test-engineer` — 13 tasks
 
 | ID | Stage | Task | Status |
 |---|---|---|---|
@@ -884,8 +939,9 @@ Trigger: hand-assembling JSON in CAPL proves genuinely cumbersome. Dead code las
 | TEST-2 | 8 | `tests/core/` — type-conversion | **DONE — `70adc9f`, 45 cases** |
 | TEST-3 | 8 | `tests/core/` — json-path | **DONE — `b5aca63`, 24 cases** |
 | TEST-12 | 8 | Bounds/truncation coverage for the extracted buffer sliver; deletes the placeholder `sanity-test.cpp` | **DONE — `3b17688`, 6 cases; no longer optional (D4)** |
-| TEST-4 | 9 | libcurl fake/mock boundary — source-level seam, not link substitution | |
-| TEST-5 | 9 | `tests/http/` — http-client + sync-operations, incl. timeouts and errors | |
+| TEST-4 | 9 | libcurl fake/mock boundary — source-level seam, not link substitution | **DONE** |
+| TEST-5 | 9 | `tests/http/` — http-client + sync-operations, incl. timeouts and errors; offline only. **Found and reported the cap/precedence testability gap instead of faking coverage** | **DONE** |
+| TEST-13 | 9 | Direct coverage for the extracted cap predicate and precedence, incl. the wrap case, both architectures — closes R4 in fact rather than by assignment | **DONE** |
 | TEST-6 | 11 | `tests/http/` — async: ready-flag-cleared-after-read, request-ID correlation | |
 | TEST-7 | 12 | `tests/mapping/` — json-flatten | |
 | TEST-8 | 13 | `tests/mapping/` — json-accessors | |
@@ -893,7 +949,7 @@ Trigger: hand-assembling JSON in CAPL proves genuinely cumbersome. Dead code las
 | TEST-10 | 16 | Struct mapping tests (conditional) | |
 | TEST-11 | 17 | Request-builder tests (conditional) | |
 
-### `code-reviewer` — 18 tasks
+### `code-reviewer` — 20 tasks
 
 | ID | Stage | Focus | Status |
 |---|---|---|---|
@@ -915,6 +971,8 @@ Trigger: hand-assembling JSON in CAPL proves genuinely cumbersome. Dead code las
 | REV-17 | 7 | PR #1 full-branch review — BPE-21 + BPE-22 + BPE-20 + `VCPKG_ROOT` fix + BPE-25 | **CLEAN — gated the merge of `2123c80`** |
 | REV-18 | 7 | BPE-27 — `auto-pr.yml` base-branch gap + PR-body auto-fill + `stage-branch` skill amendment | **CLEAN — ZERO MUST-FIX (run post-merge); 1 Should-fix: `chore/*` task-ID regex truncated multi-segment IDs — fixed and squash-merged as `2886812` (PR #8)** |
 | REV-19 | 8 | Stage 8 full branch — `src/core/` modules, the `exports.cpp` rewiring, Makefile, tests | **CLEAN — ZERO MUST-FIX; export table byte-identical; 1 Should-fix applied (`763cd4e`), 1 declined** |
+| REV-21 | 9 | Comment-discipline audit — `src/`, `tests/`, `Makefile`, both workflows, `setup-dev-env.ps1`; routed findings to three fix tasks | **DONE — findings closed, spot-checked against target docs** |
+| REV-20 | 9 | Stage 9 full branch — HTTP layer, sync operations, `Status` block, comment-discipline pass, `.gitkeep` | **CLEAN — ZERO MUST-FIX; 1 Should-fix fixed; `/MT` check best-effort, CI's `dumpbin` remains authoritative** |
 
 ### Human — 23 tasks
 
@@ -1006,6 +1064,8 @@ The RC2237 scare showed the inverse failure: a hand-reconstructed invocation pro
 6. **`docs/plan-v15` the branch is abandoned and deleted, not merged.** Its surviving content is in §6b, §7.13 and §5's baseline invariant. It was a sibling wholesale rewrite of v14 from a shared v13 ancestor (`33acd51`); merging it would have regressed this document and would have published a closeout narrative describing work already finished. See §7.10.
 7. **The `dumpbin /exports` confirmation for BPE-8 is still unevidenced** and is cheap — one CI step, or one local run per architecture.
 8. **BPE-28 (new) is done** — same branch as BPE-16/17/18. `ci.yml`'s `actions/checkout`, `actions/cache` and `actions/upload-artifact` were bumped off the deprecated Node 20 runtime (verified via the GitHub API that the new majors declare `node24` and change no input/default this workflow relies on); `ilammy/msvc-dev-cmd` stays on `v1` (no newer major exists, still `node20`) but is now pinned to the exact commit `v1.13.0` resolves to, for supply-chain hardening independent of the Node.js question.
+9. **The authoritative `/MT` check is still CI's, and Stage 9 did not change that.** REV-20's `/MT` verification was a best-effort binary-string scan and says so in its own report; `dumpbin /directives` under a real MSVC environment remains the authoritative pass. This sits alongside loose end 7 (`dumpbin /exports` for BPE-8, still unevidenced) — **both are cheap, both want the same one CI step or one local run per architecture**, and neither should be recorded as satisfied by a review that could not run the tool.
+10. **`msvc-build-conventions` names seven Windows system libs; static libcurl needs eight.** BPE-10 found `iphlpapi.lib` to be a real link dependency and added it to `SYSLIBS`, but the skill's dependency-acquisition section still reads *"crypt32, bcrypt, secur32, ws2_32, normaliz, wldap32, advapi32"*. The `Makefile` is correct and the skill is stale — the exact "documentation that plausibly resembles the truth" shape §13 tracks. **`build-pipeline-engineer` should amend the skill**; it is a one-line fix and was out of scope for a plan fold-in.
 
 ---
 
@@ -1015,8 +1075,8 @@ The RC2237 scare showed the inverse failure: a hand-reconstructed invocation pro
 
 **Track A is complete.** Commit, push, first CI run, fix cycle, green on both architectures — done, and it closed the x86 evidence gap and BPE-8's build half along the way. **Track B (human, CANoe) is now the sole critical path for the Stage 5 gate:** HUM-10 → HUM-11 → HUM-13 → Stage 5 gate closed.
 
-Stage 8 is complete and reviewed clean (REV-19); **Stage 9 is next** — logic-only, no human gate, no export-table append, so HUM-13 does not gate it. It begins on a `stage/09-*` branch cut from `main` once Stage 8's PR has merged. **HUM-23 has passed** (applied and verified 2026-09-22, §7.14) — "require branches up to date before merging" is now the mechanically enforced half of the export-table merge-hazard mitigation (§7.10, §7.14). **No export-table append (Stage 10 onward) may proceed until HUM-13 has also passed** — appending to a table whose base layout has never been loaded by CANoe would multiply the unknowns in exactly the way Stage 5 exists to prevent.
+**Stage 8 and Stage 9 are both complete and reviewed clean** (REV-19, REV-20 — zero Must-fix each). Stage 9 was logic-only: no export-table append, no human gate, so HUM-13 did not gate it. **Stage 10 is next, and it is the first export-table append — it may not proceed until HUM-13 has passed.** Appending to a table whose base layout has never been loaded by CANoe would multiply the unknowns in exactly the way Stage 5 exists to prevent. HUM-23 has passed, so "require branches up to date before merging" is the mechanically enforced half of the export-table merge-hazard mitigation (§7.10, §7.14); the convention half — never two open PRs touching `exports.cpp` — binds from Stage 10 onward.
 
-**BPE-16, BPE-17, BPE-18 and BPE-28 are done** (`chore/bpe-16-17-18-cleanup`, 2026-09-22 — see §14). **HUM-23 is done** (§7.14) — Stage 10's blocker list is now down to HUM-13 alone.
+**BPE-16, BPE-17, BPE-18 and BPE-28 are done** (`chore/bpe-16-17-18-cleanup`, 2026-09-22 — see §14). **HUM-23 is done** (§7.14). **Stage 10's blocker list is down to HUM-13 alone**, and Track B (human, CANoe) — HUM-10 → HUM-11 → HUM-13 — is now the sole critical path for everything from Stage 10 forward.
 
-**Status:** v15. Stages 1, 2 and 4 complete and execution-verified. Stage 5 code complete and building on both architectures; hard gate open on Stage 3. **Stages 6 and 7 executed and closed out** — CI green on both legs, branching and auto-PR live, three units of work merged through the flow. Comment discipline is a loaded rule (§6b). `plan.md` maintenance is the fold-in model (§7.10). **HUM-20 verified branch protection absent on 2026-09-21; HUM-23 applied and verified it present via the GitHub API on 2026-09-22 (§7.14).** **BPE-16/17/18/28 closed 2026-09-22** (§14). Open: HUM-13 (blocks the Stage 5 gate and any export-table append). Next action: **Stage 9** (after Stage 8's PR merges).
+**Status:** v15. Stages 1, 2 and 4 complete and execution-verified. Stage 5 code complete and building on both architectures; hard gate open on Stage 3. **Stages 6 and 7 executed and closed out** — CI green on both legs, branching and auto-PR live, three units of work merged through the flow. **Stage 8 complete (REV-19 clean). Stage 9 complete (REV-20 clean): the HTTP layer and synchronous operations exist as pure logic behind an injectable seam, 139/139 tests green on both architectures, zero export-table change.** Comment discipline is a loaded rule that has now survived a second pass which traced its own regression back to a planning instruction rather than to implementer non-compliance (§6b). `plan.md` maintenance is the fold-in model (§7.10). **HUM-20 verified branch protection absent on 2026-09-21; HUM-23 applied and verified it present via the GitHub API on 2026-09-22 (§7.14).** **BPE-16/17/18/28 closed 2026-09-22** (§14). Open: **HUM-13** (blocks the Stage 5 gate and every export-table append). Deferred and unscheduled: containerized integration testing (§11). Next action: **Stage 10**, once HUM-13 passes.
