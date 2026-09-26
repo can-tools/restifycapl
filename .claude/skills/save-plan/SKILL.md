@@ -73,7 +73,7 @@ the orchestrating session (which does have git access) can commit it with a
 message describing the revision, e.g.:
 
 ```
-docs(plan): capl-rest-dll-rebuild v7 — mark Stage 1 complete
+docs(plan): capl-rest-dll-rebuild v7 — record this revision's changes
 ```
 
 Follow this project's standard commit-attribution convention (e.g. a

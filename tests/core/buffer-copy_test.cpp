@@ -1,4 +1,4 @@
-// TEST-12 (Stage 8, plan.md §6) -- coverage for src/core/buffer-copy.*.
+// Coverage for src/core/buffer-copy.*.
 
 #include "core/buffer-copy.h"
 
@@ -22,7 +22,7 @@ TEST(CopyToBuffer, ExactFitLeavesRoomForNul) {
 }
 
 // text.size() == bufferSize leaves no room for the NUL terminator; the
-// buffer must be left empty, not truncated (plan.md TEST-12).
+// buffer must be left empty, not truncated.
 TEST(CopyToBuffer, OneByteShortIsBufferTooSmallAndLeavesBufferEmpty) {
   std::array<char, 4> buffer{};
   buffer.fill('Z');

@@ -46,6 +46,13 @@ scripts/                 setup-dev-env.ps1 — environment bootstrap only,
                          never a second build system
 ```
 
+**`.gitkeep` lifecycle.** A `.gitkeep` is removed in the same change that
+adds the first real tracked file to its directory. It is never swept
+separately, never left behind "to clean up later," and never removed from
+a directory that is still empty. `lib/gtest/x86/`, `lib/gtest/x64/`
+(gitignored, matching `lib/x86/`/`lib/x64/`) never need a `.gitkeep` at
+all — `setup-dev-env.ps1` creates all four directories on every run.
+
 ## Versioning — single source of truth: the Git tag
 
 No version number is ever hand-edited in any file. The mechanism:
@@ -141,7 +148,10 @@ number found anywhere as a bug.
   script copies from both source directories, so both files end up
   together under `lib/gtest/<arch>/`.
 - Windows system libs, always link all of them: crypt32, bcrypt, secur32,
-  ws2_32, normaliz, wldap32, advapi32.
+  ws2_32, normaliz, wldap32, advapi32, iphlpapi (libcurl's IPv6 scope-ID
+  handling needs iphlpapi; the linker error only surfaces once a real
+  curl symbol is referenced, so confirm this list by linking, not by
+  inspection, after any dependency refresh).
 - `scripts/setup-dev-env.ps1` writes the resolved versions into `lib/README`
   on every run. That file is local, generated and deliberately untracked
   (see `.gitignore`) — per-environment output, not a repo document. Never

@@ -48,15 +48,16 @@ CANoe (a "CAPL REST DLL").
   can be called and unit-tested without going through the CAPL export layer.
 - Never hand-edit a version number anywhere — versioning is entirely owned
   by `build-pipeline-engineer` (see `msvc-build-conventions`).
-- Comment discipline is non-negotiable: WHY-only, minimal. Design rationale,
-  rejected options and bug narratives go in documentation, never inline. See
-  `project-docs` for the tiers, the banned list, and where each kind of
-  material belongs.
+- Comment discipline: see `project-docs` for the tiers, the banned list, and
+  where each kind of material belongs — non-negotiable.
 
 ## Workflow
 
 1. Read the relevant existing module(s) before writing new code — match
-   existing style and error-handling conventions.
+   existing naming, layout and error-handling conventions. This excludes
+   comment volume and comment style: some existing headers in `src/core/`
+   are known to be over-commented and are not the reference — follow
+   `project-docs`'s comment-discipline rule instead.
 2. Implement the change in the appropriate `src/` subfolder. Headers live
    beside their `.cpp` in the same folder — `include/` contains only
    `vendor/`, which is third-party code and is never edited by hand.

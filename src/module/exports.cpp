@@ -3,7 +3,7 @@
 // The ONLY file in this project that includes the CAPL DLL SDK headers or
 // knows about CANoe/CAPL -- see CLAUDE.md and capl-export-contract.
 
-// CAPL-visible naming convention -- DECIDED HERE, PERMANENTLY (Stage 5):
+// CAPL-visible naming convention -- DECIDED HERE, PERMANENTLY:
 //
 //     restify<VerbNoun>          e.g. restifyGetVersion
 //
@@ -33,7 +33,7 @@
 
 namespace {
 
-// unsigned long is 32 bits on both targets here -- see plan.md §6 CPP-16.
+// unsigned long is 32 bits on both targets here.
 static_assert(sizeof(unsigned long) == sizeof(std::uint32_t),
               "restifyGetVersion assumes unsigned long is 32 bits");
 
@@ -137,16 +137,12 @@ extern "C" long CAPLPASCAL restifyGetVersion(char* buffer,
 // APPEND ONLY from this point on: never rename, reorder, or remove a row.
 //
 // #pragma pack(push, 1) / pop below wraps this table's DEFINITION end to
-// end, through and including the terminating all-zero sentinel row -- the
-// second post-mortem rule this stage must apply (capl-export-contract /
-// CLAUDE.md standing constraints). cdll.h already 1-byte-packs the
-// CAPL_DLL_INFO4 struct *type* itself (its own pack(push,1)/pack(pop) pair
-// wraps the whole header), so this struct's member layout is already fixed
-// regardless of what packing is active where it is later instantiated;
+// end, including the terminating all-zero sentinel row. cdll.h already
+// 1-byte-packs the CAPL_DLL_INFO4 struct *type* itself, so this struct's
+// member layout is already fixed regardless of packing state elsewhere --
 // this pragma pair is applied anyway, directly around the table, so the
-// rule's coverage is literally visible at the point a reviewer needs to
-// check it (REV-3), rather than relying on an implication from a different
-// file.
+// packing requirement stays visible at the point it matters rather than
+// relying on an implication from a different file.
 // ==============================================================================
 #pragma pack(push, 1)
 

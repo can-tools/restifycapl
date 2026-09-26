@@ -8,8 +8,7 @@
     This script provisions the environment ONLY. It never compiles project
     sources and never becomes a second build system -- `make` builds the
     project; this script only makes sure the tools and libraries `make`
-    depends on are present. See docs/work/capl-rest-dll-rebuild/plans/plan.md
-    (Stage 2, task BPE-1) for the authoritative spec.
+    depends on are present.
 
     Idempotent and safe to re-run: every step probes for existing state
     before attempting to change anything, and a failure in one step never
@@ -33,7 +32,7 @@
          triplets. Manifest mode installs everything vcpkg.json lists in
          one command; there is no per-package argument any more.
       6. Copy the resulting curl/zlib .lib files into lib/x86/ and
-         lib/x64/.
+         lib/x64/, and the curl headers into include/vendor/curl/.
       7. Copy the resulting GoogleTest .lib files (installed by the same
          manifest-mode command as step 5, since gtest is also listed in
          vcpkg.json) into lib/gtest/x86/ and lib/gtest/x64/ (kept separate
@@ -112,6 +111,7 @@ $LibGtestX64Dir = Join-Path $RepoRoot 'lib\gtest\x64'
 $VendorDir    = Join-Path $RepoRoot 'include\vendor'
 $SdkDir       = Join-Path $VendorDir 'capl-dll-sdk'
 $GtestVendorDir = Join-Path $VendorDir 'gtest'
+$CurlVendorDir  = Join-Path $VendorDir 'curl'
 $JsonHppDst   = Join-Path $VendorDir 'json.hpp'
 
 # nlohmann/json v3.11.3 amalgamated single header, pinned per
@@ -131,7 +131,7 @@ if (-not $VcpkgRoot) {
 }
 
 # vcpkg.json at $RepoRoot is the single authoritative dependency pin (curl,
-# gtest, builtin-baseline) -- see msvc-build-conventions / plan.md BPE-15.
+# gtest, builtin-baseline) -- see msvc-build-conventions.
 # Manifest-mode installs land under a per-TRIPLET install root, NOT
 # $VcpkgRoot\installed\<triplet>\ (the latter is classic-mode only) --
 # confirmed by running `vcpkg list` with cwd at $RepoRoot and observing it
@@ -141,7 +141,7 @@ if (-not $VcpkgRoot) {
 # Each triplet gets its OWN install root ($VcpkgInstalledRootX86,
 # $VcpkgInstalledRootX64) passed explicitly via `--x-install-root`, rather
 # than sharing one $RepoRoot\vcpkg_installed\ for both. This is load-bearing,
-# not cosmetic: confirmed by real execution (HUM-19's first real re-run,
+# not cosmetic: confirmed by real execution (a first real re-run,
 # 2026-09-18) that running `vcpkg install --triplet=B` against a shared
 # install root that already contains a prior `--triplet=A` install PRINTS
 # "The following packages will be removed: curl:A, gtest:A, zlib:A" and then
@@ -513,7 +513,7 @@ automatically. Install one of the following manually, then re-run:
 # c76c06644034521fb761a39f8f52d8e87d1103d5, dereferencing to commit
 # 9e593bb18ea69cc5095e012465dcd675a822ed0d) -- not invented. It is also the
 # same release generation already proven working end-to-end by this
-# project's own successful HUM-19 run (that run's `vcpkg version` reported
+# project's own successful run (that run's `vcpkg version` reported
 # `2026-07-27-...`, i.e. a commit from two days before this tag), so
 # pinning to it does not change behavior on an already-working machine.
 # Re-derive this the same way (`git ls-remote --tags`, pick the newest
@@ -541,8 +541,7 @@ function Repair-ShallowVcpkgClone {
         port-version commit that isn't the tip -- confirmed by actually
         running `vcpkg install --dry-run` against this machine's
         pre-existing checkout, not by inspection (consistent with this
-        project's static-review-is-not-enough pattern; see plan.md Stage 4
-        risk notes).
+        project's static-review-is-not-enough pattern).
 
         Earlier revisions of this script bootstrapped with
         `git clone --depth 1`, so an existing checkout can still be
@@ -677,7 +676,7 @@ function Invoke-VcpkgBootstrap {
 
 function Assert-VcpkgBaselinePin {
     <#
-        BPE-25 drift guard. vcpkg.json's builtin-baseline pins WHICH port
+        Baseline/tool-pin drift guard. vcpkg.json's builtin-baseline pins WHICH port
         versions resolve (registry content); $VcpkgPinnedTag / the checkout
         at $Root pins WHICH vcpkg.exe does the resolving. These are two
         independent axes that must still name the same commit in the
@@ -737,7 +736,7 @@ These are two independent pins that must name the same commit in the
 microsoft/vcpkg registry -- otherwise version resolution reads baseline
 versions from one commit but checks them against a version database pinned
 at a different (often older) commit, producing "no version database entry"
-errors (see BPE-25). Fix by re-deriving the commit VcpkgPinnedTag ($VcpkgPinnedTag)
+errors. Fix by re-deriving the commit VcpkgPinnedTag ($VcpkgPinnedTag)
 dereferences to (git ls-remote --tags https://github.com/microsoft/vcpkg.git <tag>)
 and setting vcpkg.json's builtin-baseline to that exact commit.
 "@
@@ -877,7 +876,7 @@ $tailText
     # A zero exit code is necessary but not sufficient: it only says this
     # ONE invocation's own plan completed, not that the triplet's artifacts
     # are actually sitting on disk afterward. This closes exactly the gap
-    # HUM-19's real re-run exposed -- the previous version of this function
+    # a real re-run exposed -- the previous version of this function
     # declared OK purely from $LASTEXITCODE, and that OK later turned out to
     # be meaningless once a subsequent call (for the other triplet, against
     # a then-shared install root) deleted what this one had just produced.
@@ -905,7 +904,7 @@ function Copy-TripletLibs {
 
         Under manifest mode, curl/zlib AND gtest/gmock are all listed in one
         vcpkg.json and land together in the same triplet lib/ directory
-        (confirmed by real execution, HUM-19's re-run: the unfiltered
+        (confirmed by real execution: the unfiltered
         version of this function copied gmock.lib and gtest.lib into
         lib/x64/ alongside libcurl.lib and zs.lib). gtest.lib/gmock.lib
         reaching lib/<arch>/ is not a linker-safety bug today -- the
@@ -939,7 +938,7 @@ function Copy-TripletLibs {
     $productLibNames = 'libcurl.lib', 'zs.lib'
 
     # Synchronising, not purely additive: prune any stale .lib left behind by
-    # an older allow-list (BPE-17 -- gmock.lib/gtest.lib residue from before
+    # an older allow-list (gmock.lib/gtest.lib residue from before
     # the filter above existed) so DestDir can never drift from the allow-list.
     Get-ChildItem -LiteralPath $DestDir -Filter '*.lib' -File -ErrorAction SilentlyContinue |
         Where-Object { $_.Name -notin $productLibNames } |
@@ -962,6 +961,31 @@ function Copy-TripletLibs {
     }
 
     Add-Result -Step "lib copy ($Triplet)" -Status 'OK' -Message "Copied $($libs.Count) .lib file(s) to $DestDir : $(($libs.Name) -join ', ')"
+}
+
+function Copy-CurlHeaders {
+    <#
+        Curl headers are architecture-agnostic, same reasoning as
+        Copy-GTestHeaders: copied once from whichever triplet's install
+        succeeded, not once per architecture.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$InstalledRoot,
+        [Parameter(Mandatory)][string]$Triplet,
+        [Parameter(Mandatory)][string]$DestDir
+    )
+
+    $srcIncludeDir = Join-Path $InstalledRoot "$Triplet\include\curl"
+    if (-not (Test-Path -LiteralPath $srcIncludeDir)) {
+        Add-Result -Step 'curl headers' -Status 'FAIL' -Message "Expected header directory not found: $srcIncludeDir"
+        return $false
+    }
+
+    New-Item -ItemType Directory -Force -Path $DestDir | Out-Null
+    Copy-Item -Path (Join-Path $srcIncludeDir '*') -Destination $DestDir -Recurse -Force
+    $count = @(Get-ChildItem -LiteralPath $DestDir -Filter '*.h' -Recurse -File).Count
+    Add-Result -Step 'curl headers' -Status 'OK' -Message "Copied $count header file(s) from $srcIncludeDir to $DestDir (source triplet: $Triplet)."
+    return $true
 }
 
 function Get-InstalledCurlVersion {
@@ -997,7 +1021,7 @@ Invoke-Step -Name 'vcpkg / curl' -Body {
     }
     Add-Result -Step 'vcpkg' -Status 'OK' -Message "Using vcpkg at: $vcpkgExe"
 
-    # BPE-25 drift guard -- runs right after the tool pin (Set-VcpkgPinnedVersion,
+    # Baseline/tool-pin drift guard -- runs right after the tool pin (Set-VcpkgPinnedVersion,
     # inside Install-VcpkgIfMissing above) has had a chance to act, before any
     # manifest install is attempted, so a mismatch is reported clearly instead
     # of surfacing later as a confusing "no version database entry" error from
@@ -1007,9 +1031,14 @@ Invoke-Step -Name 'vcpkg / curl' -Body {
     $okX86 = Install-ManifestTriplet -VcpkgExe $vcpkgExe -Triplet 'x86-windows-static' -InstallRoot $VcpkgInstalledRootX86 -StepLabel 'vcpkg install (x86-windows-static)'
     $okX64 = Install-ManifestTriplet -VcpkgExe $vcpkgExe -Triplet 'x64-windows-static' -InstallRoot $VcpkgInstalledRootX64 -StepLabel 'vcpkg install (x64-windows-static)'
 
+    $headersCopied = $false
+
     if ($okX86) {
         Copy-TripletLibs -InstalledRoot $VcpkgInstalledRootX86 -Triplet 'x86-windows-static' -DestDir $LibX86Dir
         $script:CurlVersionX86ForReadme = Get-InstalledCurlVersion -VcpkgExe $vcpkgExe -Triplet 'x86-windows-static' -InstallRoot $VcpkgInstalledRootX86
+        if (-not $headersCopied) {
+            $headersCopied = Copy-CurlHeaders -InstalledRoot $VcpkgInstalledRootX86 -Triplet 'x86-windows-static' -DestDir $CurlVendorDir
+        }
     } else {
         Add-Result -Step 'lib copy (x86-windows-static)' -Status 'SKIP' -Message 'Skipped: manifest install for this triplet failed.'
     }
@@ -1017,8 +1046,15 @@ Invoke-Step -Name 'vcpkg / curl' -Body {
     if ($okX64) {
         Copy-TripletLibs -InstalledRoot $VcpkgInstalledRootX64 -Triplet 'x64-windows-static' -DestDir $LibX64Dir
         $script:CurlVersionX64ForReadme = Get-InstalledCurlVersion -VcpkgExe $vcpkgExe -Triplet 'x64-windows-static' -InstallRoot $VcpkgInstalledRootX64
+        if (-not $headersCopied) {
+            $headersCopied = Copy-CurlHeaders -InstalledRoot $VcpkgInstalledRootX64 -Triplet 'x64-windows-static' -DestDir $CurlVendorDir
+        }
     } else {
         Add-Result -Step 'lib copy (x64-windows-static)' -Status 'SKIP' -Message 'Skipped: manifest install for this triplet failed.'
+    }
+
+    if (-not $headersCopied) {
+        Add-Result -Step 'curl headers' -Status 'FAIL' -Message 'Neither triplet installed successfully; include/vendor/curl/ was not populated.'
     }
 
     if (($script:CurlVersionX86ForReadme -ne 'unknown') -and ($script:CurlVersionX64ForReadme -ne 'unknown') -and `
@@ -1406,10 +1442,9 @@ Invoke-Step -Name 'CAPL SDK headers' -Body {
     Add-Result -Step 'CAPL SDK headers' -Status 'FAIL' -Message @"
 Missing SDK header(s): $($missing -join ', ') under $SdkDir
 This script never fetches these -- they are Vector-licensed material sourced
-from a Vector CANoe/CANalyzer installation. See Stage 3 of the project plan
-(HUM-10: install Vector CANoe/CANalyzer; HUM-11: build the official
-"Example of a Windows DLL for CAPL" sample) to obtain them, then place all
-three at include/vendor/capl-dll-sdk/.
+from a Vector CANoe/CANalyzer installation. Install Vector CANoe/CANalyzer
+and build the official "Example of a Windows DLL for CAPL" sample to obtain
+them, then place all three at include/vendor/capl-dll-sdk/.
 "@
 }
 

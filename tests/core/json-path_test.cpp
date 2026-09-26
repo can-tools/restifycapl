@@ -1,4 +1,4 @@
-// TEST-3 (Stage 8, plan.md §6) -- coverage for src/core/json-path.*.
+// Coverage for src/core/json-path.*.
 
 #include "core/json-path.h"
 
@@ -15,7 +15,7 @@
 using nlohmann::json;
 
 // ---------------------------------------------------------------------------
-// ParsePath -- edge-case table (json-path.h, mirrors plan.md §6 CPP-3).
+// ParsePath -- edge-case table (see json-path.h / docs/json-path.md).
 // ---------------------------------------------------------------------------
 
 TEST(ParsePath, EmptyPathIsSyntaxError) {
@@ -114,7 +114,8 @@ TEST(ResolvePath, ValidNestedHitResolvesToLeafString) {
 }
 
 // ---------------------------------------------------------------------------
-// ResolvePath -- §5.2 segment-kind resolution rule, one test per row.
+// ResolvePath -- segment-kind resolution rule, one test per row (see
+// json-path.h / docs/json-path.md).
 // ---------------------------------------------------------------------------
 
 // Row 1: [n] on array, n >= size -> IndexOutOfRange.
@@ -154,17 +155,17 @@ TEST(ResolvePath, KeyOnScalarIsTypeMismatch) {
 }
 
 // ---------------------------------------------------------------------------
-// ResolvePath -- additional scenarios from plan.md §6 TEST-3.
+// ResolvePath -- additional scenarios.
 // ---------------------------------------------------------------------------
 
-// D3.3: mid-path scalar node (name resolves to a string, not a container).
+// Mid-path scalar node (name resolves to a string, not a container).
 TEST(ResolvePath, MidPathScalarIsTypeMismatch) {
   const json document = json::parse(R"({"user":{"name":"Ann"}})");
   const json* out = nullptr;
   EXPECT_EQ(ResolvePath(document, "user.name.first", out), Status::TypeMismatch);
 }
 
-// Mid-path null falls under §5.2's last row (container expected), not
+// Mid-path null falls under the "container expected" resolution rule, not
 // NullValue -- NullValue is reserved for terminal typed reads.
 TEST(ResolvePath, MidPathNullIsTypeMismatch) {
   const json document = json::parse(R"({"user":null})");

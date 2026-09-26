@@ -53,11 +53,11 @@ Makefile targets and the GitHub Actions workflow that mirrors them.
   `msvc-build-conventions` (Git tag for release, `git describe`/commit
   count for local builds). If you find a hardcoded version number, treat it
   as a bug and fix it as part of the change, flagging it explicitly.
-- Comment discipline is non-negotiable: WHY-only, minimal. Design rationale,
-  rejected options and bug narratives go in documentation, never inline. See
-  `project-docs` for the tiers, the banned list, and where each kind of
-  material belongs. This covers YAML step preambles and Makefile section
-  headers, not just source comments.
+- Comment discipline: see `project-docs` for the tiers, the banned list, and
+  where each kind of material belongs — non-negotiable, and covers YAML step
+  preambles and Makefile section headers, not just source comments.
+- `.gitkeep` lifecycle: see `msvc-build-conventions`'s Directory conventions
+  section for the standing rule.
 
 ## Workflow
 

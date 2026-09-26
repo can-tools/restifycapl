@@ -35,9 +35,9 @@ jobs:
             msvc_arch: x64
 
     env:
-      # VCPKG_ROOT is NOT set here -- trap 4 (docs/ci-pipeline.md) means
-      # anything in this block gets clobbered by MSVC activation; it's set
-      # by the dedicated "Pin VCPKG_ROOT..." step below instead.
+      # VCPKG_ROOT is NOT set here -- the MSVC dev-cmd step below clobbers
+      # env vars in this block; it's re-pinned by the dedicated step
+      # immediately after. See docs/ci-pipeline.md.
       # Pins the vcpkg TOOL itself (docs/development-environment.md#pinning-the-vcpkg-tool-itself).
       # Must match scripts/setup-dev-env.ps1's $VcpkgPinnedTag exactly.
       VCPKG_PINNED_TAG: "2026.07.29"
@@ -60,9 +60,9 @@ jobs:
         with:
           arch: ${{ matrix.msvc_arch }}
 
-      # Trap 4 (docs/ci-pipeline.md): the step above just clobbered
-      # VCPKG_ROOT with VS's own bundled vcpkg. Re-pin to a CI-only,
-      # per-runner path; every later step reads VCPKG_ROOT from here.
+      # The step above just clobbered VCPKG_ROOT with VS's own bundled
+      # vcpkg. Re-pin to a CI-only, per-runner path; every later step reads
+      # VCPKG_ROOT from here. See docs/ci-pipeline.md.
       - name: Pin VCPKG_ROOT to a CI-only path (avoid VS-bundled vcpkg collision)
         shell: pwsh
         run: echo "VCPKG_ROOT=$env:RUNNER_TEMP\vcpkg" >> $env:GITHUB_ENV
@@ -118,7 +118,7 @@ jobs:
           }
 
       # Drift guard: builtin-baseline and the pinned tool must name the same
-      # commit (BPE-25; docs/development-environment.md#pinning-the-vcpkg-tool-itself).
+      # commit (docs/development-environment.md#pinning-the-vcpkg-tool-itself).
       - name: Verify vcpkg tool pin matches vcpkg.json's builtin-baseline
         shell: pwsh
         run: |
@@ -129,7 +129,7 @@ jobs:
             $lines = @(
               "vcpkg.json's builtin-baseline ($baseline) does not match the pinned vcpkg TOOL's checked-out commit ($toolCommit, from VCPKG_PINNED_TAG=$env:VCPKG_PINNED_TAG).",
               "These are two independent pins (WHICH port versions resolve vs. WHICH vcpkg.exe resolves them) that must name the same commit -- otherwise version resolution reads baseline versions from one commit but checks them against a version database pinned at a different (often older) commit, producing 'no version database entry' errors.",
-              "See BPE-25 and docs/development-environment.md's 'Pinning the vcpkg tool itself' section.",
+              "See docs/development-environment.md's 'Pinning the vcpkg tool itself' section.",
               "Fix by re-deriving the commit VCPKG_PINNED_TAG dereferences to (git ls-remote --tags https://github.com/microsoft/vcpkg.git <tag>) and setting vcpkg.json's builtin-baseline to that exact commit."
             )
             throw ($lines -join "`n")
@@ -161,8 +161,9 @@ jobs:
             throw "vcpkg install exited 0 but expected lib directory not found: $tripletLibDir -- do not trust exit code alone (see scripts/setup-dev-env.ps1's Install-ManifestTriplet)."
           }
 
-      # Places libs exactly where the Makefile expects them: lib/<arch>/
-      # (product) and lib/gtest/<arch>/ + include/vendor/gtest/ (test-only).
+      # Places libs exactly where the Makefile expects them: lib/<arch>/ +
+      # include/vendor/curl/ (product) and lib/gtest/<arch>/ +
+      # include/vendor/gtest/ (test-only).
       - name: Place libs where the Makefile expects them
         shell: pwsh
         run: |
@@ -172,13 +173,15 @@ jobs:
           $arch = "${{ matrix.arch }}"
           $srcLib = Join-Path "$env:VCPKG_INSTALL_ROOT" "$triplet\lib"
           $srcManualLink = Join-Path $srcLib 'manual-link'
-          $srcInclude = Join-Path "$env:VCPKG_INSTALL_ROOT" "$triplet\include\gtest"
+          $srcGtestInclude = Join-Path "$env:VCPKG_INSTALL_ROOT" "$triplet\include\gtest"
+          $srcCurlInclude = Join-Path "$env:VCPKG_INSTALL_ROOT" "$triplet\include\curl"
 
           $libDest = "lib\$arch"
           $gtestLibDest = "lib\gtest\$arch"
           $gtestIncludeDest = "include\vendor\gtest"
+          $curlIncludeDest = "include\vendor\curl"
 
-          New-Item -ItemType Directory -Force -Path $libDest, $gtestLibDest, $gtestIncludeDest | Out-Null
+          New-Item -ItemType Directory -Force -Path $libDest, $gtestLibDest, $gtestIncludeDest, $curlIncludeDest | Out-Null
 
           # Product-linked -- must match the Makefile's LIBS variable exactly.
           foreach ($name in 'libcurl.lib', 'zs.lib') {
@@ -196,12 +199,15 @@ jobs:
           Copy-Item -LiteralPath $gtestLibSrc -Destination $gtestLibDest -Force
           Copy-Item -LiteralPath $gtestMainLibSrc -Destination $gtestLibDest -Force
 
-          if (-not (Test-Path -LiteralPath $srcInclude)) { throw "Expected gtest header directory not found: $srcInclude" }
-          Copy-Item -Path (Join-Path $srcInclude '*') -Destination $gtestIncludeDest -Recurse -Force
+          if (-not (Test-Path -LiteralPath $srcGtestInclude)) { throw "Expected gtest header directory not found: $srcGtestInclude" }
+          Copy-Item -Path (Join-Path $srcGtestInclude '*') -Destination $gtestIncludeDest -Recurse -Force
 
-          Write-Host "Placed: $libDest\libcurl.lib, $libDest\zs.lib, $gtestLibDest\gtest.lib, $gtestLibDest\gtest_main.lib, headers under $gtestIncludeDest"
+          if (-not (Test-Path -LiteralPath $srcCurlInclude)) { throw "Expected curl header directory not found: $srcCurlInclude" }
+          Copy-Item -Path (Join-Path $srcCurlInclude '*') -Destination $curlIncludeDest -Recurse -Force
 
-      # CI-side equivalent of REV-2's /MT provenance check, re-verified on
+          Write-Host "Placed: $libDest\libcurl.lib, $libDest\zs.lib, $gtestLibDest\gtest.lib, $gtestLibDest\gtest_main.lib, headers under $gtestIncludeDest and $curlIncludeDest"
+
+      # CI-side equivalent of the local /MT provenance check, re-verified on
       # every push instead of spot-checked once locally.
       - name: Verify /MT provenance (dumpbin /directives)
         shell: pwsh

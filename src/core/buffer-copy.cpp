@@ -8,8 +8,7 @@ Status CopyToBuffer(std::string_view text, char* buffer, std::uint32_t bufferSiz
   }
   buffer[0] = '\0';
 
-  // text.size() + 1 > bufferSize can wrap at SIZE_MAX; this form cannot
-  // (constraint §3.6 narrowing discipline).
+  // text.size() + 1 > bufferSize can wrap at SIZE_MAX; this form cannot.
   if (text.size() >= static_cast<std::size_t>(bufferSize)) {
     return Status::BufferTooSmall;
   }

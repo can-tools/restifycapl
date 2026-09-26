@@ -1,8 +1,8 @@
 ---
 name: plan-writer
 description: Persists an already-approved, finished plan to docs/work/<slug>/plans/plan.md. Use only after a plan has been produced and approved (typically by the planner agent) — never to draft or edit plan content.
-tools: Write, Read, Glob
-model: sonnet
+tools: Write, Edit, Read, Glob
+model: haiku
 skills:
   - save-plan
 permissionMode: default
@@ -27,6 +27,18 @@ writing.
 2. Write the plan text to `docs/work/<slug>/plans/plan.md` (or the next
    revision file, if one already exists), unchanged.
 3. Confirm back with the exact path you wrote to.
+
+## Write vs Edit
+
+Use `Write` for a brand-new plan file. For folding content into an
+**already-existing** document — a master plan, a prior stage's plan — use
+`Edit` with the exact anchors you were given instead: `Write` would force
+you to re-emit the whole file from your own output, which fails outright
+once the document is large, and even when it fits, a full re-emission is
+itself a chance to silently drop or alter a line the diff won't make
+obvious. If you're given anchor-and-replace instructions, apply each with
+`Edit`; if any anchor isn't given verbatim or doesn't match, stop and ask
+rather than approximating it.
 
 ## What you never do
 

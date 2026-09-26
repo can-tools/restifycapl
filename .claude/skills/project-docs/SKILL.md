@@ -1,6 +1,6 @@
 ---
 name: project-docs
-description: Conventions for README.md, examples/*.can, and CHANGELOG.md — what each document is for, who updates it, and when — plus the project's comment-discipline rule for inline comments. Load this before touching README.md, anything under examples/, or CHANGELOG.md, and before any edit to src/, tests/, Makefile, or .github/workflows/.
+description: Conventions for README.md, examples/*.can, and CHANGELOG.md — what each document is for, who updates it, and when — plus the project's comment-discipline rule for inline comments. Load this before touching README.md, anything under examples/, or CHANGELOG.md, and before any edit to src/, tests/, Makefile, scripts/, or .github/workflows/.
 ---
 
 # Project documentation conventions
@@ -17,9 +17,17 @@ Inline comments explain **why**, never **what** or **how** — the code already 
 
 - a file-header block summarising "what this does and does not do", or enumerating traps/decisions;
 - multi-paragraph rationale, or "why we chose Option A over Option B";
-- restatement of a `plan.md` section — point to it instead (`see plan.md §7.5`), never repeat it;
+- **in an inline comment:** any reference to a plan section, stage number, or task ID (`plan.md §7.5`, `Stage 5`, `CPP-16`, `REV-3`, `D15`, `OQ3`), including bare criterion or section *numbers* that only resolve against a plan document. A comment must stand on its own and explain the current *why* without depending on an external tracker. Material worth recording at length goes in `docs/<topic>.md` — point **there**;
 - commit/PR archaeology ("the bug just fixed in `c11a5b6`", "found the hard way on the first real run");
 - the same rationale in two files. One substantive explanation plus a pointer from the other.
+
+**Three categories are exempt from mechanical flagging, not from the rule:** program output read by a user at runtime (error messages, log lines, `echo`/`Write-Host` text); PowerShell comment-based help (`<# .SYNOPSIS … #>`), which `Get-Help` consumes; and generated artefacts such as auto-filled PR bodies. A sweep must not auto-file these as Must-fix — it cannot distinguish them from developer-facing comments, and a wrong edit breaks a working feature. **Each hit goes to human judgment, under the same principle: the citation never survives; what varies is only whether there is substance worth inlining in its place.**
+
+**Worked patterns — the three shapes a fix takes, applied to real instances:**
+
+- **Delete the whole sentence** (nothing to inline). `setup-dev-env.ps1`'s `.DESCRIPTION` block once read *"See docs/work/capl-rest-dll-rebuild/plans/plan.md (Stage 2, task BPE-1) for the authoritative spec."* The three preceding sentences already said what the script does, so the citation was removed outright.
+- **Inline the substance** (the citation stood in for real content). `auto-pr.yml`'s checklist once read *"Plan folded into `plan.md`, incl. any renumbering (§7.8 criterion 6)"*; it became *"Plan folded into `plan.md`, incl. any task-ID/section renumbering (last commit before marking Ready for review)"* — the fact survives, the pointer doesn't.
+- **Drop the prefix only** (the rest already stands alone). `auto-pr.yml`'s `exports.cpp` warning once opened with *"Per plan.md §7.10:"* before a sentence that was already self-contained; only the prefix was removed.
 
 **Where explanatory material goes instead.** The discriminator is: **is this still a decision, or is it now just a fact?**
 
@@ -29,10 +37,11 @@ Inline comments explain **why**, never **what** or **how** — the code already 
 | A **settled** bug: what broke, how it was found, why the fix has the shape it has | `docs/<topic>.md` (e.g. `development-environment.md`, `ci-pipeline.md`) | *Is this now simply a fact about the world?* |
 | The user-visible **fact** that something changed | `CHANGELOG.md` | — |
 | Contributor/agent **conventions** | `CLAUDE.md` or the relevant skill | — |
+| A bare plan/stage/task-ID citation with no substance of its own | Nowhere — delete it; only real substance (if any) migrates per the rows above | *Does removing it lose a fact, or only a pointer?* |
 
 Archival documents under `docs/` are **topic-scoped, never stage-scoped.** Each section carries a one-line breadcrumb — `(found during Stage 6, BPE-9)` — so stage attribution survives without fragmenting the topic.
 
-**Protected existing comments — do not strip these under this rule:** the `Makefile`'s `/SUBSYSTEM:CONSOLE` and `make -n` trap comments (tier 3, blessed by plan.md §6a), and `exports.cpp`'s CAPL naming-convention statement (required by plan.md §5 to live in the file being edited — trim it, but never remove it).
+**Protected existing comments — protection covers substance, not identifiers.** These stay under this rule; any stage/task identifier they carry does not. The `Makefile`'s `/SUBSYSTEM:CONSOLE` and `make -n` trap comments are tier 3, blessed by plan.md §6a — the `make -n` trap runs to roughly 19 lines, a named, bounded exception to tier 3's own ≤10-line limit, kept because the bug it documents is real and non-obvious. `exports.cpp`'s CAPL naming-convention statement is required by plan.md §5 to live in the file being edited — trim it, but never remove it; its own `(Stage 5)` tag is not protected and comes out, while the statement itself stays.
 
 ## Three documents, three audiences — do not let them duplicate each other
 

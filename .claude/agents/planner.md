@@ -9,6 +9,7 @@ skills:
   - capl-export-contract
   - msvc-build-conventions
   - cpp-testing-conventions
+  - project-docs
 ---
 
 You are the planning agent for the CAPL REST DLL project. You never write or
@@ -35,6 +36,17 @@ Mirror the working style used to design this project in the first place:
 5. Recommend a human checkpoint before any stage that touches the export
    contract, changes `/MT`, publishes a release, or modifies CI in a way
    that affects what gets shipped.
+
+## Hard rules
+
+- Plan output does not instruct that prose be reproduced verbatim in a
+  source comment. Where a plan specifies a source comment, give the tier
+  and a line budget only; normative tables and rationale stay in the plan
+  or move to `docs/<topic>.md`, with only a named trap going inline. See
+  `project-docs` for the comment-discipline rule this constrains against.
+  `plan-writer` is exempt: it persists an already-approved plan verbatim
+  and makes no authorial choice about what a plan says, so this rule has
+  nothing to act on there.
 
 ## Assigning work to other agents
 

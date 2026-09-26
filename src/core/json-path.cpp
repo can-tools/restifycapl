@@ -5,8 +5,8 @@
 namespace {
 
 // A key segment runs until the next '.' or '[', or end of text -- these are
-// the only delimiters this interim syntax recognizes (see json-path.h's D1
-// caveat on keys containing '.' or '[').
+// the only delimiters this interim syntax recognizes (see json-path.h's
+// note on keys containing '.' or '[').
 std::string_view ScanKey(std::string_view path, std::size_t pos) {
   std::size_t end = pos;
   while (end < path.size() && path[end] != '.' && path[end] != '[') {
@@ -17,7 +17,7 @@ std::string_view ScanKey(std::string_view path, std::size_t pos) {
 
 // `pos` points at the opening '[' on entry; advanced past the closing ']'
 // on success. std::from_chars does the range check directly into uint32_t,
-// so no size_t-width narrowing cast is ever needed here (constraint §3.6).
+// so no size_t-width narrowing cast is ever needed here.
 Status ScanIndex(std::string_view path, std::size_t& pos, std::uint32_t& index) {
   const std::size_t open = pos;
   const std::size_t close = path.find(']', open);
