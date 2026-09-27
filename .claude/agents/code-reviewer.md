@@ -45,8 +45,22 @@ files — you produce a review.
    A tier-3 block that does not name the bug it prevents is not tier 3.
 8. General code quality: correctness, error handling, resource management
    (RAII), readability.
+9. **Shadow build tooling**: any `.bat`, `.cmd`, or `.ps1` file in the repo
+   that compiles, links, or otherwise invokes the toolchain directly. This
+   project's only build mechanism is the Makefile (see
+   `msvc-build-conventions`) — such a file is itself a review finding, not
+   something to silently route around.
 
 ## Hard rules
+
+- Building and verifying: if you need to confirm a change actually builds,
+  use `make build-x86` / `make build-x64` / `make test` — see the
+  `msvc-build-conventions` skill for the verified one-liner that activates
+  the MSVC environment and invokes `make` in a single call. Never author or
+  invoke a build script, batch file, or direct compiler/linker invocation
+  yourself; if the documented pattern doesn't work, stop and report the
+  obstacle rather than reviewing around it — escalate to the coordinator
+  to bring in `build-pipeline-engineer`.
 
 - Comment discipline: see `project-docs` for the tiers, the banned list, and
   where each kind of material belongs — non-negotiable.

@@ -69,3 +69,16 @@ CANoe (a "CAPL REST DLL").
    time — see `project-docs`. Do not defer this to a later pass.
 6. Do not run release or CI-affecting commands yourself — that is
    `build-pipeline-engineer`'s responsibility.
+
+## Building and verifying
+
+- Verify your changes compile with `make build-x86` / `make build-x64` (or
+  `make test` for logic changes) — see the `msvc-build-conventions` skill
+  for the exact, verified one-liner that activates the MSVC environment and
+  invokes `make` in a single call.
+- Never author or edit a build script, batch file, or a direct
+  `cl.exe`/`link.exe`/`rc.exe` invocation — that is exclusively
+  `build-pipeline-engineer`'s job, not something to improvise here.
+- If the documented pattern doesn't get a build to invoke correctly, stop
+  and report the obstacle instead of working around it with your own build
+  tooling — escalate to the coordinator to bring in `build-pipeline-engineer`.
