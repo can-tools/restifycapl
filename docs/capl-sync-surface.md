@@ -6,6 +6,22 @@ Normative material for the six `CAPL_DLL_INFO4` rows that expose
 raw CAPL parameters and that existing API. `src/module/exports.cpp` and its
 `hintText`/trap-comment budgets point here rather than restating any of it.
 
+## `categoryName` scheme
+
+`CAPL_DLL_INFO4`'s `categoryName` groups exported operations for display in
+CANoe's function browser. Three groups exist:
+
+| Group | Meaning | Rows |
+|---|---|---|
+| `Common` | Non-HTTP utility operations. | `restifyReadVersion` |
+| `Sync` | Synchronous (blocking) HTTP operations. | `restifyGetSync`, `restifyDeleteSync`, `restifyPostSync`, `restifyPutSync`, `restifyPatchSync`, `restifyRequestSync` |
+| `Async` | Reserved for Stage 11's async exports. Nothing uses it yet. | none |
+
+**Case-sensitivity trap:** `"Sync"` is a case-insensitive substring of
+`"Async"` -- the last four letters of `Async` are `sync`. Anything that
+filters or groups rows by `categoryName` must compare case-sensitively, or
+a case-insensitive `"sync"` match will also catch every `Async` row.
+
 ## Signature table
 
 `kRefLong = static_cast<char>('L' - 128)`, `kRefDword = static_cast<char>('D' - 128)`
@@ -90,21 +106,25 @@ copied into the caller's buffer, so a subsequent `CopyToBuffer` failure
 - A pre-transport rejection (empty URL, or a body on a method that forbids
   one) -> `InvalidArgument`, and neither out-parameter is touched.
 
-## `elcount()` and the empty-string carve-out
+`responseBodyLength` is a byte count, not a character count -- relevant
+once multi-byte/UTF-8 response bodies are involved.
+
+## `elcount()`
 
 Every input `char[]` parameter is paired with an explicit `dword` size,
 placed immediately after it, whose value must come from `elcount(theArray)`
 -- the array's real declared capacity, exactly the same meaning
 `responseBodySize` already has. `BoundedText` (`src/core/input-text.h`)
 scans for a NUL only within that stated bound: found -> the text is
-everything before it; not found -> `UnterminatedInputText`. A hand-counted
-literal size is the documented anti-pattern, since a too-large count
-reproduces the exact over-read this rule exists to prevent.
+everything before it; not found -> `UnterminatedInputText`.
 
-**Carve-out:** the one sanctioned exception to "always use `elcount()`" is
-writing `("", 1)` by hand to mean "no headers" (or, on `restifyRequestSync`,
-"no body") -- a literal empty string with size `1` is trivially safe to
-count by hand and is the documented way to omit an optional text parameter.
+Every input argument must be a declared `char[]` variable; pass
+`elcount()` of that variable as its size. String literals cannot be passed
+as `char[]` arguments in CAPL -- declare and fill a variable first. To omit
+an optional text parameter (e.g. "no headers", or "no body" on
+`restifyRequestSync`), declare a zero-length-content array, e.g.
+`char noHeaders[1]; noHeaders[0] = 0;` or `char noHeaders[1] = "";`, and
+pass `elcount(noHeaders)` as usual -- not a hand-written literal.
 
 ## Binary response bodies are out of scope
 

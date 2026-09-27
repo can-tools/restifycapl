@@ -293,7 +293,7 @@ CAPL_DLL_INFO4 CAPL_DLL_INFO_LIST4[] = {
     // parameter 1 ('D', array depth 0) is a scalar unsigned long.
     {"restifyReadVersion",
      (CAPL_FARCALL)restifyReadVersion,
-     "restifycapl",
+     "Common",
      "Writes this DLL's build version string into the caller-supplied "
      "buffer. Returns 0 on success, a negative error code otherwise.",
      'L',
@@ -312,7 +312,7 @@ CAPL_DLL_INFO4 CAPL_DLL_INFO_LIST4[] = {
 
     {"restifyGetSync",
      (CAPL_FARCALL)restifyGetSync,
-     "restifycapl",
+     "Sync",
      "Performs a blocking HTTP GET and copies the response body into the "
      "caller's buffer, returning 0 on success or a negative error code "
      "otherwise. Blocking call \xe2\x80\x94 use from Measurement Setup or a "
@@ -326,7 +326,7 @@ CAPL_DLL_INFO4 CAPL_DLL_INFO_LIST4[] = {
 
     {"restifyDeleteSync",
      (CAPL_FARCALL)restifyDeleteSync,
-     "restifycapl",
+     "Sync",
      "Performs a blocking HTTP DELETE and copies the response body into the "
      "caller's buffer, returning 0 on success or a negative error code "
      "otherwise. Blocking call \xe2\x80\x94 use from Measurement Setup or a "
@@ -340,7 +340,7 @@ CAPL_DLL_INFO4 CAPL_DLL_INFO_LIST4[] = {
 
     {"restifyPostSync",
      (CAPL_FARCALL)restifyPostSync,
-     "restifycapl",
+     "Sync",
      "Performs a blocking HTTP POST with the given request body and copies "
      "the response body into the caller's buffer, returning 0 on success or "
      "a negative error code otherwise. Blocking call \xe2\x80\x94 use from "
@@ -356,7 +356,7 @@ CAPL_DLL_INFO4 CAPL_DLL_INFO_LIST4[] = {
 
     {"restifyPutSync",
      (CAPL_FARCALL)restifyPutSync,
-     "restifycapl",
+     "Sync",
      "Performs a blocking HTTP PUT with the given request body and copies "
      "the response body into the caller's buffer, returning 0 on success or "
      "a negative error code otherwise. Blocking call \xe2\x80\x94 use from "
@@ -372,7 +372,7 @@ CAPL_DLL_INFO4 CAPL_DLL_INFO_LIST4[] = {
 
     {"restifyPatchSync",
      (CAPL_FARCALL)restifyPatchSync,
-     "restifycapl",
+     "Sync",
      "Performs a blocking HTTP PATCH with the given request body and copies "
      "the response body into the caller's buffer, returning 0 on success or "
      "a negative error code otherwise. Blocking call \xe2\x80\x94 use from "
@@ -388,7 +388,7 @@ CAPL_DLL_INFO4 CAPL_DLL_INFO_LIST4[] = {
 
     {"restifyRequestSync",
      (CAPL_FARCALL)restifyRequestSync,
-     "restifycapl",
+     "Sync",
      "Performs a blocking HTTP request using the given method, request body "
      "and timeouts, copying the response body into the caller's buffer and "
      "returning 0 on success or a negative error code otherwise. Blocking "
