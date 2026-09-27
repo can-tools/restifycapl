@@ -147,7 +147,7 @@ Plus one sentence naming what the function does and that it returns 0 on success
 | ID | Agent | Task | Approval |
 |---|---|---|---|
 **HUM-24** | Human | Approve names and the exact signature table | **SATISFIED** by the OQ1–OQ8 rulings |
-— | Human | Cut `stage/10-capl-sync-exports` from `main` @ `b1c21f8` | Human-only git step |
+— | `build-pipeline-engineer` | Cut `stage/10-capl-sync-exports` from `main` @ `b1c21f8` | No |
 **CPP-24** | `cpp-implementer` | **The rename.** Committed alone, ahead of everything — a rename and an append are the two most contract-sensitive operations in the project and must not share a diff. Criteria: `cdlName` reads `"restifyReadVersion"`; **row 1 stays in position 1** — renamed, not moved, not re-added; the `extern "C"` function and `(CAPL_FARCALL)` cast agree; **`CopyOwnVersionString` is not modified at all**; no `Status` value changes; behaviour identical for every input class; row 1's `parCount`/`parTypes`/`array`/`categoryName`/`hintText` **unchanged**; `src/core/buffer-copy.h:8` and `docs/status-codes.md:19` updated in the same commit; the line-8 protected comment's **example name only** updated, wording and tier intact; `CHANGELOG.md` per below; **the two completed stage plans left untouched**; `exports.def` untouched; both architectures clean at `/W4`; `make test` still green. | **YES** — the rename exception, already granted |
 **CPP-23** | `cpp-implementer` | `src/core/status.h`: append `-4`, `-5`, `-6` per D14. Every pre-existing value byte-identical; `-7..-9` reserved; `-25..-29` untouched. | No |
 **CPP-22** | `cpp-implementer` | `src/core/input-text.{h,cpp}` and `src/http/sync-text-api.{h,cpp}` per D12, plus **`docs/capl-sync-surface.md`** per D18. | No |
@@ -165,7 +165,7 @@ Plus one sentence naming what the function does and that it returns 0 on success
 
 ## 8. Execution order
 
-1. Human — cut the branch from `main` @ `b1c21f8`.
+1. `build-pipeline-engineer` — cut the branch from `main` @ `b1c21f8`.
 2. **CPP-24** — the rename, alone.
 3. **CPP-23** — `Status` codes.
 4. **CPP-22** — the two translation-layer files plus `docs/capl-sync-surface.md`.
