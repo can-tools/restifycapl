@@ -4,8 +4,8 @@
 // Filed separately from type-conversion.h: type-conversion.h holds only
 // functions whose direction is JSON/text in, C++ value out; this header
 // holds the one function whose direction is the opposite -- C++ value out
-// to a raw caller-owned buffer. It has exactly one consumer,
-// src/module/exports.cpp's restifyGetVersion.
+// to a raw caller-owned buffer. The version-string and sync-HTTP-response
+// code paths both go through it.
 #pragma once
 
 #include <cstdint>

@@ -3,6 +3,12 @@
 Native Windows DLL plugin for Vector CANoe, exposing REST/HTTP operations to
 CAPL scripts.
 
+Synchronous HTTP is available from CAPL today: `restifyGetSync`,
+`restifyPostSync`, `restifyPutSync`, `restifyPatchSync`, `restifyDeleteSync`,
+and the general-purpose `restifyRequestSync` (see
+[`docs/capl-sync-surface.md`](docs/capl-sync-surface.md) for the full
+signature table).
+
 ## Development setup
 
 `scripts/setup-dev-env.ps1` provisions the local toolchain needed to build

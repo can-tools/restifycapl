@@ -16,7 +16,7 @@ lives in its own file instead, included by all three (and by
 
 `Ok = 0`, `InvalidArgument = -1`, `BufferTooSmall = -2` and
 `VersionResourceUnavailable = -3` are pre-existing, already-shipped values
-from `restifyGetVersion` (`src/module/exports.cpp`), predating this enum.
+from `restifyReadVersion` (`src/module/exports.cpp`), predating this enum.
 They were absorbed into `Status` rather than given new numbers, because
 CAPL scripts already depend on these exact values at runtime
 (`capl-export-contract`) -- renumbering any of them would silently break
@@ -29,7 +29,15 @@ version-resource read that yields it has no place in CANoe-unaware code).
 
 ## Reserved ranges
 
-- `-4..-9`: future module-local glue codes, currently empty.
+- `-7..-9`: future module-local glue codes, currently empty.
 
 Each range has exactly one owning layer, so a future addition never has to
 guess where the next free number is.
+
+## `-4..-6`
+
+| `Status` | Meaning |
+|---|---|
+| `MalformedHeaderBlock` | The header block text violates the `Name: Value` grammar -- a line with no colon, an empty name, or an empty value. |
+| `UnknownHttpMethod` | The method text did not match any of the six known HTTP verbs. |
+| `UnterminatedInputText` | No NUL terminator was found within the caller-stated size bound for an input `char[]` parameter. |

@@ -11,7 +11,10 @@ enum class Status : int32_t {
   InvalidArgument = -1,
   BufferTooSmall = -2,
   VersionResourceUnavailable = -3,  // exports.cpp only; src/core/ can never produce this
-  // -4..-9 reserved, currently empty, for future module-local glue codes
+  MalformedHeaderBlock = -4,  // header block text violates the Name: Value grammar
+  UnknownHttpMethod = -5,     // method text did not match any known HTTP verb
+  UnterminatedInputText = -6, // no NUL terminator found within the caller-stated size bound
+  // -7..-9 reserved, currently empty, for future module-local glue codes
   ParseError = -10,          // reserved for JSON parsing (json-flatten); sync-operations does not claim this code
   PathSyntaxError = -11,     // ParsePath: malformed path text, no document needed
   PathNotFound = -12,        // object key absent

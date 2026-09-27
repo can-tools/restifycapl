@@ -111,6 +111,61 @@ No other agent edits `version.rc`, the `/VERSION:` flags, or anything
 related to version numbers. `code-reviewer` flags any hardcoded version
 number found anywhere as a bug.
 
+## Local builds — the only sanctioned invocation
+
+- Building and testing locally is only ever done via `make <target>`
+  (`make build-x86`, `make build-x64`, `make test`, `make clean`). No agent
+  other than `build-pipeline-engineer`, doing actual build-system
+  maintenance, may author, edit, or invoke a standalone build script, batch
+  file, or direct `cl.exe`/`link.exe`/`rc.exe` invocation.
+  `build-pipeline-engineer` owns the build mechanism end to end; every
+  other agent only ever reaches it through `make`.
+- Both the activated MSVC developer environment and the working directory
+  are process state: neither survives from one shell invocation to the
+  next, and each Bash tool call starts a fresh process from a reset cwd.
+  Activating the environment in one call and running `make` in a separate
+  later call fails with `'cl' is not recognized as an internal or external
+  command` — that failure means the activation from the earlier call never
+  carried over to this one, **not** that the build itself is broken.
+  Environment activation and the `make` invocation must always happen in
+  one call.
+- Verified working form: feed a short script to `cmd.exe` over stdin in a
+  single call. Piping into `cmd.exe` (rather than passing the whole thing
+  as a `cmd /c "..."` string) sidesteps a real, reproduced failure mode —
+  nested double quotes inside a `cmd /c` argument get mangled by the
+  calling shell before `cmd.exe` ever sees them, breaking `for /f`'s own
+  quoting.
+
+  x86:
+  ```
+  cmd.exe <<'EOF'
+  @echo off
+  for /f "tokens=*" %i in ('"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath') do set VSINSTALL=%i
+  call "%VSINSTALL%\VC\Auxiliary\Build\vcvarsall.bat" x86
+  cd /d C:\Workspace\restifycapl
+  make build-x86
+  EOF
+  ```
+
+  x64: identical, with `x86` replaced by `x64` in the `vcvarsall.bat`
+  argument, and the final line replaced by the target actually wanted
+  (`make build-x64`, `make test ARCH=x64`, `make clean`, etc.).
+
+  `vswhere.exe` locates the Visual Studio install rather than hardcoding
+  `VC\Auxiliary\Build\vcvarsall.bat`'s full path, so this keeps working
+  across VS installs/updates. Both `make build-x86` and `make build-x64`
+  (and `make test ARCH=x64`) have been run end-to-end through this exact
+  form and produced a working DLL / a passing test suite.
+- `cd /d` to the repo root explicitly inside the same block — it cannot be
+  assumed from the calling agent's prior state, for the same reason the
+  environment can't be.
+- A line reading `'vswhere.exe' is not recognized as an internal or
+  external command` printed immediately after the `call vcvarsall.bat`
+  line is harmless noise from `vcvarsall.bat`'s own internal probing, not
+  a sign this incantation failed — confirmed by checking `where cl`
+  immediately afterward, which still resolves to the correct
+  architecture's `cl.exe`. Do not treat that line as a build failure.
+
 ## CI/CD
 
 - The GitHub Actions workflow must invoke the same `build-x86`/`build-x64`

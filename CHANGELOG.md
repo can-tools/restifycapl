@@ -10,10 +10,12 @@ hand-invented version numbers.
 
 ### Added
 
-- `restifyGetVersion(char buffer[], dword bufferSize) : long` -- the
-  project's first CAPL-exported operation (Stage 5, ABI proof). Writes the
-  DLL's build version string into a caller-supplied buffer; returns 0 on
-  success or a negative error code (see `src/module/exports.cpp`).
+- `restifyReadVersion(char buffer[], dword bufferSize) : long` -- the
+  project's first CAPL-exported operation (Stage 5, ABI proof), renamed
+  from `restifyGetVersion` while still unreferenced by any observed
+  runtime call. Writes the DLL's build version string into a
+  caller-supplied buffer; returns 0 on success or a negative error code
+  (see `src/module/exports.cpp`).
 - `scripts/setup-dev-env.ps1`: development environment bootstrap script
   that provisions MSVC Build Tools, `make`, vcpkg-built libcurl (x86 and
   x64, static, SChannel), and the pinned `nlohmann/json` single header.
@@ -29,6 +31,19 @@ hand-invented version numbers.
   and `make test ARCH=<arch>` targets used locally, with its own `/MT`
   provenance check and both DLLs uploaded as workflow artifacts (Stage 6,
   BPE-9).
+- `restifyGetSync(char url[], dword urlSize, char requestHeaders[], dword requestHeadersSize, char responseBody[], dword responseBodySize, long& httpStatusCode, dword& responseBodyLength) : long`
+  -- blocking HTTP GET.
+- `restifyDeleteSync(...same shape as restifyGetSync...) : long` -- blocking
+  HTTP DELETE.
+- `restifyPostSync(char url[], dword urlSize, char requestHeaders[], dword requestHeadersSize, char requestBody[], dword requestBodySize, char responseBody[], dword responseBodySize, long& httpStatusCode, dword& responseBodyLength) : long`
+  -- blocking HTTP POST.
+- `restifyPutSync(...same shape as restifyPostSync...) : long` -- blocking
+  HTTP PUT.
+- `restifyPatchSync(...same shape as restifyPostSync...) : long` -- blocking
+  HTTP PATCH.
+- `restifyRequestSync(char method[], dword methodSize, char url[], dword urlSize, char requestHeaders[], dword requestHeadersSize, char requestBody[], dword requestBodySize, char responseBody[], dword responseBodySize, dword connectTimeoutMs, dword totalTimeoutMs, dword maxResponseBytes, long& httpStatusCode, dword& responseBodyLength) : long`
+  -- general-purpose blocking HTTP request covering any method and explicit
+  timeouts/response cap, for cases the five verb helpers above don't reach.
 
 ### Changed
 
