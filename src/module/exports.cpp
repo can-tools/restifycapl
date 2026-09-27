@@ -27,6 +27,8 @@
 
 #include "core/buffer-copy.h"
 #include "core/status.h"
+#include "http/http-client.h"
+#include "http/sync-text-api.h"
 
 #pragma comment(lib, "version.lib")
 // Needed for the VerQueryValue* calls below; see the Makefile's SYSLIBS comment.
@@ -36,6 +38,20 @@ namespace {
 // unsigned long is 32 bits on both targets here.
 static_assert(sizeof(unsigned long) == sizeof(std::uint32_t),
               "restifyReadVersion assumes unsigned long is 32 bits");
+// CAPL long is 32 bits on both targets here.
+static_assert(sizeof(long) == sizeof(std::int32_t),
+              "the sync-export shims assume long is 32 bits");
+
+// type - 128 marks a CAPL by-reference parameter (docs/capl-sync-surface.md).
+// Spelled via named constants, not inline arithmetic, to avoid a /W4
+// narrowing diagnostic in the table's braced parTypes initializers below.
+constexpr char kRefLong = static_cast<char>('L' - 128);
+constexpr char kRefDword = static_cast<char>('D' - 128);
+
+HttpClient& SyncClient() {
+  static HttpClient instance;
+  return instance;
+}
 
 // Not unit-tested: CAPL/Win32 module glue, excluded per cpp-testing-conventions.
 //
@@ -132,6 +148,119 @@ extern "C" long CAPLPASCAL restifyReadVersion(char* buffer,
   return CopyOwnVersionString(buffer, bufferSize);
 }
 
+// ------------------------------------------------------------------------
+// Six synchronous REST shims -- each is a direct forwarding call into the
+// matching Execute*Sync function (src/http/sync-text-api.h), which owns
+// all parsing, request assembly and status mapping. Signature table,
+// header-block grammar and status codes: docs/capl-sync-surface.md.
+// ------------------------------------------------------------------------
+extern "C" long CAPLPASCAL restifyGetSync(char* url, unsigned long urlSize,
+                                           char* requestHeaders,
+                                           unsigned long requestHeadersSize,
+                                           char* responseBody,
+                                           unsigned long responseBodySize,
+                                           long* httpStatusCode,
+                                           unsigned long* responseBodyLength) {
+  std::int32_t status = *httpStatusCode;
+  std::uint32_t length = *responseBodyLength;
+  Status result = ExecuteGetSync(SyncClient(), url, urlSize, requestHeaders,
+                                  requestHeadersSize, responseBody, responseBodySize,
+                                  status, length);
+  *httpStatusCode = status;
+  *responseBodyLength = length;
+  return static_cast<long>(result);
+}
+
+extern "C" long CAPLPASCAL restifyDeleteSync(char* url, unsigned long urlSize,
+                                              char* requestHeaders,
+                                              unsigned long requestHeadersSize,
+                                              char* responseBody,
+                                              unsigned long responseBodySize,
+                                              long* httpStatusCode,
+                                              unsigned long* responseBodyLength) {
+  std::int32_t status = *httpStatusCode;
+  std::uint32_t length = *responseBodyLength;
+  Status result = ExecuteDeleteSync(SyncClient(), url, urlSize, requestHeaders,
+                                     requestHeadersSize, responseBody, responseBodySize,
+                                     status, length);
+  *httpStatusCode = status;
+  *responseBodyLength = length;
+  return static_cast<long>(result);
+}
+
+extern "C" long CAPLPASCAL restifyPostSync(char* url, unsigned long urlSize,
+                                            char* requestHeaders,
+                                            unsigned long requestHeadersSize,
+                                            char* requestBody, unsigned long requestBodySize,
+                                            char* responseBody, unsigned long responseBodySize,
+                                            long* httpStatusCode,
+                                            unsigned long* responseBodyLength) {
+  std::int32_t status = *httpStatusCode;
+  std::uint32_t length = *responseBodyLength;
+  Status result = ExecutePostSync(SyncClient(), url, urlSize, requestHeaders,
+                                   requestHeadersSize, requestBody, requestBodySize,
+                                   responseBody, responseBodySize, status, length);
+  *httpStatusCode = status;
+  *responseBodyLength = length;
+  return static_cast<long>(result);
+}
+
+extern "C" long CAPLPASCAL restifyPutSync(char* url, unsigned long urlSize,
+                                           char* requestHeaders,
+                                           unsigned long requestHeadersSize,
+                                           char* requestBody, unsigned long requestBodySize,
+                                           char* responseBody, unsigned long responseBodySize,
+                                           long* httpStatusCode,
+                                           unsigned long* responseBodyLength) {
+  std::int32_t status = *httpStatusCode;
+  std::uint32_t length = *responseBodyLength;
+  Status result = ExecutePutSync(SyncClient(), url, urlSize, requestHeaders,
+                                  requestHeadersSize, requestBody, requestBodySize,
+                                  responseBody, responseBodySize, status, length);
+  *httpStatusCode = status;
+  *responseBodyLength = length;
+  return static_cast<long>(result);
+}
+
+extern "C" long CAPLPASCAL restifyPatchSync(char* url, unsigned long urlSize,
+                                             char* requestHeaders,
+                                             unsigned long requestHeadersSize,
+                                             char* requestBody, unsigned long requestBodySize,
+                                             char* responseBody, unsigned long responseBodySize,
+                                             long* httpStatusCode,
+                                             unsigned long* responseBodyLength) {
+  std::int32_t status = *httpStatusCode;
+  std::uint32_t length = *responseBodyLength;
+  Status result = ExecutePatchSync(SyncClient(), url, urlSize, requestHeaders,
+                                    requestHeadersSize, requestBody, requestBodySize,
+                                    responseBody, responseBodySize, status, length);
+  *httpStatusCode = status;
+  *responseBodyLength = length;
+  return static_cast<long>(result);
+}
+
+extern "C" long CAPLPASCAL restifyRequestSync(char* method, unsigned long methodSize, char* url,
+                                               unsigned long urlSize, char* requestHeaders,
+                                               unsigned long requestHeadersSize,
+                                               char* requestBody, unsigned long requestBodySize,
+                                               char* responseBody, unsigned long responseBodySize,
+                                               unsigned long connectTimeoutMs,
+                                               unsigned long totalTimeoutMs,
+                                               unsigned long maxResponseBytes,
+                                               long* httpStatusCode,
+                                               unsigned long* responseBodyLength) {
+  std::int32_t status = *httpStatusCode;
+  std::uint32_t length = *responseBodyLength;
+  Status result = ExecuteRequestSync(SyncClient(), method, methodSize, url, urlSize,
+                                      requestHeaders, requestHeadersSize, requestBody,
+                                      requestBodySize, connectTimeoutMs, totalTimeoutMs,
+                                      maxResponseBytes, responseBody, responseBodySize,
+                                      status, length);
+  *httpStatusCode = status;
+  *responseBodyLength = length;
+  return static_cast<long>(result);
+}
+
 // ==============================================================================
 // CAPL_DLL_INFO_LIST4 -- the real API contract (capl-export-contract).
 // APPEND ONLY from this point on: never rename, reorder, or remove a row.
@@ -172,6 +301,107 @@ CAPL_DLL_INFO4 CAPL_DLL_INFO_LIST4[] = {
      "CD",
      "\001\000",
      {"buffer", "bufferSize"}},
+
+    // Trap: parCount below must equal the number of entries actually
+    // present in that row's parTypes/array/parNames -- nothing checks this
+    // at compile time or at runtime, and a mismatch corrupts the CAPL
+    // stack (worst on x86) with no diagnostic. Trap: a `kRefLong`/
+    // `kRefDword` (`type - 128`) entry marks a CAPL reference parameter;
+    // the matching C++ shim parameter must be a pointer, never a plain
+    // value, or the write-back targets the wrong memory.
+
+    {"restifyGetSync",
+     (CAPL_FARCALL)restifyGetSync,
+     "restifycapl",
+     "Performs a blocking HTTP GET and copies the response body into the "
+     "caller's buffer, returning 0 on success or a negative error code "
+     "otherwise. Blocking call \xe2\x80\x94 use from Measurement Setup or a "
+     "test node only, never from a Simulation Setup node.",
+     'L',
+     8,
+     {'C', 'D', 'C', 'D', 'C', 'D', kRefLong, kRefDword},
+     {1, 0, 1, 0, 1, 0, 0, 0},
+     {"url", "urlSize", "requestHeaders", "requestHeadersSize", "responseBody",
+      "responseBodySize", "httpStatusCode", "responseBodyLength"}},
+
+    {"restifyDeleteSync",
+     (CAPL_FARCALL)restifyDeleteSync,
+     "restifycapl",
+     "Performs a blocking HTTP DELETE and copies the response body into the "
+     "caller's buffer, returning 0 on success or a negative error code "
+     "otherwise. Blocking call \xe2\x80\x94 use from Measurement Setup or a "
+     "test node only, never from a Simulation Setup node.",
+     'L',
+     8,
+     {'C', 'D', 'C', 'D', 'C', 'D', kRefLong, kRefDword},
+     {1, 0, 1, 0, 1, 0, 0, 0},
+     {"url", "urlSize", "requestHeaders", "requestHeadersSize", "responseBody",
+      "responseBodySize", "httpStatusCode", "responseBodyLength"}},
+
+    {"restifyPostSync",
+     (CAPL_FARCALL)restifyPostSync,
+     "restifycapl",
+     "Performs a blocking HTTP POST with the given request body and copies "
+     "the response body into the caller's buffer, returning 0 on success or "
+     "a negative error code otherwise. Blocking call \xe2\x80\x94 use from "
+     "Measurement Setup or a test node only, never from a Simulation Setup "
+     "node.",
+     'L',
+     10,
+     {'C', 'D', 'C', 'D', 'C', 'D', 'C', 'D', kRefLong, kRefDword},
+     {1, 0, 1, 0, 1, 0, 1, 0, 0, 0},
+     {"url", "urlSize", "requestHeaders", "requestHeadersSize", "requestBody",
+      "requestBodySize", "responseBody", "responseBodySize", "httpStatusCode",
+      "responseBodyLength"}},
+
+    {"restifyPutSync",
+     (CAPL_FARCALL)restifyPutSync,
+     "restifycapl",
+     "Performs a blocking HTTP PUT with the given request body and copies "
+     "the response body into the caller's buffer, returning 0 on success or "
+     "a negative error code otherwise. Blocking call \xe2\x80\x94 use from "
+     "Measurement Setup or a test node only, never from a Simulation Setup "
+     "node.",
+     'L',
+     10,
+     {'C', 'D', 'C', 'D', 'C', 'D', 'C', 'D', kRefLong, kRefDword},
+     {1, 0, 1, 0, 1, 0, 1, 0, 0, 0},
+     {"url", "urlSize", "requestHeaders", "requestHeadersSize", "requestBody",
+      "requestBodySize", "responseBody", "responseBodySize", "httpStatusCode",
+      "responseBodyLength"}},
+
+    {"restifyPatchSync",
+     (CAPL_FARCALL)restifyPatchSync,
+     "restifycapl",
+     "Performs a blocking HTTP PATCH with the given request body and copies "
+     "the response body into the caller's buffer, returning 0 on success or "
+     "a negative error code otherwise. Blocking call \xe2\x80\x94 use from "
+     "Measurement Setup or a test node only, never from a Simulation Setup "
+     "node.",
+     'L',
+     10,
+     {'C', 'D', 'C', 'D', 'C', 'D', 'C', 'D', kRefLong, kRefDword},
+     {1, 0, 1, 0, 1, 0, 1, 0, 0, 0},
+     {"url", "urlSize", "requestHeaders", "requestHeadersSize", "requestBody",
+      "requestBodySize", "responseBody", "responseBodySize", "httpStatusCode",
+      "responseBodyLength"}},
+
+    {"restifyRequestSync",
+     (CAPL_FARCALL)restifyRequestSync,
+     "restifycapl",
+     "Performs a blocking HTTP request using the given method, request body "
+     "and timeouts, copying the response body into the caller's buffer and "
+     "returning 0 on success or a negative error code otherwise. Blocking "
+     "call \xe2\x80\x94 use from Measurement Setup or a test node only, "
+     "never from a Simulation Setup node.",
+     'L',
+     15,
+     {'C', 'D', 'C', 'D', 'C', 'D', 'C', 'D', 'C', 'D', 'D', 'D', 'D', kRefLong, kRefDword},
+     {1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0},
+     {"method", "methodSize", "url", "urlSize", "requestHeaders",
+      "requestHeadersSize", "requestBody", "requestBodySize", "responseBody",
+      "responseBodySize", "connectTimeoutMs", "totalTimeoutMs",
+      "maxResponseBytes", "httpStatusCode", "responseBodyLength"}},
 
     // Terminating sentinel -- CANoe reads entries until the first one
     // whose name is NULL.

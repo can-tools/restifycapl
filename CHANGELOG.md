@@ -31,6 +31,19 @@ hand-invented version numbers.
   and `make test ARCH=<arch>` targets used locally, with its own `/MT`
   provenance check and both DLLs uploaded as workflow artifacts (Stage 6,
   BPE-9).
+- `restifyGetSync(char url[], dword urlSize, char requestHeaders[], dword requestHeadersSize, char responseBody[], dword responseBodySize, long& httpStatusCode, dword& responseBodyLength) : long`
+  -- blocking HTTP GET.
+- `restifyDeleteSync(...same shape as restifyGetSync...) : long` -- blocking
+  HTTP DELETE.
+- `restifyPostSync(char url[], dword urlSize, char requestHeaders[], dword requestHeadersSize, char requestBody[], dword requestBodySize, char responseBody[], dword responseBodySize, long& httpStatusCode, dword& responseBodyLength) : long`
+  -- blocking HTTP POST.
+- `restifyPutSync(...same shape as restifyPostSync...) : long` -- blocking
+  HTTP PUT.
+- `restifyPatchSync(...same shape as restifyPostSync...) : long` -- blocking
+  HTTP PATCH.
+- `restifyRequestSync(char method[], dword methodSize, char url[], dword urlSize, char requestHeaders[], dword requestHeadersSize, char requestBody[], dword requestBodySize, char responseBody[], dword responseBodySize, dword connectTimeoutMs, dword totalTimeoutMs, dword maxResponseBytes, long& httpStatusCode, dword& responseBodyLength) : long`
+  -- general-purpose blocking HTTP request covering any method and explicit
+  timeouts/response cap, for cases the five verb helpers above don't reach.
 
 ### Changed
 
