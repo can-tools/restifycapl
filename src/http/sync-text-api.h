@@ -1,6 +1,5 @@
 // sync-text-api.h -- translates pointer+size CAPL text parameters into
-// sync-operations calls. Grammar, status table and write-ordering rule:
-// docs/capl-sync-surface.md.
+// sync-operations calls. See docs/capl-sync-surface.md for the full contract.
 #pragma once
 
 #include <cstdint>
@@ -10,22 +9,13 @@
 #include "core/status.h"
 #include "http/http-client.h"
 
-// Case-insensitive match against the six HttpMethod names. No match ->
-// UnknownHttpMethod, out untouched.
+// No match against the six HttpMethod names -> UnknownHttpMethod.
 Status ParseMethodText(std::string_view text, HttpMethod& out);
 
-// block.empty() -> Ok, out left empty (no headers). Otherwise split on
-// '\n' (trailing '\r' per line tolerated), each line "Name: Value" split
-// on the first ':'; missing colon, empty name or empty value after
-// trimming -> MalformedHeaderBlock. Duplicates preserved in order.
+// Empty block -> Ok, no headers; malformed "Name: Value" line -> MalformedHeaderBlock.
 Status ParseHeaderBlock(std::string_view block, std::vector<HttpHeader>& out);
 
-// The seven functions below share one contract: every (text, size) pair is
-// resolved through BoundedText first, InvalidArgument/UnterminatedInputText
-// propagate immediately with no call into HttpClient. httpStatusCode and
-// responseBodyLength are written iff a response was actually received (see
-// docs/capl-sync-surface.md); the body is then copied via CopyToBuffer.
-
+// All seven below: truncated text -> UnterminatedInputText before any HttpClient call.
 Status ExecuteRequestSync(HttpClient& client, const char* methodText, std::uint32_t methodSize,
                            const char* urlText, std::uint32_t urlSize, const char* headersText,
                            std::uint32_t headersSize, const char* bodyText, std::uint32_t bodySize,
