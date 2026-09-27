@@ -5,7 +5,7 @@
 
 // CAPL-visible naming convention -- DECIDED HERE, PERMANENTLY:
 //
-//     restify<VerbNoun>          e.g. restifyGetVersion
+//     restify<VerbNoun>          e.g. restifyReadVersion
 //
 // lowercase "restify" prefix + UpperCamelCase verb-noun, giving an overall
 // lowerCamelCase symbol matching idiomatic CAPL (sysGetVariableInt,
@@ -35,7 +35,7 @@ namespace {
 
 // unsigned long is 32 bits on both targets here.
 static_assert(sizeof(unsigned long) == sizeof(std::uint32_t),
-              "restifyGetVersion assumes unsigned long is 32 bits");
+              "restifyReadVersion assumes unsigned long is 32 bits");
 
 // Not unit-tested: CAPL/Win32 module glue, excluded per cpp-testing-conventions.
 //
@@ -105,10 +105,10 @@ long CopyOwnVersionString(char* buffer, unsigned long bufferSize) {
 }  // namespace
 
 // ------------------------------------------------------------------------
-// restifyGetVersion -- the project's first-ever CAPL-visible operation.
+// restifyReadVersion -- the project's first-ever CAPL-visible operation.
 //
 // CAPL signature (see the CAPL_DLL_INFO_LIST4 entry below):
-//   long restifyGetVersion(char buffer[], dword bufferSize);
+//   long restifyReadVersion(char buffer[], dword bufferSize);
 //
 // Writes this DLL's build-version string (see CopyOwnVersionString above)
 // into the caller-supplied buffer. Returns Status::Ok (0) on success, or a
@@ -127,8 +127,8 @@ long CopyOwnVersionString(char* buffer, unsigned long bufferSize) {
 // caplDllGetTable4 below, so this function has no need to appear in the
 // DLL's own export directory or in exports.def.
 // ------------------------------------------------------------------------
-extern "C" long CAPLPASCAL restifyGetVersion(char* buffer,
-                                              unsigned long bufferSize) {
+extern "C" long CAPLPASCAL restifyReadVersion(char* buffer,
+                                               unsigned long bufferSize) {
   return CopyOwnVersionString(buffer, bufferSize);
 }
 
@@ -157,13 +157,13 @@ CAPL_DLL_INFO4 CAPL_DLL_INFO_LIST4[] = {
     {CDLL_VERSION_NAME, (CAPL_FARCALL)CDLL_VERSION, "", "", 0, 0, "", "",
      {""}},
 
-    // restifyGetVersion(char buffer[], dword bufferSize) : long
-    // See the naming-convention rationale and restifyGetVersion's own
+    // restifyReadVersion(char buffer[], dword bufferSize) : long
+    // See the naming-convention rationale and restifyReadVersion's own
     // comment above. parTypes "CD" / array "\001\000" mean: parameter 0
     // ('C', array depth 1) is a CAPL char[] buffer passed by reference;
     // parameter 1 ('D', array depth 0) is a scalar unsigned long.
-    {"restifyGetVersion",
-     (CAPL_FARCALL)restifyGetVersion,
+    {"restifyReadVersion",
+     (CAPL_FARCALL)restifyReadVersion,
      "restifycapl",
      "Writes this DLL's build version string into the caller-supplied "
      "buffer. Returns 0 on success, a negative error code otherwise.",

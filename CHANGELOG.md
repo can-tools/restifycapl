@@ -10,10 +10,12 @@ hand-invented version numbers.
 
 ### Added
 
-- `restifyGetVersion(char buffer[], dword bufferSize) : long` -- the
-  project's first CAPL-exported operation (Stage 5, ABI proof). Writes the
-  DLL's build version string into a caller-supplied buffer; returns 0 on
-  success or a negative error code (see `src/module/exports.cpp`).
+- `restifyReadVersion(char buffer[], dword bufferSize) : long` -- the
+  project's first CAPL-exported operation (Stage 5, ABI proof), renamed
+  from `restifyGetVersion` while still unreferenced by any observed
+  runtime call. Writes the DLL's build version string into a
+  caller-supplied buffer; returns 0 on success or a negative error code
+  (see `src/module/exports.cpp`).
 - `scripts/setup-dev-env.ps1`: development environment bootstrap script
   that provisions MSVC Build Tools, `make`, vcpkg-built libcurl (x86 and
   x64, static, SChannel), and the pinned `nlohmann/json` single header.

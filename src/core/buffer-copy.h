@@ -5,7 +5,7 @@
 // functions whose direction is JSON/text in, C++ value out; this header
 // holds the one function whose direction is the opposite -- C++ value out
 // to a raw caller-owned buffer. It has exactly one consumer,
-// src/module/exports.cpp's restifyGetVersion.
+// src/module/exports.cpp's restifyReadVersion.
 #pragma once
 
 #include <cstdint>

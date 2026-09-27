@@ -16,7 +16,7 @@ lives in its own file instead, included by all three (and by
 
 `Ok = 0`, `InvalidArgument = -1`, `BufferTooSmall = -2` and
 `VersionResourceUnavailable = -3` are pre-existing, already-shipped values
-from `restifyGetVersion` (`src/module/exports.cpp`), predating this enum.
+from `restifyReadVersion` (`src/module/exports.cpp`), predating this enum.
 They were absorbed into `Status` rather than given new numbers, because
 CAPL scripts already depend on these exact values at runtime
 (`capl-export-contract`) -- renumbering any of them would silently break
