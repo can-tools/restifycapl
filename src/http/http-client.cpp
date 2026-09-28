@@ -70,6 +70,8 @@ Status MapCurlCode(CURLcode code) {
     case CURLE_PARTIAL_FILE:
     case CURLE_TOO_MANY_REDIRECTS:
       return Status::NetworkError;
+    case CURLE_ABORTED_BY_CALLBACK:
+      return Status::RequestCancelled;
     default:
       return Status::NetworkError;
   }
@@ -151,6 +153,11 @@ std::size_t HeaderCallback(char* buffer, std::size_t size, std::size_t nitems, v
   return total;
 }
 
+// Thin wrapper so ShouldCancelTransfer stays libcurl-free and unit-testable.
+int XferInfoCallback(void* userdata, curl_off_t, curl_off_t, curl_off_t, curl_off_t) {
+  return ShouldCancelTransfer(static_cast<const std::atomic<bool>*>(userdata)) ? 1 : 0;
+}
+
 long ClampToLong(std::uint32_t milliseconds) {
   constexpr std::uint32_t kLongMax = static_cast<std::uint32_t>(LONG_MAX);
   return static_cast<long>(milliseconds > kLongMax ? kLongMax : milliseconds);
@@ -221,6 +228,13 @@ Status CurlTransport::Perform(const HttpRequest& request, HttpResponse& response
 
     curl_easy_setopt(handle, CURLOPT_NOSIGNAL, 1L);  // required for use from a non-main thread
 
+    // Trap: safe for a worker thread to own *cancelFlag alone only because
+    // CURLOPT_QUICK_EXIT is never set here, and this handle is created and
+    // destroyed entirely within this call.
+    curl_easy_setopt(handle, CURLOPT_NOPROGRESS, 0L);
+    curl_easy_setopt(handle, CURLOPT_XFERINFOFUNCTION, &XferInfoCallback);
+    curl_easy_setopt(handle, CURLOPT_XFERINFODATA, request.cancelFlag);
+
     // Trap: set both VERIFYPEER and VERIFYHOST, or set neither to
     // non-default -- never one without the other. Each handle is created
     // fresh above, so leaving either at libcurl's implicit default is a
@@ -288,6 +302,10 @@ bool WouldExceedResponseCap(std::size_t currentSize, std::size_t incoming,
 
 Status ResolveTransferResult(bool capExceeded, Status mappedStatus) {
   return capExceeded ? Status::ResponseTooLarge : mappedStatus;
+}
+
+bool ShouldCancelTransfer(const std::atomic<bool>* cancelFlag) {
+  return cancelFlag != nullptr && cancelFlag->load();
 }
 
 HttpTransport::~HttpTransport() = default;

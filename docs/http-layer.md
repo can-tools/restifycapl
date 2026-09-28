@@ -91,6 +91,45 @@ libcurl enforces both independently and the total simply wins in that case.
 This is documented rather than validated against, since rejecting it would
 add a check for a combination that already behaves predictably.
 
+`totalTimeoutMs` is not a hard wall-clock ceiling on `Perform` in practice:
+DNS cleanup (or, possibly, a Schannel revocation check) can block past it
+during handle teardown even after the transfer itself has already been
+aborted or timed out. This affects only whichever thread called `Perform`
+-- never CANoe's realtime thread, since synchronous callers never run
+`Perform` from that context (see "Blocking calls are prohibited" below).
+
+## Cancel hook (Stage 11, CPP-28)
+
+`HttpRequest::cancelFlag` is an optional `std::atomic<bool>*`, defaulting to
+`nullptr`. Synchronous callers (`sync-operations.*`) never set it, so it
+stays `nullptr` for every existing caller and the transport behaves exactly
+as before -- `nullptr` means "never cancel".
+
+`CurlTransport::Perform` sets `CURLOPT_NOPROGRESS = 0L` and registers an
+`XFERINFOFUNCTION`, passing `cancelFlag` through as `CURLOPT_XFERINFODATA`.
+The actual decision -- whether the flag is set -- is pulled out into
+`ShouldCancelTransfer(const std::atomic<bool>*)`, a pure function declared
+in `http-client.h` with no libcurl type in its signature, so it is directly
+unit-testable and keeps `curl.h` confined to `http-client.cpp`. The
+registered callback is a thin wrapper that casts `userdata` back to
+`const std::atomic<bool>*` and calls it; returning non-zero makes libcurl
+abort the transfer with `CURLE_ABORTED_BY_CALLBACK`, which `MapCurlCode`
+maps to `Status::RequestCancelled`.
+
+**Cancel latency.** `curl_easy_perform`'s internal event loop
+(`lib/easy.c`, upstream libcurl) polls for socket activity in increments of
+at most 1000 ms and re-enters the transfer state machine after each poll,
+which is what actually drives the xferinfo callback -- not a fixed internal
+timer in `lib/progress.c`. In the worst case (no socket activity at all,
+e.g. a stalled send/recv), the callback is still reached within about one
+second of the flag being set; while data is actively flowing, it fires far
+more often than that, once per read/write cycle.
+
+**Known limitation.** The cancel hook cannot interrupt a blocking
+`getaddrinfo` (DNS) call or a Schannel certificate revocation fetch --
+libcurl does not reach the progress callback while blocked inside either.
+This is accepted, not a bug to work around.
+
 ## Handle lifecycle and threading (Stage 9, CPP-4)
 
 1. `curl_global_init(CURL_GLOBAL_DEFAULT)` runs exactly once, lazily, via
@@ -112,6 +151,12 @@ add a check for a combination that already behaves predictably.
    async layer (a later stage) depends on, at the cost of a fresh
    connection per request. Connection reuse is a deliberate, accepted
    trade against that property, not deferred by oversight.
+5. `CURLOPT_QUICK_EXIT` is never set anywhere in this codebase, and (per
+   point 4) every easy handle is created and destroyed inside the single
+   `Perform` call that owns it -- no handle outlives its call. Together
+   these two invariants are what let a worker thread hold the only
+   reference to a cancel flag's target (see "Cancel hook" above) without
+   this transport itself needing to know about threads.
 
 ## `skipTlsVerification` -- why it exists, and its bounds (Stage 9, CPP-4)
 

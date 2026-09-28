@@ -6,6 +6,7 @@
 // handle-lifecycle rules this header only summarizes in short form.
 #pragma once
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -48,6 +49,11 @@ struct HttpRequest {
   std::vector<HttpHeader> headers;
   std::string body;
   RequestOptions options;
+
+  // Per-call transient signaling from a caller, not a request option --
+  // nullptr for every synchronous caller. Setting it to true asks
+  // CurlTransport::Perform to abort the in-flight transfer.
+  std::atomic<bool>* cancelFlag = nullptr;
 };
 
 struct HttpResponse {
@@ -63,6 +69,9 @@ struct HttpResponse {
 bool WouldExceedResponseCap(std::size_t currentSize, std::size_t incoming,
                              std::uint32_t capBytes);
 Status ResolveTransferResult(bool capExceeded, Status mappedStatus);
+
+// nullptr never cancels; otherwise reflects the flag's current value.
+bool ShouldCancelTransfer(const std::atomic<bool>* cancelFlag);
 
 // Pure-virtual seam: production traffic goes through CurlTransport
 // (http-client.cpp); tests inject a fake instead. See docs/http-layer.md
