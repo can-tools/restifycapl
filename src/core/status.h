@@ -30,6 +30,10 @@ enum class Status : int32_t {
   TransportInitFailed = -21, // curl_global_init or curl_easy_init failed -- process-level, not request-level
   InvalidUrl = -22,          // malformed or unsupported-scheme URL, kept distinct from InvalidArgument (-1)
   ResponseTooLarge = -23,    // response body exceeded the configured cap
-  // -24 reserved, currently empty, for the HTTP layer.
-  // -25..-29 reserved for the async layer; do not mint from this range here.
+  RequestCancelled = -24,     // CURLE_ABORTED_BY_CALLBACK; internal only, CAPL never sees this
+  NoFreeRequestSlot = -25,    // dispatch: all 8 slots occupied
+  RequestNotComplete = -26,   // read on a live id still Pending/Running
+  UnknownRequestId = -27,     // id is 0, never issued, Consumed, Abandoned, or Free
+  WaitTimeout = -28,          // await's deadline reached
+  AsyncStartFailed = -29,     // worker thread creation failed
 };

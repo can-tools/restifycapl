@@ -41,3 +41,25 @@ guess where the next free number is.
 | `MalformedHeaderBlock` | The header block text violates the `Name: Value` grammar -- a line with no colon, an empty name, or an empty value. |
 | `UnknownHttpMethod` | The method text did not match any of the six known HTTP verbs. |
 | `UnterminatedInputText` | No NUL terminator was found within the caller-stated size bound for an input `char[]` parameter. |
+
+## `-18..-23`
+
+| `Status` | Meaning |
+|---|---|
+| `NetworkError` | The transfer failed (DNS, connect, send/recv, redirect limit) -- also the catch-all for any unmapped `CURLcode`. |
+| `Timeout` | Connect or total timeout expired -- libcurl cannot distinguish the two, so one code covers both. |
+| `TlsError` | TLS/Schannel handshake or certificate verification failed, kept distinct from `NetworkError`. |
+| `TransportInitFailed` | `curl_global_init` or `curl_easy_init` failed -- process-level, not request-level. |
+| `InvalidUrl` | The URL was malformed or used an unsupported scheme, kept distinct from `InvalidArgument` (-1). |
+| `ResponseTooLarge` | The response body exceeded the configured cap. |
+
+## `-24..-29`
+
+| `Status` | Meaning |
+|---|---|
+| `RequestCancelled` | `CURLE_ABORTED_BY_CALLBACK` -- internal only, CAPL never observes this value. |
+| `NoFreeRequestSlot` | Dispatch found all 8 async request slots occupied. |
+| `RequestNotComplete` | A read was attempted on a live id still `Pending`/`Running`. |
+| `UnknownRequestId` | The id was 0, never issued, or already `Consumed`, `Abandoned`, or `Free`. |
+| `WaitTimeout` | `await`'s deadline was reached, kept distinct from `Timeout` (-19), which is libcurl's own transfer timeout. |
+| `AsyncStartFailed` | Worker thread creation failed. |
