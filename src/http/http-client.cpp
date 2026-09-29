@@ -312,6 +312,16 @@ bool MethodForbidsBody(HttpMethod method) {
   return method == HttpMethod::Get || method == HttpMethod::Head || method == HttpMethod::Delete;
 }
 
+RequestOptions MakeRequestOptions(std::uint32_t connectTimeoutMs, std::uint32_t totalTimeoutMs,
+                                   std::uint32_t maxResponseBytes) {
+  RequestOptions options;
+  options.connectTimeoutMs = connectTimeoutMs;
+  options.totalTimeoutMs = totalTimeoutMs;
+  options.maxResponseBytes = maxResponseBytes;
+  options.skipTlsVerification = false;
+  return options;
+}
+
 HttpTransport::~HttpTransport() = default;
 
 HttpTransport& DefaultTransport() {

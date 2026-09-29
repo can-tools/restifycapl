@@ -8,16 +8,6 @@
 
 namespace {
 
-RequestOptions MakeOptions(std::uint32_t connectTimeoutMs, std::uint32_t totalTimeoutMs,
-                            std::uint32_t maxResponseBytes) {
-  RequestOptions options;
-  options.connectTimeoutMs = connectTimeoutMs;
-  options.totalTimeoutMs = totalTimeoutMs;
-  options.maxResponseBytes = maxResponseBytes;
-  options.skipTlsVerification = false;
-  return options;
-}
-
 Status DispatchNoBodyVerb(HttpClient& client, AsyncEngine& engine, HttpMethod method,
                            const char* urlText, std::uint32_t urlSize, const char* headersText,
                            std::uint32_t headersSize, std::uint32_t& requestId) {
@@ -47,7 +37,7 @@ Status DispatchNoBodyVerb(HttpClient& client, AsyncEngine& engine, HttpMethod me
   request.method = method;
   request.url = std::string(urlView);
   request.headers = headers;
-  request.options = MakeOptions(0, 0, 0);
+  request.options = MakeRequestOptions(0, 0, 0);
 
   return engine.Dispatch(client, request, requestId);
 }
@@ -88,7 +78,7 @@ Status DispatchBodyVerb(HttpClient& client, AsyncEngine& engine, HttpMethod meth
   request.url = std::string(urlView);
   request.headers = headers;
   request.body = std::string(bodyView);
-  request.options = MakeOptions(0, 0, 0);
+  request.options = MakeRequestOptions(0, 0, 0);
 
   return engine.Dispatch(client, request, requestId);
 }
@@ -183,7 +173,7 @@ Status DispatchRequestAsync(HttpClient& client, AsyncEngine& engine, const char*
   request.url = std::string(urlView);
   request.headers = headers;
   request.body = std::string(bodyView);
-  request.options = MakeOptions(connectTimeoutMs, totalTimeoutMs, maxResponseBytes);
+  request.options = MakeRequestOptions(connectTimeoutMs, totalTimeoutMs, maxResponseBytes);
 
   return engine.Dispatch(client, request, requestId);
 }

@@ -45,6 +45,9 @@ struct RequestOptions {
   bool skipTlsVerification = false;
 };
 
+RequestOptions MakeRequestOptions(std::uint32_t connectTimeoutMs, std::uint32_t totalTimeoutMs,
+                                   std::uint32_t maxResponseBytes);
+
 struct HttpRequest {
   HttpMethod method = HttpMethod::Get;
   std::string url;

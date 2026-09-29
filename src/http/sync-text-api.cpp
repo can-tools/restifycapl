@@ -38,18 +38,8 @@ std::string_view StripTrailingCr(std::string_view line) {
   return line;
 }
 
-RequestOptions MakeOptions(std::uint32_t connectTimeoutMs, std::uint32_t totalTimeoutMs,
-                            std::uint32_t maxResponseBytes) {
-  RequestOptions options;
-  options.connectTimeoutMs = connectTimeoutMs;
-  options.totalTimeoutMs = totalTimeoutMs;
-  options.maxResponseBytes = maxResponseBytes;
-  options.skipTlsVerification = false;
-  return options;
-}
-
-// D5's ordering: httpStatusCode/responseBodyLength are set before the copy
-// outcome is known, so a BufferTooSmall copy never erases them.
+// This ordering matters: httpStatusCode/responseBodyLength are set before
+// the copy outcome is known, so a BufferTooSmall copy never erases them.
 Status FinishResponse(Status result, const HttpResponse& response, char* responseBody,
                        std::uint32_t responseBodySize, std::int32_t& httpStatusCode,
                        std::uint32_t& responseBodyLength) {
@@ -84,7 +74,7 @@ Status ExecuteNoBodyVerb(HttpClient& client, HttpMethod method, const char* urlT
     return status;
   }
 
-  RequestOptions options = MakeOptions(0, 0, 0);
+  RequestOptions options = MakeRequestOptions(0, 0, 0);
   HttpResponse response;
   Status result = method == HttpMethod::Get
                        ? Get(client, std::string(urlView), headers, options, response)
@@ -120,7 +110,7 @@ Status ExecuteBodyVerb(HttpClient& client, HttpMethod method, const char* urlTex
     return status;
   }
 
-  RequestOptions options = MakeOptions(0, 0, 0);
+  RequestOptions options = MakeRequestOptions(0, 0, 0);
   HttpResponse response;
   std::string url(urlView);
   std::string body(bodyView);
@@ -237,7 +227,7 @@ Status ExecuteRequestSync(HttpClient& client, const char* methodText, std::uint3
   request.url = std::string(urlView);
   request.headers = headers;
   request.body = std::string(bodyView);
-  request.options = MakeOptions(connectTimeoutMs, totalTimeoutMs, maxResponseBytes);
+  request.options = MakeRequestOptions(connectTimeoutMs, totalTimeoutMs, maxResponseBytes);
 
   HttpResponse response;
   Status result = Request(client, request, response);
