@@ -108,6 +108,16 @@ AsyncEngine::Slot* AsyncEngine::FindPendingSlotLocked() {
   return nullptr;
 }
 
+std::uint32_t AsyncEngine::CountPendingSlotsLocked() const {
+  std::uint32_t count = 0;
+  for (const Slot& slot : slots_) {
+    if (slot.state == SlotState::Pending) {
+      ++count;
+    }
+  }
+  return count;
+}
+
 AsyncEngine::Slot* AsyncEngine::FindLiveSlotLocked(std::uint32_t requestId) {
   if (requestId == 0) {
     return nullptr;
@@ -192,9 +202,17 @@ void AsyncEngine::WorkerLoop(void* moduleReference) {
     Slot* pending = FindPendingSlotLocked();
     if (pending == nullptr) {
       ++idleWorkers_;
-      workAvailable_.wait_for(lock, workerIdleTimeout_);
+      const auto deadline = std::chrono::steady_clock::now() + workerIdleTimeout_;
+      std::uint64_t observedGeneration = wakeGeneration_;
+      for (;;) {
+        const std::cv_status waitResult = workAvailable_.wait_until(lock, deadline);
+        pending = FindPendingSlotLocked();
+        if (pending != nullptr || waitResult == std::cv_status::timeout ||
+            wakeGeneration_ != observedGeneration) {
+          break;
+        }
+      }
       --idleWorkers_;
-      pending = FindPendingSlotLocked();
       if (pending == nullptr) {
         --liveWorkers_;
         lock.unlock();
@@ -241,12 +259,21 @@ Status AsyncEngine::Dispatch(HttpClient& client, const HttpRequest& request,
   slot->request.cancelFlag = &slot->cancelFlag;
   slot->state = SlotState::Pending;
 
-  if (idleWorkers_ == 0 && !StartWorkerLocked()) {
-    FreeSlotContentsLocked(*slot);
-    slot->state = SlotState::Free;
-    return Status::AsyncStartFailed;
+  // idleWorkers_ only ever undercounts (a notified worker may not have
+  // reacquired the lock yet), so comparing it against the pending count
+  // taken fresh right here -- rather than a bare idleWorkers_ == 0 check --
+  // closes a race where two back-to-back dispatches both see the same
+  // stale idle count and both skip starting a worker, stranding one of
+  // them behind a single busy worker despite pool headroom.
+  if (CountPendingSlotsLocked() > idleWorkers_ && liveWorkers_ < kAsyncRequestSlotCount) {
+    if (!StartWorkerLocked()) {
+      FreeSlotContentsLocked(*slot);
+      slot->state = SlotState::Free;
+      return Status::AsyncStartFailed;
+    }
   }
 
+  ++wakeGeneration_;
   workAvailable_.notify_all();
   requestId = id;
   return Status::Ok;
@@ -360,6 +387,7 @@ Status AsyncEngine::DiscardAll(std::uint32_t& stillRunning) {
     }
   }
   slotChanged_.notify_all();
+  ++wakeGeneration_;
   workAvailable_.notify_all();
   return Status::Ok;
 }

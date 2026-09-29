@@ -75,6 +75,7 @@ class AsyncEngine {
 
   Slot* FindSlotForDispatchLocked();
   Slot* FindPendingSlotLocked();
+  std::uint32_t CountPendingSlotsLocked() const;
   Slot* FindLiveSlotLocked(std::uint32_t requestId);
   bool IsIdLiveLocked(std::uint32_t id) const;
   std::uint32_t MintIdLocked();
@@ -91,6 +92,11 @@ class AsyncEngine {
   std::array<Slot, kAsyncRequestSlotCount> slots_;
   std::uint32_t liveWorkers_ = 0;
   std::uint32_t idleWorkers_ = 0;
+  // Bumped under mutex_ at every workAvailable_.notify_all() call site (Dispatch,
+  // DiscardAll); lets WorkerLoop's idle wait tell a deliberate wake-with-nothing-
+  // pending (exit now, e.g. DiscardAll shrinking the pool) apart from a true
+  // OS-level spurious wakeup (keep waiting out the same deadline).
+  std::uint64_t wakeGeneration_ = 0;
   bool idSeeded_ = false;
   std::uint32_t nextId_ = 0;
 };
