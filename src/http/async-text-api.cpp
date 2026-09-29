@@ -9,7 +9,7 @@
 namespace {
 
 bool ForbidsBody(HttpMethod method) {
-  return method == HttpMethod::Get || method == HttpMethod::Delete;
+  return method == HttpMethod::Get || method == HttpMethod::Head || method == HttpMethod::Delete;
 }
 
 RequestOptions MakeOptions(std::uint32_t connectTimeoutMs, std::uint32_t totalTimeoutMs,
