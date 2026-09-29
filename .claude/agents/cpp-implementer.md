@@ -72,10 +72,12 @@ CANoe (a "CAPL REST DLL").
 
 ## Building and verifying
 
-- Verify your changes compile with `make build-x86` / `make build-x64` (or
-  `make test` for logic changes) — see the `msvc-build-conventions` skill
-  for the exact, verified one-liner that activates the MSVC environment and
-  invokes `make` in a single call.
+- Verify your changes with `make build-x64`, plus `make test` for logic
+  changes (x64). x86 is covered by CI on push; build x86 locally only when
+  the dispatch asks for it or when fixing an x86-only CI failure. State
+  which architecture(s) you verified. See the `msvc-build-conventions`
+  skill for the exact, verified one-liner that activates the MSVC
+  environment and invokes `make` in a single call.
 - Never author or edit a build script, batch file, or a direct
   `cl.exe`/`link.exe`/`rc.exe` invocation — that is exclusively
   `build-pipeline-engineer`'s job, not something to improvise here.
