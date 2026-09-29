@@ -237,7 +237,7 @@ This surfaced a real latent bug that could not manifest until a real `main()`-pr
 
 **`readme-writer` — a new skill, layered under `project-docs`, not a replacement for it.** `.claude/skills/readme-writer/SKILL.md` carries generic GitHub README authoring rules (structure, formatting, a verification workflow) that apply to any project, not this one specifically. `project-docs`'s own `## README.md` section states the relationship explicitly: `readme-writer` governs form and method, `project-docs` governs project-specific content and timing, and `project-docs` wins on conflict. This mirrors §6b's own rule for comment discipline — extend an existing skill's scope rather than create a second skill answering the same kind of question — applied here to a form/content split instead of a rule/enforcement split.
 
-**`README.md` received a full rewrite this session**, drafted by `docs-writer`, reviewed clean by `code-reviewer` (two accepted deviations, not defects: the one-line description is 149 characters because it must match the GitHub "About" field verbatim, and the file runs to about 217 lines against the skill's own ~120–150 target because nothing mandatory was cut to hit that number), and its Roadmap section added only after a separate, explicit user approval — per `project-docs`'s rule that planned-but-unbuilt work needs its own approval gate, distinct from the rest of the draft. The switch-table content that used to live inline moved to `docs/development-environment.md`; an empty `LICENSE` placeholder was added, with the license choice stated as deliberately deferred. This document does not restate the README's content — see `README.md` itself — only that it exists, why, and who maintains it from here.
+**`README.md` received a full rewrite this session**, drafted by `docs-writer`, reviewed clean by `code-reviewer` (two accepted deviations, not defects: the one-line description is 148 characters because it must match the GitHub "About" field verbatim, and the file runs to about 217 lines against the skill's own ~120–150 target because nothing mandatory was cut to hit that number), and its Roadmap section added only after a separate, explicit user approval — per `project-docs`'s rule that planned-but-unbuilt work needs its own approval gate, distinct from the rest of the draft. The switch-table content that used to live inline moved to `docs/development-environment.md`; an empty `LICENSE` placeholder was added, with the license choice stated as deliberately deferred. This document does not restate the README's content — see `README.md` itself — only that it exists, why, and who maintains it from here.
 
 **README impact of §2.** The Development setup section must state plainly that provisioning is **required**, not a convenience: a fresh clone cannot build or test until `scripts/setup-dev-env.ps1` has run, because no compiled dependency is committed.
 
@@ -1002,7 +1002,7 @@ Raised during Stage 9 (OQ9). The governing principle, which is broader than any 
 | CPP-17 | 6b | Trim `exports.cpp` comments (absorbs BPE-19's half) | **DONE — human-gated; export-table rows byte-identical** |
 | CPP-18 | 8 | `src/core/status.h` — shared `Status` enum; absorbs the shipped `0`/`-1`/`-2`/`-3` codes | **DONE — `0a548be`** |
 
-### `test-engineer` — 18 tasks
+### `test-engineer` — 17 tasks
 
 | ID | Stage | Task | Status |
 |---|---|---|---|
@@ -1024,7 +1024,7 @@ Raised during Stage 9 (OQ9). The governing principle, which is broader than any 
 | TEST-10 | 16 | Struct mapping tests (conditional) | |
 | TEST-11 | 17 | Request-builder tests (conditional) | |
 
-### `code-reviewer` — 23 tasks
+### `code-reviewer` — 22 tasks
 
 | ID | Stage | Focus | Status |
 |---|---|---|---|
