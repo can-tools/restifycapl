@@ -18,15 +18,10 @@
 
 namespace {
 
-// DefaultWorkerLifetime's real implementation starts threads with the raw
-// Win32 CreateThread API, which is documented as unsafe to combine with
-// CRT-using thread bodies under the statically linked (/MT) runtime this
-// project requires -- confirmed here by a reproducible heap-corruption
-// crash in the test immediately following any test that dispatched through
-// it. This fake uses std::thread (CRT-safe start/join) instead; its
-// ExitCurrentThread deliberately returns rather than terminating the
-// thread, matching async-operations.cpp's own "reached only ... under a
-// test fake" comment on WorkerThreadEntry's fallthrough return.
+// AsyncEngine's destructor never joins/waits for its workers -- correct for
+// the production singleton, which outlives every worker, but not for a
+// short-lived per-test instance. This fake gives the fixture an explicit
+// JoinAll() to call before teardown instead.
 class JoiningWorkerLifetime : public WorkerLifetime {
  public:
   void* AcquireModuleReference() override { return this; }
@@ -68,14 +63,28 @@ class AsyncEngineTest : public ::testing::Test {
   HttpClient client{transport};
   JoiningWorkerLifetime lifetime;
   AsyncEngine engine{lifetime, DefaultIdSeedSource(), std::chrono::milliseconds(50)};
+  std::vector<std::string> gatedUrls_;
 
-  void TearDown() override { lifetime.JoinAll(); }
+  // A failed ASSERT_* can leave a test's gate open (entered but never
+  // Release()'d); without this, JoinAll() below would hang the whole binary
+  // instead of just failing that one test.
+  void TearDown() override {
+    for (const auto& url : gatedUrls_) {
+      transport.Release(url, Status::RequestCancelled, HttpResponse{});
+    }
+    lifetime.JoinAll();
+  }
 
   HttpRequest MakeRequest(const std::string& url) {
     HttpRequest request;
     request.method = HttpMethod::Get;
     request.url = url;
     return request;
+  }
+
+  void ExpectGateTracked(const std::string& url) {
+    gatedUrls_.push_back(url);
+    transport.ExpectGate(url);
   }
 
   std::uint32_t DispatchOrDie(const std::string& url) {
@@ -100,7 +109,7 @@ class AsyncEngineTest : public ::testing::Test {
 
 TEST_F(AsyncEngineTest, ReadBeforeCompletionReturnsRequestNotComplete) {
   const std::string url = "http://example.invalid/case6";
-  transport.ExpectGate(url);
+  ExpectGateTracked(url);
 
   const std::uint32_t requestId = DispatchOrDie(url);
   ASSERT_TRUE(transport.WaitForGateEntered(url));
@@ -258,7 +267,7 @@ TEST_F(AsyncEngineTest, TransportTimeoutSurfacesInRequestStatusWithZeroHttpStatu
 
 TEST_F(AsyncEngineTest, DiscardAllFreesCompleteAndConsumedSlotsAndReportsStillRunning) {
   const std::string runningUrl = "http://example.invalid/case11-running";
-  transport.ExpectGate(runningUrl);
+  ExpectGateTracked(runningUrl);
   const std::uint32_t runningId = DispatchOrDie(runningUrl);
   ASSERT_TRUE(transport.WaitForGateEntered(runningUrl));
 
