@@ -1024,6 +1024,132 @@ TEST_F(AsyncEngineTest, IdleWorkerExitsAfterInjectedTimeoutAndNextDispatchRecrea
   countingLifetime.JoinAll();
 }
 
+// ---------------------------------------------------------------------------
+// Dispatch starts a second worker as soon as the one existing worker is
+// genuinely busy (Running), not only once idleWorkers_ has already dropped
+// to zero through some other means -- a request must not wait behind a
+// single worker that is still occupied with an earlier one while pool
+// headroom remains.
+// ---------------------------------------------------------------------------
+
+TEST_F(AsyncEngineTest,
+       DispatchStartsAdditionalWorkerWhenExistingWorkerIsBusyNotJustWhenNoneAreIdle) {
+  CountingWorkerLifetime countingLifetime;
+  AsyncEngine busyEngine(countingLifetime, DefaultIdSeedSource(), std::chrono::milliseconds(5000));
+
+  // Await and the worker's own idle-wait entry serialize on the same mutex,
+  // so by the time Await returns Ok here the one worker it woke for is
+  // already sitting idle (idleWorkers_ incremented, blocked in its wait) --
+  // no extra synchronization is needed to reach a known idle starting state.
+  const std::string warmupUrl = "http://example.invalid/serialization-warmup";
+  transport.SetResult(Status::Ok, HttpResponse{});
+  std::uint32_t warmupId = 0;
+  ASSERT_EQ(busyEngine.Dispatch(client, MakeRequest(warmupUrl), warmupId), Status::Ok);
+  ASSERT_EQ(busyEngine.Await(warmupId, 5000), Status::Ok);
+  ASSERT_EQ(busyEngine.Discard(warmupId), Status::Ok);
+  ASSERT_EQ(countingLifetime.StartCount(), 1);
+
+  const std::string urlA = "http://example.invalid/serialization-a";
+  const std::string urlB = "http://example.invalid/serialization-b";
+  ExpectGateTracked(urlA);
+  ExpectGateTracked(urlB);
+
+  std::uint32_t idA = 0;
+  ASSERT_EQ(busyEngine.Dispatch(client, MakeRequest(urlA), idA), Status::Ok);
+  ASSERT_TRUE(transport.WaitForGateEntered(urlA));
+  EXPECT_EQ(countingLifetime.StartCount(), 1)
+      << "the already-idle worker should pick up A directly, no new worker needed yet";
+
+  std::uint32_t idB = 0;
+  ASSERT_EQ(busyEngine.Dispatch(client, MakeRequest(urlB), idB), Status::Ok);
+  ASSERT_TRUE(transport.WaitForGateEntered(urlB))
+      << "B must reach Running via a second worker instead of waiting on A's busy one";
+  EXPECT_EQ(countingLifetime.StartCount(), 2);
+
+  HttpResponse responseA;
+  responseA.statusCode = 201;
+  responseA.body = "body-a";
+  HttpResponse responseB;
+  responseB.statusCode = 202;
+  responseB.body = "body-b";
+
+  // Released out of dispatch order, same as OutOfOrderCompletionsReachTheCorrectRequestId.
+  transport.Release(urlB, Status::Ok, responseB);
+  ASSERT_EQ(busyEngine.Await(idB, 5000), Status::Ok);
+  transport.Release(urlA, Status::Ok, responseA);
+  ASSERT_EQ(busyEngine.Await(idA, 5000), Status::Ok);
+
+  char buffer[64];
+  std::int32_t requestStatus = -1;
+  std::int32_t httpStatusCode = -1;
+  std::uint32_t responseBodyLength = 0;
+  ASSERT_EQ(busyEngine.Read(idA, buffer, sizeof(buffer), requestStatus, httpStatusCode,
+                             responseBodyLength),
+            Status::Ok);
+  EXPECT_EQ(httpStatusCode, 201);
+  EXPECT_STREQ(buffer, "body-a");
+
+  ASSERT_EQ(busyEngine.Read(idB, buffer, sizeof(buffer), requestStatus, httpStatusCode,
+                             responseBodyLength),
+            Status::Ok);
+  EXPECT_EQ(httpStatusCode, 202);
+  EXPECT_STREQ(buffer, "body-b");
+
+  // DiscardAll wakes the now-idle workers immediately (see
+  // DiscardAllWakesIdleWorkerToExitPromptly) so JoinAll below does not have
+  // to wait out busyEngine's 5-second idle timeout.
+  std::uint32_t stillRunning = 999;
+  EXPECT_EQ(busyEngine.DiscardAll(stillRunning), Status::Ok);
+  countingLifetime.JoinAll();
+}
+
+// ---------------------------------------------------------------------------
+// A burst of dispatches against a cold engine starts exactly as many workers
+// as there are concurrently-blocked requests, up to kAsyncRequestSlotCount,
+// and every one of them reaches Running without needing to wait out any
+// idle timeout -- none is left stranded behind a single worker no matter how
+// dispatch calls and worker-thread scheduling happen to interleave.
+// ---------------------------------------------------------------------------
+
+TEST_F(AsyncEngineTest, BurstOfDispatchesStartsWorkersUpToCapAndAllReachRunningPromptly) {
+  CountingWorkerLifetime countingLifetime;
+  AsyncEngine burstEngine(countingLifetime, DefaultIdSeedSource(), std::chrono::milliseconds(5000));
+
+  std::vector<std::string> urls;
+  std::vector<std::uint32_t> ids;
+  for (std::size_t i = 0; i < kAsyncRequestSlotCount; ++i) {
+    urls.push_back("http://example.invalid/burst-" + std::to_string(i));
+    ExpectGateTracked(urls.back());
+  }
+
+  for (const auto& url : urls) {
+    std::uint32_t requestId = 0;
+    ASSERT_EQ(burstEngine.Dispatch(client, MakeRequest(url), requestId), Status::Ok);
+    ids.push_back(requestId);
+  }
+
+  for (const auto& url : urls) {
+    EXPECT_TRUE(transport.WaitForGateEntered(url))
+        << "request for '" << url << "' never reached Running";
+  }
+
+  // Every one of the kAsyncRequestSlotCount requests is blocked on its own
+  // gate at this point, so none can have been serviced by a worker looping
+  // back to pick up a second one -- exactly this many workers must exist,
+  // which is also the cap itself (the slot table and the worker cap share
+  // the same constant).
+  EXPECT_EQ(countingLifetime.StartCount(), static_cast<int>(kAsyncRequestSlotCount));
+
+  for (std::size_t i = 0; i < urls.size(); ++i) {
+    transport.Release(urls[i], Status::Ok, HttpResponse{});
+    ASSERT_EQ(burstEngine.Await(ids[i], 5000), Status::Ok);
+  }
+
+  std::uint32_t stillRunning = 999;
+  EXPECT_EQ(burstEngine.DiscardAll(stillRunning), Status::Ok);
+  countingLifetime.JoinAll();
+}
+
 // WorkerLoop decrements idleWorkers_ and commits to exiting under the same
 // lock Dispatch's idle check uses, so Dispatch only ever sees a worker still
 // idle and reusable, or already gone -- never one idle-counted mid-exit.
