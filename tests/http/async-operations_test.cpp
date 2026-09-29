@@ -6,6 +6,7 @@
 
 #include <chrono>
 #include <cstring>
+#include <future>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -291,7 +292,7 @@ TEST_F(AsyncEngineTest, DispatchBeyondSlotCountReturnsNoFreeRequestSlot) {
 }
 
 // ---------------------------------------------------------------------------
-// Case 11: DiscardAll frees every non-Running slot immediately and reports
+// Case 10: DiscardAll frees every non-Running slot immediately and reports
 // the Running count (now Abandoned, cancelled but not yet actually stopped)
 // in stillRunning.
 // ---------------------------------------------------------------------------
@@ -487,4 +488,262 @@ TEST_F(AsyncEngineTest, ReadWithUndersizedBufferIsRetryableWithLargerBuffer) {
   EXPECT_EQ(engine.Read(requestId, bigBuffer, sizeof(bigBuffer), requestStatus, httpStatusCode,
                          responseBodyLength),
             Status::UnknownRequestId);
+}
+
+// ---------------------------------------------------------------------------
+// Case 9: Pending is not exercised here -- the instant a slot is marked
+// Pending, an idle or freshly-started worker claims it before any test hook
+// can observe or gate that state, so only Running and Complete are covered.
+// ---------------------------------------------------------------------------
+
+TEST_F(AsyncEngineTest, DiscardOnRunningSlotDropsResultAndEventuallyFreesSlot) {
+  std::vector<std::string> otherUrls;
+  for (std::size_t i = 0; i < kAsyncRequestSlotCount - 1; ++i) {
+    otherUrls.push_back("http://example.invalid/case9-running-other-" + std::to_string(i));
+  }
+  std::vector<std::uint32_t> otherIds;
+  for (const auto& url : otherUrls) {
+    ExpectGateTracked(url);
+    otherIds.push_back(DispatchOrDie(url));
+  }
+  for (const auto& url : otherUrls) {
+    ASSERT_TRUE(transport.WaitForGateEntered(url));
+  }
+
+  const std::string discardUrl = "http://example.invalid/case9-running-discard";
+  ExpectGateTracked(discardUrl);
+  const std::uint32_t discardId = DispatchOrDie(discardUrl);
+  ASSERT_TRUE(transport.WaitForGateEntered(discardUrl));
+
+  EXPECT_EQ(engine.Discard(discardId), Status::Ok);
+
+  std::int32_t pollState = -1;
+  EXPECT_EQ(engine.Poll(discardId, pollState), Status::UnknownRequestId);
+  char buffer[64];
+  std::int32_t requestStatus = 0;
+  std::int32_t httpStatusCode = 0;
+  std::uint32_t responseBodyLength = 0;
+  EXPECT_EQ(engine.Read(discardId, buffer, sizeof(buffer), requestStatus, httpStatusCode,
+                         responseBodyLength),
+            Status::UnknownRequestId);
+
+  // The cancelled worker frees its slot asynchronously (once FakeTransport's
+  // own poll notices the cancel flag) -- bounded retry instead of a fixed
+  // sleep, matching FakeTransport's own gate-wait style.
+  const std::string reclaimUrl = "http://example.invalid/case9-running-reclaimed";
+  ExpectGateTracked(reclaimUrl);
+  std::uint32_t reclaimedId = 0;
+  bool reclaimed = false;
+  for (int attempt = 0; attempt < 200 && !reclaimed; ++attempt) {
+    const Status dispatchStatus = engine.Dispatch(client, MakeRequest(reclaimUrl), reclaimedId);
+    if (dispatchStatus == Status::Ok) {
+      reclaimed = true;
+      break;
+    }
+    ASSERT_EQ(dispatchStatus, Status::NoFreeRequestSlot);
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  ASSERT_TRUE(reclaimed) << "discarded Running slot never became reusable";
+  ASSERT_TRUE(transport.WaitForGateEntered(reclaimUrl));
+
+  for (std::size_t i = 0; i < otherUrls.size(); ++i) {
+    transport.Release(otherUrls[i], Status::Ok, HttpResponse{});
+    AwaitOrDie(otherIds[i]);
+  }
+  transport.Release(reclaimUrl, Status::Ok, HttpResponse{});
+  AwaitOrDie(reclaimedId);
+}
+
+// ---------------------------------------------------------------------------
+// Case 9 (Complete): a Complete-but-unread slot discards the same way a
+// consumed Read does (case 3) -- Discard alone makes it reusable, no worker
+// involvement needed.
+// ---------------------------------------------------------------------------
+
+TEST_F(AsyncEngineTest, DiscardOnCompleteSlotDropsResultAndFreesSlotImmediately) {
+  const std::string url = "http://example.invalid/case9-complete";
+  HttpResponse scripted;
+  scripted.statusCode = 200;
+  scripted.body = "unread-result";
+  transport.SetResult(Status::Ok, scripted);
+
+  const std::uint32_t requestId = DispatchOrDie(url);
+  AwaitOrDie(requestId);
+
+  std::int32_t pollState = -1;
+  ASSERT_EQ(engine.Poll(requestId, pollState), Status::Ok);
+  ASSERT_EQ(pollState, 2);
+
+  EXPECT_EQ(engine.Discard(requestId), Status::Ok);
+
+  EXPECT_EQ(engine.Poll(requestId, pollState), Status::UnknownRequestId);
+  char buffer[64];
+  std::int32_t requestStatus = 0;
+  std::int32_t httpStatusCode = 0;
+  std::uint32_t responseBodyLength = 0;
+  EXPECT_EQ(engine.Read(requestId, buffer, sizeof(buffer), requestStatus, httpStatusCode,
+                         responseBodyLength),
+            Status::UnknownRequestId);
+
+  const std::string reclaimUrl = "http://example.invalid/case9-complete-reclaimed";
+  ExpectGateTracked(reclaimUrl);
+  const std::uint32_t reclaimedId = DispatchOrDie(reclaimUrl);
+  EXPECT_NE(reclaimedId, 0u);
+  ASSERT_TRUE(transport.WaitForGateEntered(reclaimUrl));
+
+  transport.Release(reclaimUrl, Status::Ok, HttpResponse{});
+  AwaitOrDie(reclaimedId);
+}
+
+// ---------------------------------------------------------------------------
+// Case 10: DiscardAll also wakes a worker that has gone idle -- it rechecks
+// for pending work right away and exits instead of sitting out the rest of
+// its idle timeout. A long idle timeout here is what makes the difference
+// between "woken" and "just happened to time out" observable.
+// ---------------------------------------------------------------------------
+
+TEST_F(AsyncEngineTest, DiscardAllWakesIdleWorkerToExitPromptly) {
+  AsyncEngine longIdleEngine(lifetime, DefaultIdSeedSource(), std::chrono::milliseconds(2000));
+
+  const std::string url = "http://example.invalid/case10-idle-wake";
+  ExpectGateTracked(url);
+  std::uint32_t requestId = 0;
+  ASSERT_EQ(longIdleEngine.Dispatch(client, MakeRequest(url), requestId), Status::Ok);
+  ASSERT_TRUE(transport.WaitForGateEntered(url));
+
+  transport.Release(url, Status::Ok, HttpResponse{});
+  // Await cannot return until the worker has moved past Complete and back to
+  // its own idle wait -- both sides serialize on the same engine mutex.
+  ASSERT_EQ(longIdleEngine.Await(requestId, 5000), Status::Ok);
+
+  const auto start = std::chrono::steady_clock::now();
+  std::uint32_t stillRunning = 999;
+  EXPECT_EQ(longIdleEngine.DiscardAll(stillRunning), Status::Ok);
+  EXPECT_EQ(stillRunning, 0u);
+
+  lifetime.JoinAll();
+  const auto elapsed = std::chrono::steady_clock::now() - start;
+  EXPECT_LT(elapsed, std::chrono::milliseconds(1000))
+      << "worker exited only after its idle timeout instead of being woken by DiscardAll";
+}
+
+// ---------------------------------------------------------------------------
+// Case 12 (0 on completion): Await unblocks with Ok once the request
+// transitions to Complete.
+// ---------------------------------------------------------------------------
+
+TEST_F(AsyncEngineTest, AwaitReturnsOkWhenRequestCompletesBeforeDeadline) {
+  const std::string url = "http://example.invalid/case12-ok";
+  ExpectGateTracked(url);
+  const std::uint32_t requestId = DispatchOrDie(url);
+  ASSERT_TRUE(transport.WaitForGateEntered(url));
+
+  transport.Release(url, Status::Ok, HttpResponse{});
+  EXPECT_EQ(engine.Await(requestId, 5000), Status::Ok);
+
+  EXPECT_EQ(engine.Discard(requestId), Status::Ok);
+}
+
+// ---------------------------------------------------------------------------
+// Case 12 (-28 at the deadline): Await gives up and reports WaitTimeout once
+// its bound elapses while the request is still Running.
+// ---------------------------------------------------------------------------
+
+TEST_F(AsyncEngineTest, AwaitReturnsWaitTimeoutAtDeadlineWhileStillRunning) {
+  const std::string url = "http://example.invalid/case12-timeout";
+  ExpectGateTracked(url);
+  const std::uint32_t requestId = DispatchOrDie(url);
+  ASSERT_TRUE(transport.WaitForGateEntered(url));
+
+  EXPECT_EQ(engine.Await(requestId, 50), Status::WaitTimeout);
+}
+
+// ---------------------------------------------------------------------------
+// Case 12 (-27 promptly on discard): a concurrent Discard ends a blocked
+// Await well before its own deadline -- discard's wake-up, not the timeout,
+// is what ends the wait.
+// ---------------------------------------------------------------------------
+
+TEST_F(AsyncEngineTest, AwaitReturnsUnknownRequestIdPromptlyOnDiscard) {
+  const std::string url = "http://example.invalid/case12-discard";
+  ExpectGateTracked(url);
+  const std::uint32_t requestId = DispatchOrDie(url);
+  ASSERT_TRUE(transport.WaitForGateEntered(url));
+
+  std::future<Status> awaitResult =
+      std::async(std::launch::async, [&] { return engine.Await(requestId, 5000); });
+  EXPECT_EQ(engine.Discard(requestId), Status::Ok);
+
+  ASSERT_EQ(awaitResult.wait_for(std::chrono::milliseconds(500)), std::future_status::ready);
+  EXPECT_EQ(awaitResult.get(), Status::UnknownRequestId);
+}
+
+// ---------------------------------------------------------------------------
+// Case 12 (-27 promptly on discard-all): same as above, but the request is
+// swept up by DiscardAll instead of a single Discard.
+// ---------------------------------------------------------------------------
+
+TEST_F(AsyncEngineTest, AwaitReturnsUnknownRequestIdPromptlyOnDiscardAll) {
+  const std::string url = "http://example.invalid/case12-discardall";
+  ExpectGateTracked(url);
+  const std::uint32_t requestId = DispatchOrDie(url);
+  ASSERT_TRUE(transport.WaitForGateEntered(url));
+
+  std::future<Status> awaitResult =
+      std::async(std::launch::async, [&] { return engine.Await(requestId, 5000); });
+  std::uint32_t stillRunning = 0;
+  EXPECT_EQ(engine.DiscardAll(stillRunning), Status::Ok);
+  EXPECT_EQ(stillRunning, 1u);
+
+  ASSERT_EQ(awaitResult.wait_for(std::chrono::milliseconds(500)), std::future_status::ready);
+  EXPECT_EQ(awaitResult.get(), Status::UnknownRequestId);
+
+  transport.Release(url, Status::Ok, HttpResponse{});
+}
+
+// ---------------------------------------------------------------------------
+// Case 12 (-27 after reuse under a new id): once a slot has been reclaimed by
+// a different request, Await on the stale id must not be satisfied by the
+// new occupant.
+// ---------------------------------------------------------------------------
+
+TEST_F(AsyncEngineTest, AwaitReturnsUnknownRequestIdAfterSlotReusedUnderNewId) {
+  transport.SetResult(Status::Ok, HttpResponse{});
+  const std::uint32_t staleId = DispatchOrDie("http://example.invalid/case12-stale");
+  AwaitOrDie(staleId);
+  EXPECT_EQ(engine.Discard(staleId), Status::Ok);
+
+  const std::string reclaimUrl = "http://example.invalid/case12-reclaimed";
+  ExpectGateTracked(reclaimUrl);
+  const std::uint32_t newId = DispatchOrDie(reclaimUrl);
+  ASSERT_TRUE(transport.WaitForGateEntered(reclaimUrl));
+  ASSERT_NE(newId, staleId);
+
+  EXPECT_EQ(engine.Await(staleId, 2000), Status::UnknownRequestId);
+
+  transport.Release(reclaimUrl, Status::Ok, HttpResponse{});
+  AwaitOrDie(newId);
+}
+
+// ---------------------------------------------------------------------------
+// Case 12 (waitTimeoutMs = 0 follows the request's own total timeout): 0
+// means "use the request's totalTimeoutMs as the bound", not "don't wait".
+// ---------------------------------------------------------------------------
+
+TEST_F(AsyncEngineTest, AwaitWithZeroTimeoutUsesRequestsOwnTotalTimeout) {
+  const std::string url = "http://example.invalid/case12-zero-timeout";
+  ExpectGateTracked(url);
+
+  HttpRequest request = MakeRequest(url);
+  request.options.totalTimeoutMs = 50;
+  std::uint32_t requestId = 0;
+  ASSERT_EQ(engine.Dispatch(client, request, requestId), Status::Ok);
+  ASSERT_TRUE(transport.WaitForGateEntered(url));
+
+  const auto start = std::chrono::steady_clock::now();
+  EXPECT_EQ(engine.Await(requestId, 0), Status::WaitTimeout);
+  const auto elapsed = std::chrono::steady_clock::now() - start;
+
+  EXPECT_GE(elapsed, std::chrono::milliseconds(20));
+  EXPECT_LT(elapsed, std::chrono::milliseconds(5000));
 }
