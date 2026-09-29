@@ -308,6 +308,10 @@ bool ShouldCancelTransfer(const std::atomic<bool>* cancelFlag) {
   return cancelFlag != nullptr && cancelFlag->load();
 }
 
+bool MethodForbidsBody(HttpMethod method) {
+  return method == HttpMethod::Get || method == HttpMethod::Head || method == HttpMethod::Delete;
+}
+
 HttpTransport::~HttpTransport() = default;
 
 HttpTransport& DefaultTransport() {

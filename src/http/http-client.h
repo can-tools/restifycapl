@@ -16,6 +16,8 @@
 
 enum class HttpMethod { Get, Post, Put, Patch, Delete, Head };
 
+bool MethodForbidsBody(HttpMethod method);
+
 struct HttpHeader {
   std::string name;
   std::string value;

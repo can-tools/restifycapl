@@ -8,10 +8,6 @@
 
 namespace {
 
-bool ForbidsBody(HttpMethod method) {
-  return method == HttpMethod::Get || method == HttpMethod::Head || method == HttpMethod::Delete;
-}
-
 RequestOptions MakeOptions(std::uint32_t connectTimeoutMs, std::uint32_t totalTimeoutMs,
                             std::uint32_t maxResponseBytes) {
   RequestOptions options;
@@ -178,7 +174,7 @@ Status DispatchRequestAsync(HttpClient& client, AsyncEngine& engine, const char*
   if (urlView.empty()) {
     return Status::InvalidArgument;
   }
-  if (ForbidsBody(method) && !bodyView.empty()) {
+  if (MethodForbidsBody(method) && !bodyView.empty()) {
     return Status::InvalidArgument;
   }
 

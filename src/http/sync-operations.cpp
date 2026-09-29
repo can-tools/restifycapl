@@ -2,10 +2,6 @@
 
 namespace {
 
-bool ForbidsBody(HttpMethod method) {
-  return method == HttpMethod::Get || method == HttpMethod::Head || method == HttpMethod::Delete;
-}
-
 Status BuildAndSend(HttpClient& client, HttpMethod method, const std::string& url,
                      const std::vector<HttpHeader>& headers, const std::string& body,
                      const RequestOptions& options, HttpResponse& response) {
@@ -25,7 +21,7 @@ Status BuildAndSend(HttpClient& client, HttpMethod method, const std::string& ur
 }  // namespace
 
 Status Request(HttpClient& client, const HttpRequest& request, HttpResponse& response) {
-  if (ForbidsBody(request.method) && !request.body.empty()) {
+  if (MethodForbidsBody(request.method) && !request.body.empty()) {
     return Status::InvalidArgument;
   }
   return client.Perform(request, response);
