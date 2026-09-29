@@ -4,6 +4,7 @@
 
 #include "http/async-operations.h"
 
+#include <atomic>
 #include <chrono>
 #include <cstring>
 #include <future>
@@ -56,6 +57,16 @@ class JoiningWorkerLifetime : public WorkerLifetime {
  private:
   std::mutex mutex_;
   std::vector<std::thread> threads_;
+};
+
+class FixedIdSeedSource : public IdSeedSource {
+ public:
+  explicit FixedIdSeedSource(std::uint32_t seed) : seed_(seed) {}
+
+  std::uint32_t NextSeed() override { return seed_; }
+
+ private:
+  std::uint32_t seed_;
 };
 
 class AsyncEngineTest : public ::testing::Test {
@@ -775,4 +786,84 @@ TEST_F(AsyncEngineTest, PollTransitionsFromStateOneToStateTwoToUnknownRequestId)
 
   pollState = -1;
   EXPECT_EQ(engine.Poll(requestId, pollState), Status::UnknownRequestId);
+}
+
+TEST_F(AsyncEngineTest, IdSeedSourceValueBecomesTheFirstMintedRequestId) {
+  constexpr std::uint32_t seed = 42;
+  FixedIdSeedSource seedSource(seed);
+  AsyncEngine seededEngine(lifetime, seedSource, std::chrono::milliseconds(50));
+  transport.SetResult(Status::Ok, HttpResponse{});
+
+  std::uint32_t idA = 0;
+  ASSERT_EQ(seededEngine.Dispatch(client, MakeRequest("http://example.invalid/case13-seed-a"), idA),
+            Status::Ok);
+  ASSERT_EQ(seededEngine.Await(idA, 5000), Status::Ok);
+  EXPECT_EQ(idA, seed);
+
+  std::uint32_t idB = 0;
+  ASSERT_EQ(seededEngine.Dispatch(client, MakeRequest("http://example.invalid/case13-seed-b"), idB),
+            Status::Ok);
+  ASSERT_EQ(seededEngine.Await(idB, 5000), Status::Ok);
+  EXPECT_EQ(idB, seed + 1);
+
+  lifetime.JoinAll();
+}
+
+TEST_F(AsyncEngineTest, MintedIdsWrapAroundSkippingZeroAndStayUniqueAcrossTheWrap) {
+  // Chosen so the slot count's worth of dispatches crosses the uint32_t
+  // wraparound boundary partway through, without needing a full lap.
+  constexpr std::uint32_t seed = 0xFFFFFFFDu;
+  FixedIdSeedSource seedSource(seed);
+  AsyncEngine seededEngine(lifetime, seedSource, std::chrono::milliseconds(50));
+
+  std::vector<std::string> urls;
+  std::vector<std::uint32_t> ids;
+  for (std::size_t i = 0; i < kAsyncRequestSlotCount; ++i) {
+    const std::string url = "http://example.invalid/case13-wrap-" + std::to_string(i);
+    urls.push_back(url);
+    ExpectGateTracked(url);
+
+    std::uint32_t requestId = 0;
+    ASSERT_EQ(seededEngine.Dispatch(client, MakeRequest(url), requestId), Status::Ok);
+    ASSERT_TRUE(transport.WaitForGateEntered(url));
+    ids.push_back(requestId);
+  }
+
+  std::uint32_t expected = seed;
+  for (const std::uint32_t id : ids) {
+    if (expected == 0) {
+      ++expected;
+    }
+    EXPECT_NE(id, 0u);
+    EXPECT_EQ(id, expected);
+    ++expected;
+  }
+
+  for (std::size_t i = 0; i < ids.size(); ++i) {
+    for (std::size_t j = i + 1; j < ids.size(); ++j) {
+      EXPECT_NE(ids[i], ids[j]);
+    }
+  }
+
+  for (std::size_t i = 0; i < urls.size(); ++i) {
+    transport.Release(urls[i], Status::Ok, HttpResponse{});
+    ASSERT_EQ(seededEngine.Await(ids[i], 5000), Status::Ok);
+  }
+
+  lifetime.JoinAll();
+}
+
+TEST(ShouldCancelTransferTest, NullFlagNeverCancels) {
+  EXPECT_FALSE(ShouldCancelTransfer(nullptr));
+}
+
+TEST(ShouldCancelTransferTest, ReflectsFlagsCurrentValue) {
+  std::atomic<bool> flag{false};
+  EXPECT_FALSE(ShouldCancelTransfer(&flag));
+
+  flag.store(true);
+  EXPECT_TRUE(ShouldCancelTransfer(&flag));
+
+  flag.store(false);
+  EXPECT_FALSE(ShouldCancelTransfer(&flag));
 }
