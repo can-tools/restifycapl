@@ -747,3 +747,32 @@ TEST_F(AsyncEngineTest, AwaitWithZeroTimeoutUsesRequestsOwnTotalTimeout) {
   EXPECT_GE(elapsed, std::chrono::milliseconds(20));
   EXPECT_LT(elapsed, std::chrono::milliseconds(5000));
 }
+
+TEST_F(AsyncEngineTest, PollTransitionsFromStateOneToStateTwoToUnknownRequestId) {
+  const std::string url = "http://example.invalid/poll-state-transitions";
+  ExpectGateTracked(url);
+  const std::uint32_t requestId = DispatchOrDie(url);
+  ASSERT_TRUE(transport.WaitForGateEntered(url));
+
+  std::int32_t pollState = -1;
+  EXPECT_EQ(engine.Poll(requestId, pollState), Status::Ok);
+  EXPECT_EQ(pollState, 1);
+
+  transport.Release(url, Status::Ok, HttpResponse{});
+  AwaitOrDie(requestId);
+
+  pollState = -1;
+  EXPECT_EQ(engine.Poll(requestId, pollState), Status::Ok);
+  EXPECT_EQ(pollState, 2);
+
+  char buffer[64];
+  std::int32_t requestStatus = 0;
+  std::int32_t httpStatusCode = 0;
+  std::uint32_t responseBodyLength = 0;
+  ASSERT_EQ(engine.Read(requestId, buffer, sizeof(buffer), requestStatus, httpStatusCode,
+                         responseBodyLength),
+            Status::Ok);
+
+  pollState = -1;
+  EXPECT_EQ(engine.Poll(requestId, pollState), Status::UnknownRequestId);
+}
