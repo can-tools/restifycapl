@@ -1024,10 +1024,9 @@ TEST_F(AsyncEngineTest, IdleWorkerExitsAfterInjectedTimeoutAndNextDispatchRecrea
   countingLifetime.JoinAll();
 }
 
-// No seam controls the exact overlap between the idle-exit decision and a
-// concurrent Dispatch (workerIdleTimeout_ has no injectable clock or gate),
-// so that specific race window can't be hit deterministically without a
-// sleep-based guess; left untested rather than risk a flaky assertion.
+// WorkerLoop decrements idleWorkers_ and commits to exiting under the same
+// lock Dispatch's idle check uses, so Dispatch only ever sees a worker still
+// idle and reusable, or already gone -- never one idle-counted mid-exit.
 
 TEST(ShouldCancelTransferTest, NullFlagNeverCancels) {
   EXPECT_FALSE(ShouldCancelTransfer(nullptr));
