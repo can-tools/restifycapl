@@ -176,3 +176,243 @@ TEST_F(AsyncTextApiTest, DispatchGetAsyncMalformedHeaderBlockIsRejectedBeforeDis
   EXPECT_EQ(requestId, 0u);
   EXPECT_EQ(transport.CallCount(), 0);
 }
+
+// ---------------------------------------------------------------------------
+// DispatchDeleteAsync -- shares DispatchNoBodyVerb with DispatchGetAsync
+// above, so coverage here is limited to method mapping plus one rejection
+// path rather than repeating every shared bound.
+// ---------------------------------------------------------------------------
+
+TEST_F(AsyncTextApiTest, DispatchDeleteAsyncValidRequestMapsMethodAndReturnsOk) {
+  transport.SetResult(Status::Ok, HttpResponse{});
+
+  TextParam url("http://example.invalid/widgets/1");
+  TextParam headers("");
+  std::uint32_t requestId = kIdSentinel;
+
+  Status result = DispatchDeleteAsync(client, engine, url.Data(), url.Size(), headers.Data(),
+                                       headers.Size(), requestId);
+
+  EXPECT_EQ(result, Status::Ok);
+  EXPECT_NE(requestId, 0u);
+
+  AwaitOrDie(requestId);
+  EXPECT_EQ(transport.LastRequest().method, HttpMethod::Delete);
+  EXPECT_EQ(engine.Discard(requestId), Status::Ok);
+}
+
+TEST_F(AsyncTextApiTest, DispatchDeleteAsyncUnterminatedUrlTextIsUnterminatedInputTextBeforeDispatch) {
+  std::array<char, 4> urlBuffer;
+  urlBuffer.fill('x');
+  TextParam headers("");
+  std::uint32_t requestId = kIdSentinel;
+
+  Status result = DispatchDeleteAsync(client, engine, urlBuffer.data(),
+                                       static_cast<std::uint32_t>(urlBuffer.size()), headers.Data(),
+                                       headers.Size(), requestId);
+
+  EXPECT_EQ(result, Status::UnterminatedInputText);
+  EXPECT_EQ(requestId, 0u);
+  EXPECT_EQ(transport.CallCount(), 0);
+}
+
+// ---------------------------------------------------------------------------
+// DispatchPostAsync
+// ---------------------------------------------------------------------------
+
+TEST_F(AsyncTextApiTest, DispatchPostAsyncValidRequestForwardsBodyAndReturnsOk) {
+  HttpResponse scripted;
+  scripted.statusCode = 201;
+  scripted.body = "created";
+  transport.SetResult(Status::Ok, scripted);
+
+  TextParam url("http://example.invalid/widgets");
+  TextParam headers("Content-Type: application/json");
+  TextParam body("{\"n\":1}");
+  std::uint32_t requestId = kIdSentinel;
+
+  Status result = DispatchPostAsync(client, engine, url.Data(), url.Size(), headers.Data(),
+                                     headers.Size(), body.Data(), body.Size(), requestId);
+
+  EXPECT_EQ(result, Status::Ok);
+  EXPECT_NE(requestId, 0u);
+
+  AwaitOrDie(requestId);
+  EXPECT_EQ(transport.LastRequest().method, HttpMethod::Post);
+  EXPECT_EQ(transport.LastRequest().body, "{\"n\":1}");
+  ASSERT_EQ(transport.LastRequest().headers.size(), 1u);
+  EXPECT_EQ(transport.LastRequest().headers[0].name, "Content-Type");
+  EXPECT_EQ(engine.Discard(requestId), Status::Ok);
+}
+
+TEST_F(AsyncTextApiTest, DispatchPostAsyncUnterminatedUrlTextIsUnterminatedInputTextBeforeDispatch) {
+  std::array<char, 4> urlBuffer;
+  urlBuffer.fill('x');
+  TextParam headers("");
+  TextParam body("payload");
+  std::uint32_t requestId = kIdSentinel;
+
+  Status result = DispatchPostAsync(client, engine, urlBuffer.data(),
+                                     static_cast<std::uint32_t>(urlBuffer.size()), headers.Data(),
+                                     headers.Size(), body.Data(), body.Size(), requestId);
+
+  EXPECT_EQ(result, Status::UnterminatedInputText);
+  EXPECT_EQ(requestId, 0u);
+  EXPECT_EQ(transport.CallCount(), 0);
+}
+
+TEST_F(AsyncTextApiTest, DispatchPostAsyncZeroSizeUrlIsInvalidArgumentBeforeDispatch) {
+  TextParam headers("");
+  TextParam body("payload");
+  std::uint32_t requestId = kIdSentinel;
+
+  Status result = DispatchPostAsync(client, engine, "unused", 0, headers.Data(), headers.Size(),
+                                     body.Data(), body.Size(), requestId);
+
+  EXPECT_EQ(result, Status::InvalidArgument);
+  EXPECT_EQ(requestId, 0u);
+  EXPECT_EQ(transport.CallCount(), 0);
+}
+
+TEST_F(AsyncTextApiTest, DispatchPostAsyncUnterminatedHeadersTextIsUnterminatedInputTextBeforeDispatch) {
+  TextParam url("http://example.invalid/");
+  std::array<char, 4> headersBuffer;
+  headersBuffer.fill('x');
+  TextParam body("payload");
+  std::uint32_t requestId = kIdSentinel;
+
+  Status result = DispatchPostAsync(client, engine, url.Data(), url.Size(), headersBuffer.data(),
+                                     static_cast<std::uint32_t>(headersBuffer.size()), body.Data(),
+                                     body.Size(), requestId);
+
+  EXPECT_EQ(result, Status::UnterminatedInputText);
+  EXPECT_EQ(requestId, 0u);
+  EXPECT_EQ(transport.CallCount(), 0);
+}
+
+TEST_F(AsyncTextApiTest, DispatchPostAsyncMalformedHeaderBlockIsRejectedBeforeDispatch) {
+  TextParam url("http://example.invalid/");
+  TextParam headers("X-Foo:   ");
+  TextParam body("payload");
+  std::uint32_t requestId = kIdSentinel;
+
+  Status result = DispatchPostAsync(client, engine, url.Data(), url.Size(), headers.Data(),
+                                     headers.Size(), body.Data(), body.Size(), requestId);
+
+  EXPECT_EQ(result, Status::MalformedHeaderBlock);
+  EXPECT_EQ(requestId, 0u);
+  EXPECT_EQ(transport.CallCount(), 0);
+}
+
+TEST_F(AsyncTextApiTest, DispatchPostAsyncUnterminatedBodyTextIsUnterminatedInputTextBeforeDispatch) {
+  TextParam url("http://example.invalid/");
+  TextParam headers("");
+  std::array<char, 4> bodyBuffer;
+  bodyBuffer.fill('x');
+  std::uint32_t requestId = kIdSentinel;
+
+  Status result = DispatchPostAsync(client, engine, url.Data(), url.Size(), headers.Data(),
+                                     headers.Size(), bodyBuffer.data(),
+                                     static_cast<std::uint32_t>(bodyBuffer.size()), requestId);
+
+  EXPECT_EQ(result, Status::UnterminatedInputText);
+  EXPECT_EQ(requestId, 0u);
+  EXPECT_EQ(transport.CallCount(), 0);
+}
+
+TEST_F(AsyncTextApiTest, DispatchPostAsyncEmptyUrlAfterBoundIsInvalidArgumentBeforeDispatch) {
+  TextParam url("");
+  TextParam headers("");
+  TextParam body("payload");
+  std::uint32_t requestId = kIdSentinel;
+
+  Status result = DispatchPostAsync(client, engine, url.Data(), url.Size(), headers.Data(),
+                                     headers.Size(), body.Data(), body.Size(), requestId);
+
+  EXPECT_EQ(result, Status::InvalidArgument);
+  EXPECT_EQ(requestId, 0u);
+  EXPECT_EQ(transport.CallCount(), 0);
+}
+
+// ---------------------------------------------------------------------------
+// DispatchPutAsync, DispatchPatchAsync -- share DispatchBodyVerb with
+// DispatchPostAsync above, so coverage here is limited to method mapping
+// plus one rejection path per function rather than repeating every shared
+// bound.
+// ---------------------------------------------------------------------------
+
+TEST_F(AsyncTextApiTest, DispatchPutAsyncValidRequestForwardsBodyAndReturnsOk) {
+  HttpResponse scripted;
+  scripted.statusCode = 200;
+  scripted.body = "updated";
+  transport.SetResult(Status::Ok, scripted);
+
+  TextParam url("http://example.invalid/widgets/1");
+  TextParam headers("");
+  TextParam body("{\"n\":2}");
+  std::uint32_t requestId = kIdSentinel;
+
+  Status result = DispatchPutAsync(client, engine, url.Data(), url.Size(), headers.Data(),
+                                    headers.Size(), body.Data(), body.Size(), requestId);
+
+  EXPECT_EQ(result, Status::Ok);
+  EXPECT_NE(requestId, 0u);
+
+  AwaitOrDie(requestId);
+  EXPECT_EQ(transport.LastRequest().method, HttpMethod::Put);
+  EXPECT_EQ(transport.LastRequest().body, "{\"n\":2}");
+  EXPECT_EQ(engine.Discard(requestId), Status::Ok);
+}
+
+TEST_F(AsyncTextApiTest, DispatchPutAsyncMalformedHeaderBlockIsRejectedBeforeDispatch) {
+  TextParam url("http://example.invalid/");
+  TextParam headers("   : value");
+  TextParam body("payload");
+  std::uint32_t requestId = kIdSentinel;
+
+  Status result = DispatchPutAsync(client, engine, url.Data(), url.Size(), headers.Data(),
+                                    headers.Size(), body.Data(), body.Size(), requestId);
+
+  EXPECT_EQ(result, Status::MalformedHeaderBlock);
+  EXPECT_EQ(requestId, 0u);
+  EXPECT_EQ(transport.CallCount(), 0);
+}
+
+TEST_F(AsyncTextApiTest, DispatchPatchAsyncValidRequestForwardsBodyAndReturnsOk) {
+  HttpResponse scripted;
+  scripted.statusCode = 200;
+  scripted.body = "patched";
+  transport.SetResult(Status::Ok, scripted);
+
+  TextParam url("http://example.invalid/widgets/1");
+  TextParam headers("");
+  TextParam body("{\"n\":3}");
+  std::uint32_t requestId = kIdSentinel;
+
+  Status result = DispatchPatchAsync(client, engine, url.Data(), url.Size(), headers.Data(),
+                                      headers.Size(), body.Data(), body.Size(), requestId);
+
+  EXPECT_EQ(result, Status::Ok);
+  EXPECT_NE(requestId, 0u);
+
+  AwaitOrDie(requestId);
+  EXPECT_EQ(transport.LastRequest().method, HttpMethod::Patch);
+  EXPECT_EQ(transport.LastRequest().body, "{\"n\":3}");
+  EXPECT_EQ(engine.Discard(requestId), Status::Ok);
+}
+
+TEST_F(AsyncTextApiTest, DispatchPatchAsyncUnterminatedBodyTextIsUnterminatedInputTextBeforeDispatch) {
+  TextParam url("http://example.invalid/");
+  TextParam headers("");
+  std::array<char, 4> bodyBuffer;
+  bodyBuffer.fill('x');
+  std::uint32_t requestId = kIdSentinel;
+
+  Status result = DispatchPatchAsync(client, engine, url.Data(), url.Size(), headers.Data(),
+                                      headers.Size(), bodyBuffer.data(),
+                                      static_cast<std::uint32_t>(bodyBuffer.size()), requestId);
+
+  EXPECT_EQ(result, Status::UnterminatedInputText);
+  EXPECT_EQ(requestId, 0u);
+  EXPECT_EQ(transport.CallCount(), 0);
+}
