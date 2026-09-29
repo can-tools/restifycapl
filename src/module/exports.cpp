@@ -27,6 +27,8 @@
 
 #include "core/buffer-copy.h"
 #include "core/status.h"
+#include "http/async-operations.h"
+#include "http/async-text-api.h"
 #include "http/http-client.h"
 #include "http/sync-text-api.h"
 
@@ -261,6 +263,112 @@ extern "C" long CAPLPASCAL restifyRequestSync(char* method, unsigned long method
   return static_cast<long>(result);
 }
 
+// ------------------------------------------------------------------------
+// Eleven asynchronous REST shims -- six dispatch shims and five lifecycle
+// shims, each a direct forwarding call into the matching Dispatch*Async /
+// Poll/Await/Read/Discard function (src/http/async-text-api.h), which owns
+// all parsing, slot management and status mapping. Signature table,
+// state-machine semantics and status codes: docs/capl-async-surface.md.
+// ------------------------------------------------------------------------
+extern "C" long CAPLPASCAL restifyGetAsync(char* url, unsigned long urlSize,
+                                            char* requestHeaders,
+                                            unsigned long requestHeadersSize,
+                                            std::uint32_t* requestId) {
+  Status result = DispatchGetAsync(SyncClient(), DefaultAsyncEngine(), url, urlSize,
+                                    requestHeaders, requestHeadersSize, *requestId);
+  return static_cast<long>(result);
+}
+
+extern "C" long CAPLPASCAL restifyDeleteAsync(char* url, unsigned long urlSize,
+                                               char* requestHeaders,
+                                               unsigned long requestHeadersSize,
+                                               std::uint32_t* requestId) {
+  Status result = DispatchDeleteAsync(SyncClient(), DefaultAsyncEngine(), url, urlSize,
+                                       requestHeaders, requestHeadersSize, *requestId);
+  return static_cast<long>(result);
+}
+
+extern "C" long CAPLPASCAL restifyPostAsync(char* url, unsigned long urlSize,
+                                             char* requestHeaders,
+                                             unsigned long requestHeadersSize,
+                                             char* requestBody, unsigned long requestBodySize,
+                                             std::uint32_t* requestId) {
+  Status result = DispatchPostAsync(SyncClient(), DefaultAsyncEngine(), url, urlSize,
+                                     requestHeaders, requestHeadersSize, requestBody,
+                                     requestBodySize, *requestId);
+  return static_cast<long>(result);
+}
+
+extern "C" long CAPLPASCAL restifyPutAsync(char* url, unsigned long urlSize,
+                                            char* requestHeaders,
+                                            unsigned long requestHeadersSize,
+                                            char* requestBody, unsigned long requestBodySize,
+                                            std::uint32_t* requestId) {
+  Status result = DispatchPutAsync(SyncClient(), DefaultAsyncEngine(), url, urlSize,
+                                    requestHeaders, requestHeadersSize, requestBody,
+                                    requestBodySize, *requestId);
+  return static_cast<long>(result);
+}
+
+extern "C" long CAPLPASCAL restifyPatchAsync(char* url, unsigned long urlSize,
+                                              char* requestHeaders,
+                                              unsigned long requestHeadersSize,
+                                              char* requestBody, unsigned long requestBodySize,
+                                              std::uint32_t* requestId) {
+  Status result = DispatchPatchAsync(SyncClient(), DefaultAsyncEngine(), url, urlSize,
+                                      requestHeaders, requestHeadersSize, requestBody,
+                                      requestBodySize, *requestId);
+  return static_cast<long>(result);
+}
+
+extern "C" long CAPLPASCAL restifyRequestAsync(char* method, unsigned long methodSize,
+                                                char* url, unsigned long urlSize,
+                                                char* requestHeaders,
+                                                unsigned long requestHeadersSize,
+                                                char* requestBody, unsigned long requestBodySize,
+                                                unsigned long connectTimeoutMs,
+                                                unsigned long totalTimeoutMs,
+                                                unsigned long maxResponseBytes,
+                                                std::uint32_t* requestId) {
+  Status result = DispatchRequestAsync(SyncClient(), DefaultAsyncEngine(), method, methodSize,
+                                        url, urlSize, requestHeaders, requestHeadersSize,
+                                        requestBody, requestBodySize, connectTimeoutMs,
+                                        totalTimeoutMs, maxResponseBytes, *requestId);
+  return static_cast<long>(result);
+}
+
+extern "C" long CAPLPASCAL restifyPollResponse(unsigned long requestId, std::int32_t* state) {
+  Status result = PollAsyncResponse(DefaultAsyncEngine(), requestId, *state);
+  return static_cast<long>(result);
+}
+
+extern "C" long CAPLPASCAL restifyAwaitResponse(unsigned long requestId,
+                                                 unsigned long waitTimeoutMs) {
+  Status result = AwaitAsyncResponse(DefaultAsyncEngine(), requestId, waitTimeoutMs);
+  return static_cast<long>(result);
+}
+
+extern "C" long CAPLPASCAL restifyReadResponse(unsigned long requestId, char* responseBody,
+                                                unsigned long responseBodySize,
+                                                std::int32_t* requestStatus,
+                                                std::int32_t* httpStatusCode,
+                                                std::uint32_t* responseBodyLength) {
+  Status result = ReadAsyncResponse(DefaultAsyncEngine(), requestId, responseBody,
+                                     responseBodySize, *requestStatus, *httpStatusCode,
+                                     *responseBodyLength);
+  return static_cast<long>(result);
+}
+
+extern "C" long CAPLPASCAL restifyDiscardResponse(unsigned long requestId) {
+  Status result = DiscardAsyncResponse(DefaultAsyncEngine(), requestId);
+  return static_cast<long>(result);
+}
+
+extern "C" long CAPLPASCAL restifyDiscardAllResponses(std::uint32_t* stillRunning) {
+  Status result = DiscardAllAsyncResponses(DefaultAsyncEngine(), *stillRunning);
+  return static_cast<long>(result);
+}
+
 // ==============================================================================
 // CAPL_DLL_INFO_LIST4 -- the real API contract (capl-export-contract).
 // APPEND ONLY from this point on: never rename, reorder, or remove a row.
@@ -402,6 +510,152 @@ CAPL_DLL_INFO4 CAPL_DLL_INFO_LIST4[] = {
       "requestHeadersSize", "requestBody", "requestBodySize", "responseBody",
       "responseBodySize", "connectTimeoutMs", "totalTimeoutMs",
       "maxResponseBytes", "httpStatusCode", "responseBodyLength"}},
+
+    // Eleven asynchronous rows -- six dispatch rows and five lifecycle
+    // rows. Same parCount / kRefLong / kRefDword trap as above; signature
+    // table and state-machine semantics: docs/capl-async-surface.md.
+
+    {"restifyGetAsync",
+     (CAPL_FARCALL)restifyGetAsync,
+     "Async",
+     "Dispatches a non-blocking HTTP GET, returning 0 on success with a "
+     "request id or a negative error code otherwise. Non-blocking \xe2\x80\x94 "
+     "safe to call from a Simulation Setup node.",
+     'L',
+     5,
+     {'C', 'D', 'C', 'D', kRefDword},
+     {1, 0, 1, 0, 0},
+     {"url", "urlSize", "requestHeaders", "requestHeadersSize", "requestId"}},
+
+    {"restifyDeleteAsync",
+     (CAPL_FARCALL)restifyDeleteAsync,
+     "Async",
+     "Dispatches a non-blocking HTTP DELETE, returning 0 on success with a "
+     "request id or a negative error code otherwise. Non-blocking \xe2\x80\x94 "
+     "safe to call from a Simulation Setup node.",
+     'L',
+     5,
+     {'C', 'D', 'C', 'D', kRefDword},
+     {1, 0, 1, 0, 0},
+     {"url", "urlSize", "requestHeaders", "requestHeadersSize", "requestId"}},
+
+    {"restifyPostAsync",
+     (CAPL_FARCALL)restifyPostAsync,
+     "Async",
+     "Dispatches a non-blocking HTTP POST with the given request body, "
+     "returning 0 on success with a request id or a negative error code "
+     "otherwise. Non-blocking \xe2\x80\x94 safe to call from a Simulation "
+     "Setup node.",
+     'L',
+     7,
+     {'C', 'D', 'C', 'D', 'C', 'D', kRefDword},
+     {1, 0, 1, 0, 1, 0, 0},
+     {"url", "urlSize", "requestHeaders", "requestHeadersSize", "requestBody",
+      "requestBodySize", "requestId"}},
+
+    {"restifyPutAsync",
+     (CAPL_FARCALL)restifyPutAsync,
+     "Async",
+     "Dispatches a non-blocking HTTP PUT with the given request body, "
+     "returning 0 on success with a request id or a negative error code "
+     "otherwise. Non-blocking \xe2\x80\x94 safe to call from a Simulation "
+     "Setup node.",
+     'L',
+     7,
+     {'C', 'D', 'C', 'D', 'C', 'D', kRefDword},
+     {1, 0, 1, 0, 1, 0, 0},
+     {"url", "urlSize", "requestHeaders", "requestHeadersSize", "requestBody",
+      "requestBodySize", "requestId"}},
+
+    {"restifyPatchAsync",
+     (CAPL_FARCALL)restifyPatchAsync,
+     "Async",
+     "Dispatches a non-blocking HTTP PATCH with the given request body, "
+     "returning 0 on success with a request id or a negative error code "
+     "otherwise. Non-blocking \xe2\x80\x94 safe to call from a Simulation "
+     "Setup node.",
+     'L',
+     7,
+     {'C', 'D', 'C', 'D', 'C', 'D', kRefDword},
+     {1, 0, 1, 0, 1, 0, 0},
+     {"url", "urlSize", "requestHeaders", "requestHeadersSize", "requestBody",
+      "requestBodySize", "requestId"}},
+
+    {"restifyRequestAsync",
+     (CAPL_FARCALL)restifyRequestAsync,
+     "Async",
+     "Dispatches a non-blocking HTTP request using the given method, "
+     "request body and timeouts, returning 0 on success with a request id "
+     "or a negative error code otherwise. Non-blocking \xe2\x80\x94 safe to "
+     "call from a Simulation Setup node.",
+     'L',
+     12,
+     {'C', 'D', 'C', 'D', 'C', 'D', 'C', 'D', 'D', 'D', 'D', kRefDword},
+     {1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0},
+     {"method", "methodSize", "url", "urlSize", "requestHeaders",
+      "requestHeadersSize", "requestBody", "requestBodySize", "connectTimeoutMs",
+      "totalTimeoutMs", "maxResponseBytes", "requestId"}},
+
+    {"restifyPollResponse",
+     (CAPL_FARCALL)restifyPollResponse,
+     "Async",
+     "Checks whether a dispatched request is still in flight or has "
+     "completed, without blocking. Safe to call from a Simulation Setup "
+     "timer.",
+     'L',
+     2,
+     {'D', kRefLong},
+     {0, 0},
+     {"requestId", "state"}},
+
+    {"restifyAwaitResponse",
+     (CAPL_FARCALL)restifyAwaitResponse,
+     "Async",
+     "Blocks until a dispatched request completes or the given timeout "
+     "elapses. Blocking call \xe2\x80\x94 use from Measurement Setup or a "
+     "test node only, never from a Simulation Setup node.",
+     'L',
+     2,
+     {'D', 'D'},
+     {0, 0},
+     {"requestId", "waitTimeoutMs"}},
+
+    {"restifyReadResponse",
+     (CAPL_FARCALL)restifyReadResponse,
+     "Async",
+     "Copies a completed response's body into the caller's buffer without "
+     "blocking, returning 0 on success or a negative error code otherwise. "
+     "Safe to call from a Simulation Setup timer.",
+     'L',
+     6,
+     {'D', 'C', 'D', kRefLong, kRefLong, kRefDword},
+     {0, 1, 0, 0, 0, 0},
+     {"requestId", "responseBody", "responseBodySize", "requestStatus",
+      "httpStatusCode", "responseBodyLength"}},
+
+    {"restifyDiscardResponse",
+     (CAPL_FARCALL)restifyDiscardResponse,
+     "Async",
+     "Releases a single response's slot without blocking, returning 0 on "
+     "success or a negative error code otherwise. Safe to call from a "
+     "Simulation Setup timer.",
+     'L',
+     1,
+     {'D'},
+     {0},
+     {"requestId"}},
+
+    {"restifyDiscardAllResponses",
+     (CAPL_FARCALL)restifyDiscardAllResponses,
+     "Async",
+     "Releases every response's memory at once, returning 0 and a count of "
+     "requests still running. Frees memory \xe2\x80\x94 call from on "
+     "stopMeasurement or a test node.",
+     'L',
+     1,
+     {kRefDword},
+     {0},
+     {"stillRunning"}},
 
     // Terminating sentinel -- CANoe reads entries until the first one
     // whose name is NULL.

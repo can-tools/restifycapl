@@ -44,6 +44,32 @@ hand-invented version numbers.
 - `restifyRequestSync(char method[], dword methodSize, char url[], dword urlSize, char requestHeaders[], dword requestHeadersSize, char requestBody[], dword requestBodySize, char responseBody[], dword responseBodySize, dword connectTimeoutMs, dword totalTimeoutMs, dword maxResponseBytes, long& httpStatusCode, dword& responseBodyLength) : long`
   -- general-purpose blocking HTTP request covering any method and explicit
   timeouts/response cap, for cases the five verb helpers above don't reach.
+- `restifyGetAsync(char url[], dword urlSize, char requestHeaders[], dword requestHeadersSize, dword& requestId) : long`
+  -- dispatches a non-blocking HTTP GET, returning immediately with a
+  request id (see `docs/capl-async-surface.md`).
+- `restifyDeleteAsync(...same shape as restifyGetAsync...) : long` --
+  dispatches a non-blocking HTTP DELETE.
+- `restifyPostAsync(char url[], dword urlSize, char requestHeaders[], dword requestHeadersSize, char requestBody[], dword requestBodySize, dword& requestId) : long`
+  -- dispatches a non-blocking HTTP POST with the given request body.
+- `restifyPutAsync(...same shape as restifyPostAsync...) : long` --
+  dispatches a non-blocking HTTP PUT.
+- `restifyPatchAsync(...same shape as restifyPostAsync...) : long` --
+  dispatches a non-blocking HTTP PATCH.
+- `restifyRequestAsync(char method[], dword methodSize, char url[], dword urlSize, char requestHeaders[], dword requestHeadersSize, char requestBody[], dword requestBodySize, dword connectTimeoutMs, dword totalTimeoutMs, dword maxResponseBytes, dword& requestId) : long`
+  -- dispatches a non-blocking HTTP request using any method and explicit
+  timeouts/response cap, for cases the five verb helpers above don't reach.
+- `restifyPollResponse(dword requestId, long& state) : long` -- non-blocking
+  check of whether a dispatched request is still in flight or has completed.
+- `restifyAwaitResponse(dword requestId, dword waitTimeoutMs) : long` --
+  blocks until a dispatched request completes or the given timeout elapses.
+- `restifyReadResponse(dword requestId, char responseBody[], dword responseBodySize, long& requestStatus, long& httpStatusCode, dword& responseBodyLength) : long`
+  -- copies a completed response's body into the caller's buffer without
+  blocking, retryable on `BufferTooSmall`.
+- `restifyDiscardResponse(dword requestId) : long` -- releases a single
+  response's slot without blocking.
+- `restifyDiscardAllResponses(dword& stillRunning) : long` -- releases every
+  response's memory at once and reports how many requests are still running;
+  frees memory on the caller's thread.
 
 ### Changed
 

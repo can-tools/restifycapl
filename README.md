@@ -9,6 +9,15 @@ and the general-purpose `restifyRequestSync` (see
 [`docs/capl-sync-surface.md`](docs/capl-sync-surface.md) for the full
 signature table).
 
+Asynchronous HTTP is also available, for use from a Simulation Setup node
+without blocking the realtime thread: `restifyGetAsync`, `restifyPostAsync`,
+`restifyPutAsync`, `restifyPatchAsync`, `restifyDeleteAsync`, and the
+general-purpose `restifyRequestAsync`, paired with `restifyPollResponse`,
+`restifyAwaitResponse`, `restifyReadResponse`, `restifyDiscardResponse`, and
+`restifyDiscardAllResponses` to track and retrieve each dispatched request
+(see [`docs/capl-async-surface.md`](docs/capl-async-surface.md) for the full
+signature table).
+
 ## Development setup
 
 `scripts/setup-dev-env.ps1` provisions the local toolchain needed to build
