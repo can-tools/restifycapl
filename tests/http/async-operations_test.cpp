@@ -69,6 +69,110 @@ class FixedIdSeedSource : public IdSeedSource {
   std::uint32_t seed_;
 };
 
+struct RecordedThreadStart {
+  AsyncThreadEntry entry;
+  void* param;
+};
+
+// StartThread only records (entry, param) here instead of starting anything,
+// which is what lets a test catch a slot in Pending before any worker claims
+// it. Trap: production code increments liveWorkers_ the moment StartThread
+// returns true, and its param owns a heap allocation freed only when the
+// deferred entry point actually runs -- every test using this fake must call
+// StartAllPending() (then JoinAll()) before it ends, or it leaks that
+// allocation and desyncs the worker/thread-join accounting.
+class DeferredStartWorkerLifetime : public WorkerLifetime {
+ public:
+  void* AcquireModuleReference() override { return this; }
+  void ReleaseModuleReference(void*) override {}
+
+  bool StartThread(AsyncThreadEntry entry, void* param) override {
+    std::lock_guard<std::mutex> lock(mutex_);
+    pending_.push_back(RecordedThreadStart{entry, param});
+    return true;
+  }
+
+  void ExitCurrentThread(void*) override {}
+
+  void StartAllPending() {
+    std::vector<RecordedThreadStart> pending;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      pending = std::move(pending_);
+    }
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (const auto& start : pending) {
+      threads_.emplace_back(start.entry, start.param);
+    }
+  }
+
+  void JoinAll() {
+    std::vector<std::thread> threads;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      threads = std::move(threads_);
+    }
+    for (auto& t : threads) {
+      if (t.joinable()) {
+        t.join();
+      }
+    }
+  }
+
+ private:
+  std::mutex mutex_;
+  std::vector<RecordedThreadStart> pending_;
+  std::vector<std::thread> threads_;
+};
+
+// Same immediate-start behavior as JoiningWorkerLifetime, plus call counts on
+// the reference/thread lifecycle so a test can confirm a module reference is
+// acquired once per worker and only ever given up when that worker's entry
+// point actually returns.
+class CountingWorkerLifetime : public WorkerLifetime {
+ public:
+  void* AcquireModuleReference() override {
+    ++acquireCount_;
+    return this;
+  }
+  void ReleaseModuleReference(void*) override { ++releaseCount_; }
+
+  bool StartThread(AsyncThreadEntry entry, void* param) override {
+    std::lock_guard<std::mutex> lock(mutex_);
+    ++startCount_;
+    threads_.emplace_back(entry, param);
+    return true;
+  }
+
+  void ExitCurrentThread(void*) override { ++exitCount_; }
+
+  void JoinAll() {
+    std::vector<std::thread> threads;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      threads = std::move(threads_);
+    }
+    for (auto& t : threads) {
+      if (t.joinable()) {
+        t.join();
+      }
+    }
+  }
+
+  int AcquireCount() const { return acquireCount_.load(); }
+  int ReleaseCount() const { return releaseCount_.load(); }
+  int StartCount() const { return startCount_.load(); }
+  int ExitCount() const { return exitCount_.load(); }
+
+ private:
+  std::mutex mutex_;
+  std::vector<std::thread> threads_;
+  std::atomic<int> acquireCount_{0};
+  std::atomic<int> releaseCount_{0};
+  std::atomic<int> startCount_{0};
+  std::atomic<int> exitCount_{0};
+};
+
 class AsyncEngineTest : public ::testing::Test {
  protected:
   FakeTransport transport;
@@ -116,7 +220,7 @@ class AsyncEngineTest : public ::testing::Test {
 }  // namespace
 
 // ---------------------------------------------------------------------------
-// Case 6: Read on a slot that is still Pending/Running -> RequestNotComplete.
+// Read on a slot that is still Pending/Running -> RequestNotComplete.
 // ---------------------------------------------------------------------------
 
 TEST_F(AsyncEngineTest, ReadBeforeCompletionReturnsRequestNotComplete) {
@@ -143,7 +247,7 @@ TEST_F(AsyncEngineTest, ReadBeforeCompletionReturnsRequestNotComplete) {
 }
 
 // ---------------------------------------------------------------------------
-// Case 5: a zero-size buffer fails CopyToBuffer's own validation before the
+// A zero-size buffer fails CopyToBuffer's own validation before the
 // slot is touched, so the slot stays Complete and a follow-up Read with a
 // real buffer still succeeds and consumes it; only then does a further Read
 // on the same id see UnknownRequestId.
@@ -180,7 +284,7 @@ TEST_F(AsyncEngineTest, ReadWithZeroSizeBufferLeavesSlotRetryableThenConsumesOnR
 }
 
 // ---------------------------------------------------------------------------
-// Case 8: transport succeeds but the server responded with an HTTP error --
+// Transport succeeds but the server responded with an HTTP error --
 // requestStatus stays 0 (transport-level Ok), httpStatusCode carries the
 // real HTTP code.
 // ---------------------------------------------------------------------------
@@ -229,7 +333,7 @@ TEST_F(AsyncEngineTest, HttpServerErrorStatusAlsoSurfacesInHttpStatusCode) {
 }
 
 // ---------------------------------------------------------------------------
-// Case 7: the transport itself fails (a sync-error-range code, -18..-23) --
+// The transport itself fails (a sync-error-range code, -18..-23) --
 // requestStatus carries it through and httpStatusCode stays 0, since no
 // response was ever received.
 // ---------------------------------------------------------------------------
@@ -272,7 +376,7 @@ TEST_F(AsyncEngineTest, TransportTimeoutSurfacesInRequestStatusWithZeroHttpStatu
 }
 
 // ---------------------------------------------------------------------------
-// Case 1: all 8 slots occupied by in-flight requests -> a 9th Dispatch gets
+// All 8 slots occupied by in-flight requests -> a 9th Dispatch gets
 // NoFreeRequestSlot.
 // ---------------------------------------------------------------------------
 
@@ -303,7 +407,7 @@ TEST_F(AsyncEngineTest, DispatchBeyondSlotCountReturnsNoFreeRequestSlot) {
 }
 
 // ---------------------------------------------------------------------------
-// Case 10: DiscardAll frees every non-Running slot immediately and reports
+// DiscardAll frees every non-Running slot immediately and reports
 // the Running count (now Abandoned, cancelled but not yet actually stopped)
 // in stillRunning.
 // ---------------------------------------------------------------------------
@@ -341,7 +445,7 @@ TEST_F(AsyncEngineTest, DiscardAllFreesCompleteAndConsumedSlotsAndReportsStillRu
 }
 
 // ---------------------------------------------------------------------------
-// Case 2: completions released in an order different from dispatch order
+// Completions released in an order different from dispatch order
 // still reach the correct request id -- no id/response mixup.
 // ---------------------------------------------------------------------------
 
@@ -403,7 +507,7 @@ TEST_F(AsyncEngineTest, OutOfOrderCompletionsReachTheCorrectRequestId) {
 }
 
 // ---------------------------------------------------------------------------
-// Case 3: reading a Complete slot to full completion frees it (Consumed
+// Reading a Complete slot to full completion frees it (Consumed
 // counts as available for dispatch, same as Free) -- a subsequent Dispatch
 // reclaims it instead of failing with NoFreeRequestSlot.
 // ---------------------------------------------------------------------------
@@ -464,7 +568,7 @@ TEST_F(AsyncEngineTest, ReadThenDispatchReclaimsConsumedSlot) {
 }
 
 // ---------------------------------------------------------------------------
-// Case 4: an undersized (but non-zero) buffer on Read gives BufferTooSmall
+// An undersized (but non-zero) buffer on Read gives BufferTooSmall
 // and leaves the slot retryable -- a follow-up Read with a big-enough buffer
 // on the same request id succeeds and returns the full body.
 // ---------------------------------------------------------------------------
@@ -502,9 +606,9 @@ TEST_F(AsyncEngineTest, ReadWithUndersizedBufferIsRetryableWithLargerBuffer) {
 }
 
 // ---------------------------------------------------------------------------
-// Case 9: Pending is not exercised here -- the instant a slot is marked
-// Pending, an idle or freshly-started worker claims it before any test hook
-// can observe or gate that state, so only Running and Complete are covered.
+// Running: discarding a slot the worker has already claimed drops the
+// result and frees the slot only once the worker notices the cancel flag
+// and returns.
 // ---------------------------------------------------------------------------
 
 TEST_F(AsyncEngineTest, DiscardOnRunningSlotDropsResultAndEventuallyFreesSlot) {
@@ -566,8 +670,8 @@ TEST_F(AsyncEngineTest, DiscardOnRunningSlotDropsResultAndEventuallyFreesSlot) {
 }
 
 // ---------------------------------------------------------------------------
-// Case 9 (Complete): a Complete-but-unread slot discards the same way a
-// consumed Read does (case 3) -- Discard alone makes it reusable, no worker
+// Complete: a Complete-but-unread slot discards the same way an
+// already-consumed slot does -- Discard alone makes it reusable, no worker
 // involvement needed.
 // ---------------------------------------------------------------------------
 
@@ -607,7 +711,39 @@ TEST_F(AsyncEngineTest, DiscardOnCompleteSlotDropsResultAndFreesSlotImmediately)
 }
 
 // ---------------------------------------------------------------------------
-// Case 10: DiscardAll also wakes a worker that has gone idle -- it rechecks
+// Pending: a fresh engine with zero idle workers starts a worker on
+// Dispatch but that worker never actually runs until the test says so, so
+// Discard must act on the slot while it is still Pending -- proven by the
+// transport never being called at all.
+// ---------------------------------------------------------------------------
+
+TEST_F(AsyncEngineTest, DiscardOnPendingSlotBypassesTransportAndFreesSlotImmediately) {
+  DeferredStartWorkerLifetime deferredLifetime;
+  AsyncEngine freshEngine(deferredLifetime, DefaultIdSeedSource(), std::chrono::milliseconds(50));
+
+  const std::string url = "http://example.invalid/pending-discard";
+  std::uint32_t requestId = 0;
+  ASSERT_EQ(freshEngine.Dispatch(client, MakeRequest(url), requestId), Status::Ok);
+
+  std::int32_t pollState = -1;
+  ASSERT_EQ(freshEngine.Poll(requestId, pollState), Status::Ok);
+  EXPECT_EQ(pollState, 1);
+
+  EXPECT_EQ(freshEngine.Discard(requestId), Status::Ok);
+  EXPECT_EQ(transport.CallCount(), 0)
+      << "Discard on a Pending slot must bypass the transport entirely";
+
+  EXPECT_EQ(freshEngine.Poll(requestId, pollState), Status::UnknownRequestId);
+
+  // The trap in DeferredStartWorkerLifetime's own comment: the deferred
+  // thread must still be started and joined before the test ends.
+  deferredLifetime.StartAllPending();
+  deferredLifetime.JoinAll();
+  EXPECT_EQ(transport.CallCount(), 0);
+}
+
+// ---------------------------------------------------------------------------
+// DiscardAll also wakes a worker that has gone idle -- it rechecks
 // for pending work right away and exits instead of sitting out the rest of
 // its idle timeout. A long idle timeout here is what makes the difference
 // between "woken" and "just happened to time out" observable.
@@ -639,8 +775,7 @@ TEST_F(AsyncEngineTest, DiscardAllWakesIdleWorkerToExitPromptly) {
 }
 
 // ---------------------------------------------------------------------------
-// Case 12 (0 on completion): Await unblocks with Ok once the request
-// transitions to Complete.
+// Await unblocks with Ok once the request transitions to Complete.
 // ---------------------------------------------------------------------------
 
 TEST_F(AsyncEngineTest, AwaitReturnsOkWhenRequestCompletesBeforeDeadline) {
@@ -656,8 +791,8 @@ TEST_F(AsyncEngineTest, AwaitReturnsOkWhenRequestCompletesBeforeDeadline) {
 }
 
 // ---------------------------------------------------------------------------
-// Case 12 (-28 at the deadline): Await gives up and reports WaitTimeout once
-// its bound elapses while the request is still Running.
+// Await gives up and reports WaitTimeout once its bound elapses while the
+// request is still Running.
 // ---------------------------------------------------------------------------
 
 TEST_F(AsyncEngineTest, AwaitReturnsWaitTimeoutAtDeadlineWhileStillRunning) {
@@ -670,9 +805,8 @@ TEST_F(AsyncEngineTest, AwaitReturnsWaitTimeoutAtDeadlineWhileStillRunning) {
 }
 
 // ---------------------------------------------------------------------------
-// Case 12 (-27 promptly on discard): a concurrent Discard ends a blocked
-// Await well before its own deadline -- discard's wake-up, not the timeout,
-// is what ends the wait.
+// A concurrent Discard ends a blocked Await well before its own deadline --
+// discard's wake-up, not the timeout, is what ends the wait.
 // ---------------------------------------------------------------------------
 
 TEST_F(AsyncEngineTest, AwaitReturnsUnknownRequestIdPromptlyOnDiscard) {
@@ -690,8 +824,8 @@ TEST_F(AsyncEngineTest, AwaitReturnsUnknownRequestIdPromptlyOnDiscard) {
 }
 
 // ---------------------------------------------------------------------------
-// Case 12 (-27 promptly on discard-all): same as above, but the request is
-// swept up by DiscardAll instead of a single Discard.
+// Same as the single-discard case above, but the request is swept up by
+// DiscardAll instead of a single Discard.
 // ---------------------------------------------------------------------------
 
 TEST_F(AsyncEngineTest, AwaitReturnsUnknownRequestIdPromptlyOnDiscardAll) {
@@ -713,9 +847,8 @@ TEST_F(AsyncEngineTest, AwaitReturnsUnknownRequestIdPromptlyOnDiscardAll) {
 }
 
 // ---------------------------------------------------------------------------
-// Case 12 (-27 after reuse under a new id): once a slot has been reclaimed by
-// a different request, Await on the stale id must not be satisfied by the
-// new occupant.
+// Once a slot has been reclaimed by a different request, Await on the stale
+// id must not be satisfied by the new occupant.
 // ---------------------------------------------------------------------------
 
 TEST_F(AsyncEngineTest, AwaitReturnsUnknownRequestIdAfterSlotReusedUnderNewId) {
@@ -737,8 +870,8 @@ TEST_F(AsyncEngineTest, AwaitReturnsUnknownRequestIdAfterSlotReusedUnderNewId) {
 }
 
 // ---------------------------------------------------------------------------
-// Case 12 (waitTimeoutMs = 0 follows the request's own total timeout): 0
-// means "use the request's totalTimeoutMs as the bound", not "don't wait".
+// waitTimeoutMs = 0 means "use the request's totalTimeoutMs as the bound",
+// not "don't wait".
 // ---------------------------------------------------------------------------
 
 TEST_F(AsyncEngineTest, AwaitWithZeroTimeoutUsesRequestsOwnTotalTimeout) {
@@ -852,6 +985,49 @@ TEST_F(AsyncEngineTest, MintedIdsWrapAroundSkippingZeroAndStayUniqueAcrossTheWra
 
   lifetime.JoinAll();
 }
+
+// ---------------------------------------------------------------------------
+// An idle worker exits once its (test-shortened) idle timeout elapses, and
+// the next Dispatch after that starts a brand new worker rather than
+// reusing the exited one -- shown by StartThread/AcquireModuleReference
+// call counts advancing across the exit.
+// ---------------------------------------------------------------------------
+
+TEST_F(AsyncEngineTest, IdleWorkerExitsAfterInjectedTimeoutAndNextDispatchRecreatesOne) {
+  CountingWorkerLifetime countingLifetime;
+  AsyncEngine shortIdleEngine(countingLifetime, DefaultIdSeedSource(), std::chrono::milliseconds(20));
+
+  const std::string firstUrl = "http://example.invalid/lifecycle-first";
+  std::uint32_t firstId = 0;
+  ASSERT_EQ(shortIdleEngine.Dispatch(client, MakeRequest(firstUrl), firstId), Status::Ok);
+  ASSERT_EQ(shortIdleEngine.Await(firstId, 5000), Status::Ok);
+  EXPECT_EQ(shortIdleEngine.Discard(firstId), Status::Ok);
+  EXPECT_EQ(countingLifetime.StartCount(), 1);
+  EXPECT_EQ(countingLifetime.AcquireCount(), 1);
+
+  // Blocks only until the now-idle worker actually exits past its
+  // (test-shortened) idle timeout -- same bounded-wait technique as
+  // DiscardAllWakesIdleWorkerToExitPromptly, not a guessed sleep.
+  countingLifetime.JoinAll();
+  EXPECT_EQ(countingLifetime.ExitCount(), 1);
+
+  const std::string secondUrl = "http://example.invalid/lifecycle-second";
+  std::uint32_t secondId = 0;
+  ASSERT_EQ(shortIdleEngine.Dispatch(client, MakeRequest(secondUrl), secondId), Status::Ok);
+  EXPECT_EQ(countingLifetime.StartCount(), 2)
+      << "the exited worker must be recreated, not reused";
+  EXPECT_EQ(countingLifetime.AcquireCount(), 2)
+      << "a fresh module reference is acquired per worker, never carried over from the exited one";
+
+  ASSERT_EQ(shortIdleEngine.Await(secondId, 5000), Status::Ok);
+  EXPECT_EQ(shortIdleEngine.Discard(secondId), Status::Ok);
+  countingLifetime.JoinAll();
+}
+
+// No seam controls the exact overlap between the idle-exit decision and a
+// concurrent Dispatch (workerIdleTimeout_ has no injectable clock or gate),
+// so that specific race window can't be hit deterministically without a
+// sleep-based guess; left untested rather than risk a flaky assertion.
 
 TEST(ShouldCancelTransferTest, NullFlagNeverCancels) {
   EXPECT_FALSE(ShouldCancelTransfer(nullptr));
