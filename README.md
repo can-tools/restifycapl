@@ -1,7 +1,13 @@
 # restifycapl
 
 Native Windows DLL plugin for Vector CANoe, exposing REST/HTTP operations to
-CAPL scripts.
+CAPL scripts running inside CANoe.
+
+## Build
+
+Built with MSVC via a Makefile (no CMake), targeting both x86 and x64. See
+[`CLAUDE.md`](CLAUDE.md#build) for the exact commands (`make build-x86`,
+`make build-x64`, `make test`) and toolchain requirements.
 
 Synchronous HTTP is available from CAPL today: `restifyGetSync`,
 `restifyPostSync`, `restifyPutSync`, `restifyPatchSync`, `restifyDeleteSync`,
@@ -17,6 +23,44 @@ general-purpose `restifyRequestAsync`, paired with `restifyPollResponse`,
 `restifyDiscardAllResponses` to track and retrieve each dispatched request
 (see [`docs/capl-async-surface.md`](docs/capl-async-surface.md) for the full
 signature table).
+
+## Using the DLL from CAPL
+
+Pick the DLL matching your CANoe installation's bitness: the x86 build
+(`restifycapl-x86.dll`) for a 32-bit CANoe, the x64 build
+(`restifycapl-x64.dll`) for a 64-bit CANoe. CANoe refuses to load a DLL
+built for the wrong bitness.
+
+Reference the DLL from a CAPL program's includes section with
+`#pragma library`, then call an exported operation like any other CAPL
+function:
+
+```capl
+#pragma library("restifycapl-x64.dll")
+
+variables
+{
+  char gVersion[64];
+}
+
+on start
+{
+  restifyReadVersion(gVersion, elcount(gVersion));
+  write("restifycapl version: %s", gVersion);
+}
+```
+
+CANoe 13 and later resolve the `#pragma library` path via a module
+description file rather than a direct DLL path; consult your CANoe
+version's own CAPL DLL documentation for that file's format. Earlier CANoe
+versions accept a direct path to the DLL, as shown above. A DLL can
+instead be registered globally for all CAPL programs via the Options
+dialog rather than `#pragma library` — see CANoe's own CAPL DLL
+documentation for both mechanisms.
+
+Both architectures build and are tested through CI on every push. CANoe
+load/recognition of the exported functions above has so far been confirmed
+against a real CANoe instance for the x64 build only.
 
 ## Development setup
 
