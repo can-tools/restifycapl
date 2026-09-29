@@ -669,12 +669,9 @@ TEST_F(AsyncTextApiTest, DispatchRequestAsyncBodyOnDeleteIsInvalidArgumentBefore
   EXPECT_EQ(transport.CallCount(), 0);
 }
 
-// Trap: do not relax this expectation to match async-text-api.cpp's local
-// ForbidsBody, which currently omits HttpMethod::Head. sync-operations.cpp's
-// ForbidsBody -- the function this dispatch path is required to match --
-// forbids a body on Head as well as Get/Delete, and HEAD is only reachable
-// through this function, so a mismatch here lets a HEAD body silently reach
-// the transport.
+// Trap: HEAD must reject a body before dispatch, exactly like GET and
+// DELETE -- do not relax this expectation, or a HEAD body could reach
+// the transport unnoticed.
 TEST_F(AsyncTextApiTest, DispatchRequestAsyncBodyOnHeadIsInvalidArgumentBeforeDispatch) {
   TextParam method("HEAD");
   TextParam url("http://example.invalid/");
@@ -748,7 +745,7 @@ TEST_F(AsyncTextApiTest, AwaitAsyncResponseReturnsOkOnCompletion) {
 }
 
 // ---------------------------------------------------------------------------
-// ReadAsyncResponse -- D12's write order: zero the three out-parameters on
+// ReadAsyncResponse's write order: zero the three out-parameters on
 // entry, then write them (if the slot is Complete) before attempting the
 // copy, so a copy failure never erases what a retry needs.
 // ---------------------------------------------------------------------------
