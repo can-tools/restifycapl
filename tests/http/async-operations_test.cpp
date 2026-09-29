@@ -260,6 +260,37 @@ TEST_F(AsyncEngineTest, TransportTimeoutSurfacesInRequestStatusWithZeroHttpStatu
 }
 
 // ---------------------------------------------------------------------------
+// Case 1: all 8 slots occupied by in-flight requests -> a 9th Dispatch gets
+// NoFreeRequestSlot.
+// ---------------------------------------------------------------------------
+
+TEST_F(AsyncEngineTest, DispatchBeyondSlotCountReturnsNoFreeRequestSlot) {
+  std::vector<std::string> urls;
+  for (std::size_t i = 0; i < kAsyncRequestSlotCount; ++i) {
+    urls.push_back("http://example.invalid/case1-" + std::to_string(i));
+  }
+
+  std::vector<std::uint32_t> requestIds;
+  for (const auto& url : urls) {
+    ExpectGateTracked(url);
+    requestIds.push_back(DispatchOrDie(url));
+  }
+  for (const auto& url : urls) {
+    ASSERT_TRUE(transport.WaitForGateEntered(url));
+  }
+
+  std::uint32_t extraRequestId = 0;
+  HttpRequest extraRequest = MakeRequest("http://example.invalid/case1-extra");
+  EXPECT_EQ(engine.Dispatch(client, extraRequest, extraRequestId), Status::NoFreeRequestSlot);
+  EXPECT_EQ(extraRequestId, 0u);
+
+  for (std::size_t i = 0; i < urls.size(); ++i) {
+    transport.Release(urls[i], Status::Ok, HttpResponse{});
+    AwaitOrDie(requestIds[i]);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Case 11: DiscardAll frees every non-Running slot immediately and reports
 // the Running count (now Abandoned, cancelled but not yet actually stopped)
 // in stillRunning.
@@ -295,4 +326,165 @@ TEST_F(AsyncEngineTest, DiscardAllFreesCompleteAndConsumedSlotsAndReportsStillRu
   EXPECT_EQ(engine.Poll(runningId, pollState), Status::UnknownRequestId);
 
   transport.Release(runningUrl, Status::Ok, HttpResponse{});
+}
+
+// ---------------------------------------------------------------------------
+// Case 2: completions released in an order different from dispatch order
+// still reach the correct request id -- no id/response mixup.
+// ---------------------------------------------------------------------------
+
+TEST_F(AsyncEngineTest, OutOfOrderCompletionsReachTheCorrectRequestId) {
+  const std::string urlA = "http://example.invalid/case2-a";
+  const std::string urlB = "http://example.invalid/case2-b";
+  const std::string urlC = "http://example.invalid/case2-c";
+  ExpectGateTracked(urlA);
+  ExpectGateTracked(urlB);
+  ExpectGateTracked(urlC);
+
+  const std::uint32_t idA = DispatchOrDie(urlA);
+  const std::uint32_t idB = DispatchOrDie(urlB);
+  const std::uint32_t idC = DispatchOrDie(urlC);
+  ASSERT_TRUE(transport.WaitForGateEntered(urlA));
+  ASSERT_TRUE(transport.WaitForGateEntered(urlB));
+  ASSERT_TRUE(transport.WaitForGateEntered(urlC));
+
+  HttpResponse responseA;
+  responseA.statusCode = 201;
+  responseA.body = "body-a";
+  HttpResponse responseB;
+  responseB.statusCode = 202;
+  responseB.body = "body-b";
+  HttpResponse responseC;
+  responseC.statusCode = 203;
+  responseC.body = "body-c";
+
+  // Released out of dispatch order: C, then A, then B.
+  transport.Release(urlC, Status::Ok, responseC);
+  AwaitOrDie(idC);
+  transport.Release(urlA, Status::Ok, responseA);
+  AwaitOrDie(idA);
+  transport.Release(urlB, Status::Ok, responseB);
+  AwaitOrDie(idB);
+
+  char buffer[64];
+  std::int32_t requestStatus = -1;
+  std::int32_t httpStatusCode = -1;
+  std::uint32_t responseBodyLength = 0;
+
+  ASSERT_EQ(engine.Read(idA, buffer, sizeof(buffer), requestStatus, httpStatusCode,
+                         responseBodyLength),
+            Status::Ok);
+  EXPECT_EQ(httpStatusCode, 201);
+  EXPECT_STREQ(buffer, "body-a");
+
+  ASSERT_EQ(engine.Read(idB, buffer, sizeof(buffer), requestStatus, httpStatusCode,
+                         responseBodyLength),
+            Status::Ok);
+  EXPECT_EQ(httpStatusCode, 202);
+  EXPECT_STREQ(buffer, "body-b");
+
+  ASSERT_EQ(engine.Read(idC, buffer, sizeof(buffer), requestStatus, httpStatusCode,
+                         responseBodyLength),
+            Status::Ok);
+  EXPECT_EQ(httpStatusCode, 203);
+  EXPECT_STREQ(buffer, "body-c");
+}
+
+// ---------------------------------------------------------------------------
+// Case 3: reading a Complete slot to full completion frees it (Consumed
+// counts as available for dispatch, same as Free) -- a subsequent Dispatch
+// reclaims it instead of failing with NoFreeRequestSlot.
+// ---------------------------------------------------------------------------
+
+TEST_F(AsyncEngineTest, ReadThenDispatchReclaimsConsumedSlot) {
+  std::vector<std::string> runningUrls;
+  for (std::size_t i = 0; i < kAsyncRequestSlotCount - 1; ++i) {
+    runningUrls.push_back("http://example.invalid/case3-running-" + std::to_string(i));
+  }
+  std::vector<std::uint32_t> runningIds;
+  for (const auto& url : runningUrls) {
+    ExpectGateTracked(url);
+    runningIds.push_back(DispatchOrDie(url));
+  }
+  for (const auto& url : runningUrls) {
+    ASSERT_TRUE(transport.WaitForGateEntered(url));
+  }
+
+  HttpResponse scripted;
+  scripted.statusCode = 200;
+  scripted.body = "consume-me";
+  transport.SetResult(Status::Ok, scripted);
+  const std::uint32_t completeId = DispatchOrDie("http://example.invalid/case3-complete");
+  AwaitOrDie(completeId);
+
+  // All 8 slots are now occupied (7 Running + 1 Complete) -- confirm dispatch
+  // is blocked before reclaiming any slot.
+  std::uint32_t blockedRequestId = 0;
+  HttpRequest blockedRequest = MakeRequest("http://example.invalid/case3-blocked");
+  EXPECT_EQ(engine.Dispatch(client, blockedRequest, blockedRequestId), Status::NoFreeRequestSlot);
+
+  char buffer[64];
+  std::int32_t requestStatus = -1;
+  std::int32_t httpStatusCode = -1;
+  std::uint32_t responseBodyLength = 0;
+  ASSERT_EQ(engine.Read(completeId, buffer, sizeof(buffer), requestStatus, httpStatusCode,
+                         responseBodyLength),
+            Status::Ok);
+  EXPECT_STREQ(buffer, "consume-me");
+
+  const std::string reclaimedUrl = "http://example.invalid/case3-reclaimed";
+  ExpectGateTracked(reclaimedUrl);
+  const std::uint32_t reclaimedId = DispatchOrDie(reclaimedUrl);
+  EXPECT_NE(reclaimedId, 0u);
+  ASSERT_TRUE(transport.WaitForGateEntered(reclaimedUrl));
+
+  // All 8 slots are occupied again -- a further dispatch is blocked once more.
+  std::uint32_t stillBlockedRequestId = 0;
+  EXPECT_EQ(engine.Dispatch(client, blockedRequest, stillBlockedRequestId),
+            Status::NoFreeRequestSlot);
+
+  for (std::size_t i = 0; i < runningUrls.size(); ++i) {
+    transport.Release(runningUrls[i], Status::Ok, HttpResponse{});
+    AwaitOrDie(runningIds[i]);
+  }
+  transport.Release(reclaimedUrl, Status::Ok, HttpResponse{});
+  AwaitOrDie(reclaimedId);
+}
+
+// ---------------------------------------------------------------------------
+// Case 4: an undersized (but non-zero) buffer on Read gives BufferTooSmall
+// and leaves the slot retryable -- a follow-up Read with a big-enough buffer
+// on the same request id succeeds and returns the full body.
+// ---------------------------------------------------------------------------
+
+TEST_F(AsyncEngineTest, ReadWithUndersizedBufferIsRetryableWithLargerBuffer) {
+  const std::string url = "http://example.invalid/case4";
+  HttpResponse scripted;
+  scripted.statusCode = 200;
+  scripted.body = "this body is longer than the small buffer";
+  transport.SetResult(Status::Ok, scripted);
+
+  const std::uint32_t requestId = DispatchOrDie(url);
+  AwaitOrDie(requestId);
+
+  char smallBuffer[8];
+  std::int32_t requestStatus = -1;
+  std::int32_t httpStatusCode = -1;
+  std::uint32_t responseBodyLength = 0;
+  EXPECT_EQ(engine.Read(requestId, smallBuffer, sizeof(smallBuffer), requestStatus, httpStatusCode,
+                         responseBodyLength),
+            Status::BufferTooSmall);
+  EXPECT_EQ(httpStatusCode, 200);
+  EXPECT_EQ(responseBodyLength, scripted.body.size());
+
+  char bigBuffer[128];
+  EXPECT_EQ(engine.Read(requestId, bigBuffer, sizeof(bigBuffer), requestStatus, httpStatusCode,
+                         responseBodyLength),
+            Status::Ok);
+  EXPECT_EQ(httpStatusCode, 200);
+  EXPECT_STREQ(bigBuffer, scripted.body.c_str());
+
+  EXPECT_EQ(engine.Read(requestId, bigBuffer, sizeof(bigBuffer), requestStatus, httpStatusCode,
+                         responseBodyLength),
+            Status::UnknownRequestId);
 }
