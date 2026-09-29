@@ -92,7 +92,8 @@ include the CAPL SDK headers.
 ## Agents
 
 See `.claude/agents/`: `planner`, `plan-writer`, `cpp-implementer`,
-`build-pipeline-engineer`, `test-engineer`, `code-reviewer`. Start new
+`build-pipeline-engineer`, `test-engineer`, `code-reviewer`, `docs-writer`
+(sole owner of README.md). Start new
 features or non-trivial changes with `planner` before implementation.
 Delegate build/CI work, testing, and export-contract-sensitive review to
 the matching agent instead of doing it inline in the main session.

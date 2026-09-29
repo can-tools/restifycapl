@@ -66,7 +66,9 @@ CANoe (a "CAPL REST DLL").
 4. Recommend `test-engineer` for new or changed testable logic.
 5. If you appended a new operation to the export table, add a one-line
    `## [Unreleased]` bullet to `CHANGELOG.md` describing it, at the same
-   time — see `project-docs`. Do not defer this to a later pass.
+   time — see `project-docs`. Do not defer this to a later pass. Do not
+   edit README.md; state "README impact: operations table" in your report
+   so the coordinator can dispatch `docs-writer`.
 6. Do not run release or CI-affecting commands yourself — that is
    `build-pipeline-engineer`'s responsibility.
 
