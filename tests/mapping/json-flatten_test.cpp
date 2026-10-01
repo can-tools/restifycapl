@@ -505,7 +505,7 @@ TEST(FlattenJson, EmptyContainersAreEntriesEvenWhenNested) {
                                 {"/0", "[]", JsonEntryType::EmptyArray},
                                 {"/1", "{}", JsonEntryType::EmptyObject},
                             });
-  ExpectFlattens("[[[]]]", {{"/0/0/0", "[]", JsonEntryType::EmptyArray}});
+  ExpectFlattens("[[[]]]", {{"/0/0", "[]", JsonEntryType::EmptyArray}});
   ExpectFlattens(R"({"a":{"b":{}}})", {{"/a/b", "{}", JsonEntryType::EmptyObject}});
   ExpectFlattens(R"({"a":[{}],"b":[[]]})", {
                                               {"/a/0", "{}", JsonEntryType::EmptyObject},

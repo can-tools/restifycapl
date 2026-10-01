@@ -215,6 +215,10 @@ std::string FlatArrayOf(const std::string& element, std::size_t count) {
 
 }  // namespace
 
+TEST(TextApiStatus, InternalErrorHasTheDocumentedNumber) {
+  EXPECT_EQ(static_cast<int>(Status::InternalError), -35);
+}
+
 // ---------------------------------------------------------------------------
 // ParseJsonDocument: success and input bounds.
 // ---------------------------------------------------------------------------
