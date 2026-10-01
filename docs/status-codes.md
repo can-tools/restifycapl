@@ -30,6 +30,8 @@ version-resource read that yields it has no place in CANoe-unaware code).
 ## Reserved ranges
 
 - `-7..-9`: future module-local glue codes, currently empty.
+- `-30..-39`: the mapping layer (`src/mapping/`). `-30..-34` are assigned;
+  `-35..-39` are free.
 
 Each range has exactly one owning layer, so a future addition never has to
 guess where the next free number is.
@@ -63,3 +65,15 @@ guess where the next free number is.
 | `UnknownRequestId` | The id was 0, never issued, or already `Consumed`, `Abandoned`, or `Free`. |
 | `WaitTimeout` | `await`'s deadline was reached, kept distinct from `Timeout` (-19), which is libcurl's own transfer timeout. |
 | `AsyncStartFailed` | Worker thread creation failed. |
+
+## `-30..-34`
+
+| `Status` | Meaning |
+|---|---|
+| `NoFreeDocumentSlot` | Parsing found no free document slot. |
+| `UnknownDocumentId` | The document id is unknown or the document was already discarded. |
+| `DocumentTooLarge` | The JSON input is larger than 1 MiB. |
+| `NestingTooDeep` | The JSON nesting is deeper than 64 levels. |
+| `TooManyEntries` | The document flattens to more than 10,000 entries. |
+
+`ParseError` (`-10`) covers invalid JSON, empty text and invalid UTF-8.
