@@ -6,9 +6,7 @@
 
 namespace {
 
-// Limits are enforced in this SAX pass, before any DOM exists. Building the
-// document first and checking afterwards would let an oversized or too-deep
-// input cost its full allocation before being rejected.
+// Limits are enforced in this SAX pass so oversized input is rejected before any DOM allocation.
 class LimitCheckingSax final : public nlohmann::json_sax<JsonValue> {
  public:
   Status failure() const { return failure_; }
@@ -123,18 +121,9 @@ Status AppendLeaf(const std::string& key, const JsonValue& node, std::vector<Fla
 
   FlatEntry entry;
   entry.key = key;
-  if (node.is_object()) {
-    entry.value = "{}";
-    entry.type = JsonEntryType::EmptyObject;
-  } else if (node.is_array()) {
-    entry.value = "[]";
-    entry.type = JsonEntryType::EmptyArray;
-  } else {
-    const Status status = ValueToText(node, entry.value);
-    if (status != Status::Ok) {
-      return status;
-    }
-    entry.type = ClassifyScalar(node);
+  const Status status = DescribeLeaf(node, entry.value, entry.type);
+  if (status != Status::Ok) {
+    return status;
   }
   entries.push_back(std::move(entry));
   return Status::Ok;
@@ -179,6 +168,24 @@ Status FlattenDocument(const JsonValue& root, std::vector<FlatEntry>& entries) {
 }
 
 }  // namespace
+
+Status DescribeLeaf(const JsonValue& node, std::string& text, JsonEntryType& type) {
+  if (node.is_object() || node.is_array()) {
+    if (!node.empty()) {
+      return Status::TypeMismatch;
+    }
+    text = node.is_object() ? "{}" : "[]";
+    type = node.is_object() ? JsonEntryType::EmptyObject : JsonEntryType::EmptyArray;
+    return Status::Ok;
+  }
+
+  const Status status = ValueToText(node, text);
+  if (status != Status::Ok) {
+    return status;
+  }
+  type = ClassifyScalar(node);
+  return Status::Ok;
+}
 
 Status FlattenJson(std::string_view text, FlattenResult& out) {
   if (text.size() > kMaxJsonInputBytes) {

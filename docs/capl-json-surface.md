@@ -254,7 +254,7 @@ limit in a later release is compatible; lowering one is not.
 
 No exception crosses into CANoe. If something unexpected fails inside the DLL
 (for example, memory runs out), the operation returns `InternalError`
-(`-35`) and writes none of its out-parameters; the same happens for all six
+(`-35`) and leaves its out-parameters at 0; the same happens for all six
 operations. It is distinct from `InvalidArgument` (`-1`), which always means
 the caller passed a bad argument.
 

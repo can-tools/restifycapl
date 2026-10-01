@@ -14,40 +14,6 @@ namespace {
 static_assert(kMaxFlatEntries <= std::numeric_limits<std::uint32_t>::max(),
               "entry counts must fit a CAPL dword");
 
-JsonEntryType ClassifyScalar(const JsonValue& node) {
-  if (node.is_string()) {
-    return JsonEntryType::String;
-  }
-  if (node.is_number()) {
-    return JsonEntryType::Number;
-  }
-  if (node.is_boolean()) {
-    return JsonEntryType::Bool;
-  }
-  if (node.is_null()) {
-    return JsonEntryType::Null;
-  }
-  return JsonEntryType::None;
-}
-
-Status DescribeNode(const JsonValue& node, std::string& text, JsonEntryType& type) {
-  if (node.is_object() || node.is_array()) {
-    if (!node.empty()) {
-      return Status::TypeMismatch;
-    }
-    text = node.is_object() ? "{}" : "[]";
-    type = node.is_object() ? JsonEntryType::EmptyObject : JsonEntryType::EmptyArray;
-    return Status::Ok;
-  }
-
-  const Status status = ValueToText(node, text);
-  if (status != Status::Ok) {
-    return status;
-  }
-  type = ClassifyScalar(node);
-  return Status::Ok;
-}
-
 Status CopyEntryTexts(const FlatEntry& entry, char* key, std::uint32_t keySize, char* value,
                       std::uint32_t valueSize) {
   if (key == nullptr || keySize == 0 || value == nullptr || valueSize == 0) {
@@ -177,7 +143,7 @@ Status JsonDocumentStore::ReadValue(std::uint32_t documentId, std::string_view p
 
   std::string text;
   JsonEntryType type = JsonEntryType::None;
-  status = DescribeNode(*node, text, type);
+  status = DescribeLeaf(*node, text, type);
   if (status != Status::Ok) {
     return status;
   }
@@ -190,8 +156,7 @@ Status JsonDocumentStore::ReadValue(std::uint32_t documentId, std::string_view p
 }
 
 Status JsonDocumentStore::Discard(std::uint32_t documentId) {
-  // Trap: the document is destroyed only after the lock is released. Freeing a large document
-  // under mutex_ would block every concurrent read and parse for the length of the free.
+  // The document is destroyed after the lock is released because freeing a large one under the mutex would stall concurrent readers.
   FlattenResult doomed;
   {
     std::lock_guard<std::mutex> lock(mutex_);

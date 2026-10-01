@@ -36,3 +36,6 @@ struct FlattenResult {
 
 // FlattenJson: parses `text` and lists its leaves as JSON Pointer keys in document order; `out` is replaced only on Ok; see docs/json-flatten.md.
 Status FlattenJson(std::string_view text, FlattenResult& out);
+
+// DescribeLeaf: text and entry type of a scalar, null, or empty container; TypeMismatch for a non-empty container.
+Status DescribeLeaf(const JsonValue& node, std::string& text, JsonEntryType& type);
