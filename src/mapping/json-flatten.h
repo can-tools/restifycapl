@@ -13,6 +13,7 @@
 inline constexpr std::size_t kMaxJsonInputBytes = 1048576;
 inline constexpr std::size_t kMaxJsonDepth = 64;
 inline constexpr std::size_t kMaxFlatEntries = 10000;
+inline constexpr std::size_t kMaxFlatKeyBytes = 4194304;
 
 enum class JsonEntryType : std::int32_t {
   None = 0,

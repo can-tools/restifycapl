@@ -40,6 +40,7 @@ inline const char* StatusName(Status status) {
     case Status::NestingTooDeep: return "NestingTooDeep";
     case Status::TooManyEntries: return "TooManyEntries";
     case Status::InternalError: return "InternalError";
+    case Status::KeyTextTooLarge: return "KeyTextTooLarge";
   }
   return "UnknownStatus";
 }

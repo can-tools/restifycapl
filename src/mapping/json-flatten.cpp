@@ -1,5 +1,6 @@
 #include "mapping/json-flatten.h"
 
+#include <algorithm>
 #include <utility>
 
 #include "core/type-conversion.h"
@@ -19,13 +20,22 @@ class LimitCheckingSax final : public nlohmann::json_sax<JsonValue> {
   bool string(string_t&) override { return Leaf(); }
   bool binary(binary_t&) override { return Reject(Status::ParseError); }
 
-  bool start_object(std::size_t) override { return Open(); }
+  bool start_object(std::size_t) override { return Open(false); }
   bool end_object() override { return Close(); }
-  bool start_array(std::size_t) override { return Open(); }
+  bool start_array(std::size_t) override { return Open(true); }
   bool end_array() override { return Close(); }
 
-  bool key(string_t&) override {
+  bool key(string_t& name) override {
     previousEventOpenedContainer_ = false;
+    if (name.find('\0') != string_t::npos) {
+      return Reject(Status::ParseError);
+    }
+    pendingTokenBytes_ = name.size();
+    for (const char c : name) {
+      if (c == '~' || c == '/') {
+        ++pendingTokenBytes_;
+      }
+    }
     return true;
   }
 
@@ -47,15 +57,44 @@ class LimitCheckingSax final : public nlohmann::json_sax<JsonValue> {
     return true;
   }
 
-  bool Leaf() {
-    previousEventOpenedContainer_ = false;
-    return CountEntry();
+  bool AddKeyBytes(std::size_t keyBytes) {
+    if (keyBytes > kMaxFlatKeyBytes - keyTotal_) {
+      return Reject(Status::KeyTextTooLarge);
+    }
+    keyTotal_ += keyBytes;
+    return true;
   }
 
-  bool Open() {
+  static std::size_t DecimalDigits(std::size_t n) {
+    std::size_t digits = 1;
+    while (n >= 10) {
+      n /= 10;
+      ++digits;
+    }
+    return digits;
+  }
+
+  std::size_t NextKeyBytes() {
+    if (depth_ == 0) {
+      return 0;
+    }
+    KeyFrame& top = frames_[depth_ - 1];
+    const std::size_t token = top.isArray ? DecimalDigits(top.nextIndex++) : pendingTokenBytes_;
+    return top.prefixBytes + 1 + token;
+  }
+
+  bool Leaf() {
+    previousEventOpenedContainer_ = false;
+    const std::size_t keyBytes = NextKeyBytes();
+    return CountEntry() && AddKeyBytes(keyBytes);
+  }
+
+  bool Open(bool isArray) {
     if (depth_ >= kMaxJsonDepth) {
       return Reject(Status::NestingTooDeep);
     }
+    const std::size_t keyBytes = NextKeyBytes();
+    frames_[depth_] = KeyFrame{isArray, 0, keyBytes};
     ++depth_;
     previousEventOpenedContainer_ = true;
     return true;
@@ -65,12 +104,21 @@ class LimitCheckingSax final : public nlohmann::json_sax<JsonValue> {
     const bool wasEmpty = previousEventOpenedContainer_;
     previousEventOpenedContainer_ = false;
     --depth_;
-    return wasEmpty ? CountEntry() : true;
+    return !wasEmpty || (CountEntry() && AddKeyBytes(frames_[depth_].prefixBytes));
   }
+
+  struct KeyFrame {
+    bool isArray = false;
+    std::size_t nextIndex = 0;
+    std::size_t prefixBytes = 0;
+  };
 
   Status failure_ = Status::ParseError;
   std::size_t depth_ = 0;
   std::size_t entryCount_ = 0;
+  std::size_t keyTotal_ = 0;
+  std::size_t pendingTokenBytes_ = 0;
+  KeyFrame frames_[kMaxJsonDepth];
   bool previousEventOpenedContainer_ = false;
 };
 
@@ -188,6 +236,9 @@ Status FlattenJson(std::string_view text, FlattenResult& out) {
     return Status::DocumentTooLarge;
   }
   if (text.empty()) {
+    return Status::ParseError;
+  }
+  if (std::find(text.begin(), text.end(), '\0') != text.end()) {
     return Status::ParseError;
   }
 

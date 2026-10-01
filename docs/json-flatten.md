@@ -107,12 +107,13 @@ These follow the JSON library's (nlohmann/json 3.11.3) scanner.
   a text that is only a BOM.
 - **Comments** (`//` and `/* */`) are not allowed and give `ParseError`.
 - **`-0`** is read as the integer `0`, so its entry text is `0`.
-- **`\u0000`** is accepted inside strings and object keys, and the decoded
-  text then contains a NUL byte. A raw NUL byte in a string is invalid JSON.
-  Entry value and key texts are copied into CAPL buffers with their full
-  length (the `-2` size check counts the NUL byte and what follows it), but a
-  CAPL script reads them as NUL-terminated text, so it sees only the part
-  before the first NUL.
+- **NUL bytes.** A NUL byte anywhere in the input text is `ParseError`. A
+  `\u0000` escape in an object key is `ParseError` too, so no entry key ever
+  contains a NUL and every key can be read back by path. A `\u0000` escape in
+  a string value is accepted and the value text then contains a NUL byte. Value
+  text is copied into CAPL buffers with its full length (the `-2` size check
+  counts the NUL byte and what follows it), but a CAPL script reads it as
+  NUL-terminated text, so it sees only the part before the first NUL.
 
 ## Limits
 
@@ -121,8 +122,10 @@ These follow the JSON library's (nlohmann/json 3.11.3) scanner.
 | Input size (`kMaxJsonInputBytes`) | 1 MiB (1048576 bytes) | `DocumentTooLarge` (-32) |
 | Nesting depth (`kMaxJsonDepth`; root container = 1) | 64 | `NestingTooDeep` (-33) |
 | Entries (`kMaxFlatEntries`) | 10000 | `TooManyEntries` (-34) |
+| Key text (`kMaxFlatKeyBytes`; sum of all entry keys in bytes, after escaping, no NULs) | 4 MiB (4194304 bytes) | `KeyTextTooLarge` (-36) |
 
-Input of exactly 1048576 bytes, depth 64 and 10000 entries are accepted.
+Input of exactly 1048576 bytes, depth 64, 10000 entries and 4194304 bytes of
+key text are accepted.
 
 - The size check happens before anything is allocated for the document.
 - Depth and entry limits are enforced while the text is scanned, before the
@@ -133,12 +136,26 @@ Input of exactly 1048576 bytes, depth 64 and 10000 entries are accepted.
   so a repeated key counts once per occurrence even though only the last value
   survives. A text with more than 10000 leaves is rejected even if duplicate
   keys would reduce the final list below the limit.
+- The key text limit is counted while scanning, per occurrence in the text
+  (before duplicate keys collapse). It sums the byte length of every entry key
+  as `ReadEntry` returns it: `~` and `/` in an object key count 2 bytes, an
+  array index counts its decimal digits, the root key `""` counts 0, and an
+  empty container counts its own key. If one leaf crosses both the entry limit
+  and the key text limit, `TooManyEntries` is reported, not `KeyTextTooLarge`.
+- The key text limit exists because every entry key repeats its full path, so a
+  deep or wide document can need far more key text than its input size.
 - Raising a limit later is compatible; lowering one is not.
 
 ## Other errors
 
-`ParseError` (-10) is returned for invalid JSON, empty text and invalid UTF-8.
-Trailing content after the first JSON value is invalid JSON.
+`ParseError` (-10) is returned for invalid JSON, empty text, invalid UTF-8, a
+NUL byte in the text and a NUL in an object key. Trailing content after the
+first JSON value is invalid JSON.
+
+FlattenJson reports every input-related failure as a status. It can still
+throw `std::bad_alloc` when the process cannot supply memory. The limits bound
+what one document needs, so this means the host is short of memory, not that
+the input was too large. The text layer turns it into `InternalError` (-35).
 
 ## Cost
 
@@ -146,3 +163,6 @@ Object lookup in the ordered document type is linear, so building an object
 with k fields takes about k²/2 field comparisons. The 10000-entry limit bounds
 this: one flat object of 10000 fields is the worst case. The text is scanned
 twice, once to check the limits and once to build the document.
+
+Memory: the key text of one document is bounded to 4 MiB, so 8 held documents
+need at most 32 MiB of key text.

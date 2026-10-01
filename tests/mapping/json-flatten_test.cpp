@@ -203,6 +203,55 @@ std::string PaddedToSize(std::string text, std::size_t size) {
   return text;
 }
 
+// Key-text budget fixture: 4000 leaves under a 1022-byte key, each entry key "/A/<i>" being
+// 1 + 1022 + 1 + digits(i) = 1024 + digits(i) bytes, plus one tail leaf keyed "/<tailKey>".
+constexpr std::size_t kBudgetLeafCount = 4000;
+constexpr std::size_t kBudgetLongKeyLength = 1022;
+constexpr std::size_t kBudgetDigitSum = 14890;  // digits of 0..3999: 10*1 + 90*2 + 900*3 + 3000*4
+constexpr std::size_t kBudgetTailKeyLength = 83413;
+static_assert(kBudgetLeafCount * (1 + kBudgetLongKeyLength + 1) + kBudgetDigitSum + 1 +
+                      kBudgetTailKeyLength ==
+                  4194304,
+              "the fixture must land exactly on the documented key-text limit");
+
+std::size_t DigitSumBelow(std::size_t count) {
+  std::size_t sum = 0;
+  for (std::size_t i = 0; i < count; ++i) {
+    sum += std::to_string(i).size();
+  }
+  return sum;
+}
+
+std::size_t TotalKeyBytes(const FlattenResult& result) {
+  std::size_t total = 0;
+  for (const FlatEntry& entry : result.entries) {
+    total += entry.key.size();
+  }
+  return total;
+}
+
+std::string ZeroArrayMember(const std::string& key, std::size_t count) {
+  return "\"" + key + "\":" + FlatArrayOf("0", count);
+}
+
+// Everything up to and including the tail member's value, without the closing brace, so a test can
+// append further members.
+std::string KeyBudgetPrefix(const std::string& tailKey, const std::string& tailValue) {
+  return "{" + ZeroArrayMember(std::string(kBudgetLongKeyLength, 'a'), kBudgetLeafCount) + ",\"" +
+         tailKey + "\":" + tailValue;
+}
+
+std::string KeyBudgetDocument(const std::string& tailKey, const std::string& tailValue = "0") {
+  return KeyBudgetPrefix(tailKey, tailValue) + "}";
+}
+
+void ExpectKeyBudgetAtTheLimit(const std::string& text, std::size_t expectedEntries) {
+  FlattenResult result;
+  ASSERT_EQ(FlattenJson(text, result), Status::Ok);
+  EXPECT_EQ(result.entries.size(), expectedEntries);
+  EXPECT_EQ(TotalKeyBytes(result), kMaxFlatKeyBytes);
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -239,7 +288,7 @@ TEST(FlattenJson, KeysWithSpecialCharactersResolveBackToTheirValues) {
       R"({"\u00e9":"\u00fc","\u65e5\u672c":"\ud83d\ude00"})",
       R"({"a\/b":{"c~d":[{"e/f":null}]}})",
       R"({"0":{"1":[{"2":3}]}})",
-      R"({"a\u0000b":"c\u0000d"})",
+      R"({"k":"c\u0000d"})",
   };
   for (const char* document : documents) {
     ExpectRoundTrips(document);
@@ -530,8 +579,22 @@ TEST(FlattenJson, DecodedNulInAStringValueIsKeptInTheEntryText) {
   ExpectFlattens(R"({"k":"a\u0000b"})", {{"/k", std::string("a\0b", 3), JsonEntryType::String}});
 }
 
-TEST(FlattenJson, DecodedNulInAKeyIsKeptInTheEntryKey) {
-  ExpectFlattens(R"({"a\u0000b":1})", {{std::string("/a\0b", 4), "1", JsonEntryType::Number}});
+TEST(FlattenJson, DecodedNulInAKeyIsParseError) {
+  ExpectFails(R"({"a\u0000b":1})", Status::ParseError);
+  ExpectFails(R"({"\u0000":1})", Status::ParseError);
+  ExpectFails(R"({"a\u0000":1})", Status::ParseError);
+  ExpectFails(R"({"x":{"a\u0000b":1}})", Status::ParseError);
+  ExpectFails(R"([{"a\u0000b":1}])", Status::ParseError);
+  ExpectFails(R"({"ok":1,"a\u0000b":{}})", Status::ParseError);
+}
+
+TEST(FlattenJson, DecodedNulInAKeyIsReportedAtTheKeyInTextOrder) {
+  const std::string manyLeaves = ZeroArrayMember("A", kMaxFlatEntries + 1);
+  ExpectFails("{" + manyLeaves + R"(,"k\u0000":1})", Status::TooManyEntries);
+  ExpectFails(R"({"k\u0000":1,)" + manyLeaves + "}", Status::ParseError);
+
+  ExpectFails(KeyBudgetPrefix(std::string(kBudgetTailKeyLength + 1, 'b'), "0") + R"(,"k\u0000":1})",
+              Status::KeyTextTooLarge);
 }
 
 TEST(FlattenJson, NonEmptyContainersProduceNoEntryOfTheirOwn) {
@@ -589,8 +652,17 @@ TEST(FlattenJson, StringViewSizeDecidesTheTextNotAnyLaterBytes) {
   ExpectFlattens(std::string_view("[1]garbage", 3), {{"/0", "1", JsonEntryType::Number}});
 }
 
-TEST(FlattenJson, NulAfterTheDocumentEndsTheInput) {
-  ExpectFlattens(std::string("[1]\0", 4), {{"/0", "1", JsonEntryType::Number}});
+TEST(FlattenJson, NulAfterTheDocumentIsParseError) {
+  ExpectFails(std::string("[1]\0", 4), Status::ParseError);
+  ExpectFails(std::string("[1]\0garbage", 11), Status::ParseError);
+  ExpectFails(std::string("{\"a\":1}\0", 8), Status::ParseError);
+}
+
+TEST(FlattenJson, NulInTheTextIsCheckedBeforeScanningSoItBeatsLaterLimitFailures) {
+  ExpectFails(NestedArrays(kMaxJsonDepth + 1) + std::string(1, '\0'), Status::ParseError);
+  ExpectFails(FlatArrayOf("0", kMaxFlatEntries + 1) + std::string(1, '\0'), Status::ParseError);
+  ExpectFails(KeyBudgetDocument(std::string(kBudgetTailKeyLength + 1, 'b')) + std::string(1, '\0'),
+              Status::ParseError);
 }
 
 TEST(FlattenJson, SuccessReplacesThePreviousResultCompletely) {
@@ -696,12 +768,14 @@ TEST(FlattenJson, FailureStatusesHaveTheDocumentedNumbers) {
   EXPECT_EQ(static_cast<int>(Status::DocumentTooLarge), -32);
   EXPECT_EQ(static_cast<int>(Status::NestingTooDeep), -33);
   EXPECT_EQ(static_cast<int>(Status::TooManyEntries), -34);
+  EXPECT_EQ(static_cast<int>(Status::KeyTextTooLarge), -36);
 }
 
 TEST(FlattenJson, LimitConstantsHaveTheDocumentedValues) {
   EXPECT_EQ(kMaxJsonInputBytes, 1048576u);
   EXPECT_EQ(kMaxJsonDepth, 64u);
   EXPECT_EQ(kMaxFlatEntries, 10000u);
+  EXPECT_EQ(kMaxFlatKeyBytes, 4194304u);
 }
 
 TEST(FlattenJson, EmptyTextIsParseError) {
@@ -831,6 +905,7 @@ TEST(FlattenJson, CommentsAreParseError) {
 TEST(FlattenJson, NulBeforeOrInsideTheDocumentIsParseError) {
   ExpectFails(std::string("\0[1]", 4), Status::ParseError);
   ExpectFails(std::string("[1,\0 2]", 7), Status::ParseError);
+  ExpectFails(std::string("\0", 1), Status::ParseError);
 }
 
 TEST(FlattenJson, UnescapedControlCharactersInStringsAreParseError) {
@@ -894,13 +969,11 @@ TEST(FlattenJson, OversizedInputIsDocumentTooLargeEvenWhenNotJson) {
   ExpectFails(std::string(kMaxJsonInputBytes + 1, 'x'), Status::DocumentTooLarge);
 }
 
-TEST(FlattenJson, NulAsTheLastByteOfAMaximumSizeInputIsAcceptedAndOneMoreByteIsTooLarge) {
+TEST(FlattenJson, NulAsTheLastByteOfAMaximumSizeInputIsParseErrorAndOneMoreByteIsTooLarge) {
   std::string text = PaddedToSize("[0]", kMaxJsonInputBytes - 1);
   text.push_back('\0');
   ASSERT_EQ(text.size(), kMaxJsonInputBytes);
-  FlattenResult result;
-  ASSERT_EQ(FlattenJson(text, result), Status::Ok);
-  ExpectEntries(result, {{"/0", "0", JsonEntryType::Number}});
+  ExpectFails(text, Status::ParseError);
 
   text = PaddedToSize("[0]", kMaxJsonInputBytes);
   text.push_back('\0');
@@ -1110,6 +1183,126 @@ TEST(FlattenJson, TooManyEntriesIsReportedBeforeLaterMalformedText) {
 
 TEST(FlattenJson, EntryLimitIsNotReportedForAShortMalformedText) {
   ExpectFails("[0,0,garbage", Status::ParseError);
+}
+
+// ---------------------------------------------------------------------------
+// Limits: total key text. Every leaf and empty container counts the byte length of its entry key,
+// per occurrence in the text, after ~0/~1 escaping.
+// ---------------------------------------------------------------------------
+
+TEST(FlattenJson, KeyTextExactlyAtTheLimitIsAcceptedAndMatchesTheStoredKeyBytes) {
+  EXPECT_EQ(DigitSumBelow(kBudgetLeafCount), kBudgetDigitSum);
+  const std::string text = KeyBudgetDocument(std::string(kBudgetTailKeyLength, 'b'));
+  ASSERT_LE(text.size(), kMaxJsonInputBytes);
+  FlattenResult result;
+  ASSERT_EQ(FlattenJson(text, result), Status::Ok);
+  ASSERT_EQ(result.entries.size(), kBudgetLeafCount + 1);
+  EXPECT_EQ(result.entries[0].key.size(), 1 + kBudgetLongKeyLength + 1 + 1);
+  EXPECT_EQ(result.entries.back().key.size(), 1 + kBudgetTailKeyLength);
+  EXPECT_EQ(TotalKeyBytes(result), kMaxFlatKeyBytes);
+}
+
+TEST(FlattenJson, KeyTextOneByteOverTheLimitIsKeyTextTooLarge) {
+  ExpectFails(KeyBudgetDocument(std::string(kBudgetTailKeyLength + 1, 'b')),
+              Status::KeyTextTooLarge);
+}
+
+TEST(FlattenJson, TildeInAKeyCountsTwoBytesTowardsTheKeyTextLimit) {
+  // "/" + 41706 * "~0" + "x" is 83414 bytes, the same as "/" + 83413 * 'b'.
+  ExpectKeyBudgetAtTheLimit(KeyBudgetDocument(std::string(41706, '~') + "x"), kBudgetLeafCount + 1);
+  ExpectFails(KeyBudgetDocument(std::string(41707, '~') + "x"), Status::KeyTextTooLarge);
+}
+
+TEST(FlattenJson, SlashInAKeyCountsTwoBytesTowardsTheKeyTextLimit) {
+  ExpectKeyBudgetAtTheLimit(KeyBudgetDocument(std::string(41706, '/') + "x"), kBudgetLeafCount + 1);
+  ExpectFails(KeyBudgetDocument(std::string(41707, '/') + "x"), Status::KeyTextTooLarge);
+}
+
+TEST(FlattenJson, EmptyContainerKeysCountTowardsTheKeyTextLimit) {
+  const std::string atLimit(kBudgetTailKeyLength, 'b');
+  const std::string overLimit(kBudgetTailKeyLength + 1, 'b');
+  for (const char* const empty : {"{}", "[]"}) {
+    SCOPED_TRACE(empty);
+    ExpectKeyBudgetAtTheLimit(KeyBudgetDocument(atLimit, empty), kBudgetLeafCount + 1);
+    ExpectFails(KeyBudgetDocument(overLimit, empty), Status::KeyTextTooLarge);
+  }
+}
+
+TEST(FlattenJson, RepeatedKeyOccurrencesEachCountTowardsTheKeyTextLimit) {
+  // One occurrence is 2100 * 1024 + 7290 = 2157690 bytes; two are 4315380, past the limit even
+  // though the duplicate collapse leaves only 2100 entries.
+  const std::string member = ZeroArrayMember(std::string(kBudgetLongKeyLength, 'a'), 2100);
+  EXPECT_EQ(DigitSumBelow(2100), 7290u);
+  ASSERT_LT(2100 * (1 + kBudgetLongKeyLength + 1) + DigitSumBelow(2100), kMaxFlatKeyBytes);
+  ASSERT_GT(2 * (2100 * (1 + kBudgetLongKeyLength + 1) + DigitSumBelow(2100)), kMaxFlatKeyBytes);
+
+  FlattenResult result;
+  ASSERT_EQ(FlattenJson("{" + member + "}", result), Status::Ok);
+  EXPECT_EQ(result.entries.size(), 2100u);
+
+  ExpectFails("{" + member + "," + member + "}", Status::KeyTextTooLarge);
+}
+
+TEST(FlattenJson, DeepLongKeyAmplificationIsKeyTextTooLargeNotInternalError) {
+  constexpr std::size_t kLevels = 63;
+  constexpr std::size_t kLevelKeyLength = 15000;
+  constexpr std::size_t kLeaves = 9000;
+  std::string text;
+  const std::string key(kLevelKeyLength, 'k');
+  for (std::size_t i = 0; i < kLevels; ++i) {
+    text += "{\"" + key + "\":";
+  }
+  text += FlatArrayOf("0", kLeaves);
+  text.append(kLevels, '}');
+
+  ASSERT_LE(text.size(), kMaxJsonInputBytes);
+  ASSERT_EQ(kLevels + 1, kMaxJsonDepth);
+  ASSERT_LE(kLeaves, kMaxFlatEntries);
+  // Each leaf key is over 945000 bytes, so the limit is crossed within the first five leaves.
+  ASSERT_GT(kLevels * (kLevelKeyLength + 1), kMaxFlatKeyBytes / 5);
+
+  ExpectFails(text, Status::KeyTextTooLarge);
+}
+
+TEST(FlattenJson, EntryLimitIsReportedBeforeKeyTextLimitOnTheSameLeaf) {
+  // The first 10000 leaves "/<400 a's>/<i>" total 10000 * 402 + 38890 = 4058890 bytes, under the
+  // limit; the 10001st leaf "/<200000 b's>" is both the entry past the cap and the key past the
+  // limit.
+  const std::string text =
+      "{" + ZeroArrayMember(std::string(400, 'a'), kMaxFlatEntries) + ",\"" +
+      std::string(200000, 'b') + "\":0}";
+  const std::size_t keyBytesBeforeTheLastLeaf =
+      kMaxFlatEntries * (1 + 400 + 1) + DigitSumBelow(kMaxFlatEntries);
+  ASSERT_EQ(keyBytesBeforeTheLastLeaf, 4058890u);
+  ASSERT_LT(keyBytesBeforeTheLastLeaf, kMaxFlatKeyBytes);
+  ASSERT_GT(keyBytesBeforeTheLastLeaf + 1 + 200000, kMaxFlatKeyBytes);
+  ASSERT_LE(text.size(), kMaxJsonInputBytes);
+
+  ExpectFails(text, Status::TooManyEntries);
+}
+
+TEST(FlattenJson, KeyTextLimitIsReportedBeforeLaterExcessiveDepth) {
+  const std::string text = KeyBudgetPrefix(std::string(kBudgetTailKeyLength + 1, 'b'), "0") +
+                           ",\"C\":" + NestedArrays(kMaxJsonDepth + 6) + "}";
+  ExpectFails(text, Status::KeyTextTooLarge);
+}
+
+TEST(FlattenJson, TooDeepContainerBeforeTheKeyTextLimitIsNestingTooDeep) {
+  const std::string text = "{\"C\":" + NestedArrays(kMaxJsonDepth + 6) + "," +
+                           KeyBudgetPrefix(std::string(kBudgetTailKeyLength + 1, 'b'), "0").substr(1) +
+                           "}";
+  ExpectFails(text, Status::NestingTooDeep);
+}
+
+TEST(FlattenJson, KeyTextTooLargeIsReportedBeforeLaterMalformedText) {
+  const std::string text =
+      KeyBudgetPrefix(std::string(kBudgetTailKeyLength + 1, 'b'), "0") + ",\"C\":garbage";
+  ExpectFails(text, Status::KeyTextTooLarge);
+}
+
+TEST(FlattenJson, KeyTextLimitIsNotReportedForAShortMalformedText) {
+  ExpectFails(KeyBudgetPrefix(std::string(kBudgetTailKeyLength, 'b'), "0") + ",\"C\":garbage",
+              Status::ParseError);
 }
 
 // ---------------------------------------------------------------------------

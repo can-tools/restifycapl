@@ -255,10 +255,27 @@ std::string FlatArrayOf(const std::string& element, std::size_t count) {
   return text;
 }
 
+// 63 nested objects with a 15000-byte key each, innermost value an array of 9000 zeros: 64 levels,
+// 9000 leaves, 963316 bytes, and every leaf key is over 945000 bytes long.
+std::string DeepLongKeyDocument() {
+  const std::string key(15000, 'k');
+  std::string text;
+  for (int i = 0; i < 63; ++i) {
+    text += "{\"" + key + "\":";
+  }
+  text += FlatArrayOf("0", 9000);
+  text.append(63, '}');
+  return text;
+}
+
 }  // namespace
 
 TEST(TextApiStatus, InternalErrorHasTheDocumentedNumber) {
   EXPECT_EQ(static_cast<int>(Status::InternalError), -35);
+}
+
+TEST(TextApiStatus, KeyTextTooLargeHasTheDocumentedNumber) {
+  EXPECT_EQ(static_cast<int>(Status::KeyTextTooLarge), -36);
 }
 
 // ---------------------------------------------------------------------------
@@ -391,6 +408,22 @@ TEST(ParseJsonDocument, InvalidUtf8IsParseError) {
   }
 }
 
+TEST(ParseJsonDocument, NulInAnObjectKeyIsParseErrorZeroesTheIdAndConsumesNoSlot) {
+  JsonDocumentStore store;
+  ExpectParseFails(store, R"({"a\u0000b":"v"})", Status::ParseError);
+  ExpectParseFails(store, R"({"x":[{"\u0000":1}]})", Status::ParseError);
+  EXPECT_EQ(FillPool(store).size(), kJsonDocumentSlotCount);
+}
+
+TEST(ParseJsonDocument, NulAsTheFirstByteLeavesEmptyTextAndIsParseError) {
+  JsonDocumentStore store;
+  const char text[] = "\0[1]";
+  std::uint32_t id = kIdSentinel;
+  EXPECT_EQ(ParseJsonDocument(store, text, sizeof(text), id), Status::ParseError);
+  EXPECT_EQ(id, 0u);
+  EXPECT_EQ(FillPool(store).size(), kJsonDocumentSlotCount);
+}
+
 TEST(ParseJsonDocument, MalformedTextDoesNotConsumeASlot) {
   JsonDocumentStore store;
   ExpectParseFails(store, "{", Status::ParseError);
@@ -442,7 +475,23 @@ TEST(ParseJsonDocument, LimitFailuresDoNotConsumeASlot) {
   ExpectParseFails(store, PaddedToSize("[0]", kMaxJsonInputBytes + 1), Status::DocumentTooLarge);
   ExpectParseFails(store, NestedArrays(kMaxJsonDepth + 1), Status::NestingTooDeep);
   ExpectParseFails(store, FlatArrayOf("0", kMaxFlatEntries + 1), Status::TooManyEntries);
+  ExpectParseFails(store, DeepLongKeyDocument(), Status::KeyTextTooLarge);
   EXPECT_EQ(FillPool(store).size(), kJsonDocumentSlotCount);
+}
+
+TEST(ParseJsonDocument, DeepLongKeyDocumentIsKeyTextTooLargeNotInternalErrorAndZeroesTheId) {
+  JsonDocumentStore store;
+  const std::string text = DeepLongKeyDocument();
+  ASSERT_LE(text.size(), kMaxJsonInputBytes);
+  std::uint32_t id = kIdSentinel;
+  EXPECT_EQ(ParseText(store, text, id), Status::KeyTextTooLarge);
+  EXPECT_EQ(id, 0u);
+}
+
+TEST(ParseJsonDocument, KeyTextTooLargeIsReportedEvenWhenThePoolIsFull) {
+  JsonDocumentStore store;
+  FillPool(store);
+  ExpectParseFails(store, DeepLongKeyDocument(), Status::KeyTextTooLarge);
 }
 
 // ---------------------------------------------------------------------------
@@ -829,29 +878,6 @@ TEST(ReadJsonEntry, NulInsideAStringValueIsCopiedWithItsFullLength) {
   EXPECT_EQ(ReadJsonEntry(store, id, 0, tightKey.Data(), tightKey.Size(), tightValue.Data(),
                           tightValue.Size(), type),
             Status::BufferTooSmall);
-  EXPECT_TRUE(tightValue.HoldsEmptyText());
-}
-
-TEST(ReadJsonEntry, NulInsideAKeyIsCopiedWithItsFullLength) {
-  JsonDocumentStore store;
-  const std::uint32_t id = MustParse(store, R"({"a\u0000b":"v"})");
-
-  Buffer key(5);
-  Buffer value(8);
-  std::int32_t type = kTypeSentinel;
-  ASSERT_EQ(ReadJsonEntry(store, id, 0, key.Data(), key.Size(), value.Data(), value.Size(), type),
-            Status::Ok);
-  EXPECT_EQ(key.Raw(5), std::string("/a\0b\0", 5));
-  EXPECT_EQ(key.Text(), "/a");
-  EXPECT_EQ(value.Text(), "v");
-
-  Buffer tightKey(4);
-  Buffer tightValue(8);
-  type = kTypeSentinel;
-  EXPECT_EQ(ReadJsonEntry(store, id, 0, tightKey.Data(), tightKey.Size(), tightValue.Data(),
-                          tightValue.Size(), type),
-            Status::BufferTooSmall);
-  EXPECT_TRUE(tightKey.HoldsEmptyText());
   EXPECT_TRUE(tightValue.HoldsEmptyText());
 }
 

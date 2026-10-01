@@ -30,8 +30,8 @@ version-resource read that yields it has no place in CANoe-unaware code).
 ## Reserved ranges
 
 - `-7..-9`: future module-local glue codes, currently empty.
-- `-30..-39`: the mapping layer (`src/mapping/`). `-30..-35` are assigned;
-  `-36..-39` are free.
+- `-30..-39`: the mapping layer (`src/mapping/`). `-30..-36` are assigned;
+  `-37..-39` are free.
 
 Each range has exactly one owning layer, so a future addition never has to
 guess where the next free number is.
@@ -48,7 +48,7 @@ guess where the next free number is.
 
 | `Status` | Meaning |
 |---|---|
-| `ParseError` | `FlattenJson`: invalid JSON, empty text or invalid UTF-8. `ParseLong`/`ParseDouble`: unparseable text or trailing characters after a numeric prefix. |
+| `ParseError` | `FlattenJson`: invalid JSON, empty text, invalid UTF-8, a NUL byte in the text, or a NUL in an object key (`\u0000`). `ParseLong`/`ParseDouble`: unparseable text or trailing characters after a numeric prefix. |
 
 `-11..-17` (path and conversion codes) are documented in `docs/json-path.md`
 and `docs/type-conversion.md`.
@@ -75,7 +75,7 @@ and `docs/type-conversion.md`.
 | `WaitTimeout` | `await`'s deadline was reached, kept distinct from `Timeout` (-19), which is libcurl's own transfer timeout. |
 | `AsyncStartFailed` | Worker thread creation failed. |
 
-## `-30..-35`
+## `-30..-36`
 
 | `Status` | Meaning |
 |---|---|
@@ -85,3 +85,4 @@ and `docs/type-conversion.md`.
 | `NestingTooDeep` | The JSON nesting is deeper than 64 levels. |
 | `TooManyEntries` | The document flattens to more than 10,000 entries. |
 | `InternalError` | An unexpected failure inside the DLL, for example out of memory; no exception crosses into CANoe. |
+| `KeyTextTooLarge` | The flattened keys would total more than 4 MiB. |

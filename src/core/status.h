@@ -36,11 +36,12 @@ enum class Status : int32_t {
   UnknownRequestId = -27,     // id is 0, never issued, Consumed, Abandoned, or Free
   WaitTimeout = -28,          // await's deadline reached
   AsyncStartFailed = -29,     // worker thread creation failed
-  // -30..-39 reserved for the mapping layer (src/mapping/).
+  // -30..-36 assigned, -37..-39 free (mapping layer, src/mapping/).
   NoFreeDocumentSlot = -30,   // parse: all document slots occupied
   UnknownDocumentId = -31,    // document id unknown or already discarded
   DocumentTooLarge = -32,     // JSON input larger than 1 MiB
   NestingTooDeep = -33,       // JSON nesting deeper than 64
   TooManyEntries = -34,       // more than 10,000 flattened entries
   InternalError = -35,        // unexpected failure inside the DLL (for example out of memory)
+  KeyTextTooLarge = -36,      // flattened keys would total more than 4 MiB
 };

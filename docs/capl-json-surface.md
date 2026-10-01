@@ -131,8 +131,8 @@ Parses `json`, flattens it and stores it in a free slot.
 1. `documentId` is set to `0` on entry.
 2. The text is checked as in "Input text": `-1`, `-6`.
 3. The text is parsed and flattened (`docs/json-flatten.md`). Failures:
-   `-10` (invalid JSON, empty text, invalid UTF-8), `-32`, `-33`, `-34` (see
-   "Limits").
+   `-10` (invalid JSON, empty text, invalid UTF-8, NUL in an object key),
+   `-32`, `-33`, `-34`, `-36` (see "Limits").
 4. Only a text that would otherwise succeed is checked against the slot pool:
    all 8 slots occupied gives `-30`. A malformed text therefore reports its own
    error even when the pool is full.
@@ -143,12 +143,13 @@ Parses `json`, flattens it and stores it in a free slot.
 | `Ok` (`0`) | Document stored; `documentId` written. |
 | `InvalidArgument` (`-1`) | `json` null or `jsonSize` `0`. |
 | `UnterminatedInputText` (`-6`) | No NUL within `jsonSize`. |
-| `ParseError` (`-10`) | Invalid JSON, empty text, or invalid UTF-8. |
+| `ParseError` (`-10`) | Invalid JSON, empty text, invalid UTF-8, or a NUL in an object key (`\u0000`). |
 | `NoFreeDocumentSlot` (`-30`) | All 8 slots are occupied. |
 | `DocumentTooLarge` (`-32`) | Input larger than 1 MiB. |
 | `NestingTooDeep` (`-33`) | Nesting deeper than 64. |
 | `TooManyEntries` (`-34`) | More than 10,000 entries. |
 | `InternalError` (`-35`) | Unexpected failure inside the DLL, see "Unexpected internal failure". |
+| `KeyTextTooLarge` (`-36`) | The flattened keys would total more than 4 MiB. |
 
 ## `restifyJsonCountEntries` (row 20)
 
@@ -188,8 +189,12 @@ Checks run in this order, and the first failure decides the status:
 ## `restifyJsonReadValue` (row 22)
 
 Reads one value by path. `path` is a JSON Pointer (`docs/json-path.md`); every
-key listed by `restifyJsonReadEntry` resolves to its own value here, and `""`
-(the empty text) addresses the whole document.
+key listed by `restifyJsonReadEntry` can be read here and resolves to its own
+value (keys containing a NUL are rejected at parse time), and `""` (the empty
+text) addresses the whole document.
+
+A NUL in a string value (`\u0000`) is accepted; CAPL sees only the part of the
+value text before the first NUL.
 
 Checks run in this order, and the first failure decides the status:
 
@@ -249,9 +254,11 @@ were held).
 | Input size, counted up to the NUL | 1 MiB (1048576 bytes) | `DocumentTooLarge` (`-32`) |
 | Nesting depth (root container = 1) | 64 | `NestingTooDeep` (`-33`) |
 | Entries | 10000 | `TooManyEntries` (`-34`) |
+| Key text (sum of all entry keys in bytes, after escaping, no NULs) | 4 MiB (4194304 bytes) | `KeyTextTooLarge` (`-36`) |
 | Documents held at once | 8 | `NoFreeDocumentSlot` (`-30`) |
 
-Input of exactly 1048576 bytes, depth 64 and 10000 entries are accepted.
+Input of exactly 1048576 bytes, depth 64, 10000 entries and 4194304 bytes of
+key text are accepted.
 Details on when each limit is checked are in `docs/json-flatten.md`. Raising a
 limit in a later release is compatible; lowering one is not.
 
@@ -261,7 +268,9 @@ No exception crosses into CANoe. If something unexpected fails inside the DLL
 (for example, memory runs out), the operation returns `InternalError`
 (`-35`) and leaves its out-parameters at 0; the same happens for all six
 operations. It is distinct from `InvalidArgument` (`-1`), which always means
-the caller passed a bad argument.
+the caller passed a bad argument. The limits bound the memory one document
+takes, so `-35` from `restifyJsonParse` means the process is short of memory,
+never just that the input was too large.
 
 ## Realtime-safety summary
 
