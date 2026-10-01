@@ -115,10 +115,6 @@ JsonEntryType ClassifyScalar(const JsonValue& node) {
 }
 
 Status AppendLeaf(const std::string& key, const JsonValue& node, std::vector<FlatEntry>& entries) {
-  if (entries.size() >= kMaxFlatEntries) {
-    return Status::TooManyEntries;
-  }
-
   FlatEntry entry;
   entry.key = key;
   const Status status = DescribeLeaf(node, entry.value, entry.type);
@@ -203,6 +199,7 @@ Status FlattenJson(std::string_view text, FlattenResult& out) {
     return sax.failure();
   }
 
+  // allow_exceptions=false: failure yields a discarded value instead of throwing.
   JsonValue document = JsonValue::parse(first, last, nullptr, false);
   if (document.is_discarded()) {
     return Status::ParseError;

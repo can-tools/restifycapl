@@ -39,7 +39,7 @@ any leaf.
 `null -> "null"/Ok` guarantees `ValueToText` always succeeds on a genuine
 leaf, the same guarantee `ToText` gives for strings -- no special-cased
 failure for null. Container -> `TypeMismatch` is deliberate and loud:
-`src/mapping/json-flatten.*` (a later stage) recurses through containers
+`src/mapping/json-flatten.*` (via `DescribeLeaf`) recurses through containers
 itself and only ever calls `ValueToText` on leaves it has already
 discovered, so a container arriving here means a bug in the caller's
 recursion, not a normal runtime case -- it must not be silently serialized

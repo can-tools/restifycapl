@@ -44,6 +44,15 @@ guess where the next free number is.
 | `UnknownHttpMethod` | The method text did not match any of the six known HTTP verbs. |
 | `UnterminatedInputText` | No NUL terminator was found within the caller-stated size bound for an input `char[]` parameter. |
 
+## `-10..-17`
+
+| `Status` | Meaning |
+|---|---|
+| `ParseError` | `FlattenJson`: invalid JSON, empty text or invalid UTF-8. `ParseLong`/`ParseDouble`: unparseable text or trailing characters after a numeric prefix. |
+
+`-11..-17` (path and conversion codes) are documented in `docs/json-path.md`
+and `docs/type-conversion.md`.
+
 ## `-18..-23`
 
 | `Status` | Meaning |
@@ -76,5 +85,3 @@ guess where the next free number is.
 | `NestingTooDeep` | The JSON nesting is deeper than 64 levels. |
 | `TooManyEntries` | The document flattens to more than 10,000 entries. |
 | `InternalError` | An unexpected failure inside the DLL, for example out of memory; no exception crosses into CANoe. |
-
-`ParseError` (`-10`) covers invalid JSON, empty text and invalid UTF-8.

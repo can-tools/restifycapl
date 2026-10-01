@@ -45,7 +45,7 @@ one-to-one: `ParseJsonDocument` (row 19), `CountJsonEntries` (row 20),
 - The DLL holds at most **8** documents at once, in one pool shared by every
   CAPL node and script that uses the DLL instance. There is no per-script
   reservation.
-- Ids count up from a clock-derived start taken at the first parse after the
+- Ids count up from a clock-derived start taken at the first successful parse after the
   DLL loads. A discarded id is rejected with `-31`; it is not handed out again
   until the 32-bit counter has wrapped. An id is only meaningful for the DLL
   instance that issued it: do not keep one across a DLL reload.
@@ -265,7 +265,7 @@ the caller passed a bad argument.
 | 19 (`restifyJsonParse`) | Allowed | Allocates memory; its time grows with the size of the document, bounded by the limits above. |
 | 20 (`restifyJsonCountEntries`) | Allowed | Short lock; no allocation. |
 | 21 (`restifyJsonReadEntry`) | Allowed | Short lock and a copy into the caller's buffer. |
-| 22 (`restifyJsonReadValue`) | Allowed | Short lock and a copy into the caller's buffer; resolving the path allocates a little. |
+| 22 (`restifyJsonReadValue`) | Allowed | Copies the value text (up to 1 MiB) into a temporary string and then into the caller's buffer, all under the store lock. |
 | 23 (`restifyJsonDiscardDocument`) | Allowed | Frees memory, after the lock is released. |
 | 24 (`restifyJsonDiscardAllDocuments`) | Allowed | Frees memory, after the lock is released. |
 

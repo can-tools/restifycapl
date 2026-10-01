@@ -71,23 +71,20 @@ hand-invented version numbers.
   response's memory at once and reports how many requests are still running;
   frees memory on the caller's thread.
 - `restifyJsonParse(char json[], dword jsonSize, dword& documentId) : long`
-  -- parses JSON text, flattens it and stores it under a document id; returns
-  0, -1, -6, -10, -30, -32, -33, -34 or -35 (see `docs/capl-json-surface.md`).
+  -- parses JSON text, flattens it and stores it under a document id (see
+  `docs/capl-json-surface.md`).
 - `restifyJsonCountEntries(dword documentId, dword& entryCount) : long` --
-  writes how many flattened entries a document holds to `entryCount` and
-  returns 0, -31 or -35.
+  writes how many flattened entries a document holds to `entryCount`.
 - `restifyJsonReadEntry(dword documentId, dword entryIndex, char key[], dword keySize, char value[], dword valueSize, long& valueType) : long`
   -- copies one entry's key (a JSON Pointer) and value text and reports its
-  value type, retryable on `BufferTooSmall`; returns 0, -1, -2, -13, -31 or
-  -35 (see `docs/capl-json-surface.md`).
+  value type, retryable on `BufferTooSmall`.
 - `restifyJsonReadValue(dword documentId, char path[], dword pathSize, char value[], dword valueSize, long& valueType) : long`
   -- copies the value text at a JSON Pointer path and reports its value type,
-  retryable on `BufferTooSmall`; returns 0, -1, -2, -6, -11, -12, -13, -14,
-  -31 or -35 (see `docs/capl-json-surface.md`).
+  retryable on `BufferTooSmall`.
 - `restifyJsonDiscardDocument(dword documentId) : long` -- releases a single
-  document; returns 0, -31 or -35.
+  document.
 - `restifyJsonDiscardAllDocuments(dword& discardedCount) : long` -- releases
-  every document and reports how many were released; returns 0 or -35.
+  every document and reports how many were released.
 
 ### Changed
 

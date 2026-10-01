@@ -14,8 +14,8 @@
 #include <string>
 #include <string_view>
 
-#include "core/status.h"
 #include "core/json-value.h"
+#include "core/status.h"
 
 // JSON integer/float number in int32_t range -> Ok. Out of range ->
 // NumericOverflow. A number with a fractional part (3.7) -> NotIntegral,

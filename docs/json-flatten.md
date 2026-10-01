@@ -7,6 +7,17 @@ Behavior tables for `src/mapping/json-flatten.h`.
 entries, one per leaf, in document order. On any failure the result object is
 left unchanged.
 
+## API
+
+- `FlattenJson(text, out)` fills a `FlattenResult`: `out.document` is the
+  parsed document (a `JsonValue`) and `out.entries` the flat list. `out` is
+  replaced only on `Ok`.
+- `DescribeLeaf(node, text, type)` gives the value text and `JsonEntryType` of
+  one leaf: a scalar, `null`, `{}` or `[]`. A non-empty object or array returns
+  `TypeMismatch`.
+- Limit constants: `kMaxJsonInputBytes` (1048576), `kMaxJsonDepth` (64) and
+  `kMaxFlatEntries` (10000); see Limits below.
+
 ## Key format
 
 Each entry key is a JSON Pointer as defined by RFC 6901, in exactly the syntax
@@ -90,9 +101,9 @@ double is invalid JSON for this purpose (`ParseError`).
 
 | Limit | Value | Status when exceeded |
 |---|---|---|
-| Input size | 1 MiB (1048576 bytes) | `DocumentTooLarge` (-32) |
-| Nesting depth (root container = 1) | 64 | `NestingTooDeep` (-33) |
-| Entries | 10000 | `TooManyEntries` (-34) |
+| Input size (`kMaxJsonInputBytes`) | 1 MiB (1048576 bytes) | `DocumentTooLarge` (-32) |
+| Nesting depth (`kMaxJsonDepth`; root container = 1) | 64 | `NestingTooDeep` (-33) |
+| Entries (`kMaxFlatEntries`) | 10000 | `TooManyEntries` (-34) |
 
 Input of exactly 1048576 bytes, depth 64 and 10000 entries are accepted.
 

@@ -1,3 +1,4 @@
+// json-flatten.h -- JSON text to a flat list of JSON Pointer leaf entries; see docs/json-flatten.md.
 #pragma once
 
 #include <cstddef>

@@ -41,9 +41,9 @@ namespace {
 // unsigned long is 32 bits on both targets here.
 static_assert(sizeof(unsigned long) == sizeof(std::uint32_t),
               "restifyReadVersion assumes unsigned long is 32 bits");
-// CAPL long is 32 bits on both targets here.
+// The shims move CAPL long values through std::int32_t.
 static_assert(sizeof(long) == sizeof(std::int32_t),
-              "the sync-export shims assume long is 32 bits");
+              "the export shims assume CAPL long maps to a 32-bit long");
 
 // type - 128 marks a CAPL by-reference parameter (docs/capl-sync-surface.md).
 // Spelled via named constants, not inline arithmetic, to avoid a /W4
@@ -370,12 +370,7 @@ extern "C" long CAPLPASCAL restifyDiscardAllResponses(std::uint32_t* stillRunnin
   return static_cast<long>(result);
 }
 
-// ------------------------------------------------------------------------
-// Six JSON document shims -- each a direct forwarding call into the
-// matching function in src/mapping/json-text-api.h, which owns all
-// parsing, slot management and status mapping. Signature table, entry
-// format and status codes: docs/capl-json-surface.md.
-// ------------------------------------------------------------------------
+// Six JSON document shims -- signatures and status codes: docs/capl-json-surface.md.
 extern "C" long CAPLPASCAL restifyJsonParse(char* json, unsigned long jsonSize,
                                              std::uint32_t* documentId) {
   Status result = ParseJsonDocument(DefaultJsonDocumentStore(), json, jsonSize, *documentId);
@@ -705,8 +700,7 @@ CAPL_DLL_INFO4 CAPL_DLL_INFO_LIST4[] = {
      {0},
      {"stillRunning"}},
 
-    // Six JSON document rows. Same parCount / kRefLong / kRefDword trap as
-    // above; signature table and status codes: docs/capl-json-surface.md.
+    // Six JSON document rows -- see docs/capl-json-surface.md.
 
     {"restifyJsonParse",
      (CAPL_FARCALL)restifyJsonParse,

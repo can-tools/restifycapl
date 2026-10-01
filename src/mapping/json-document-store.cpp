@@ -7,7 +7,6 @@
 
 #include "core/buffer-copy.h"
 #include "core/json-path.h"
-#include "core/type-conversion.h"
 
 namespace {
 

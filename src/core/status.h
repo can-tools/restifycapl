@@ -15,10 +15,10 @@ enum class Status : int32_t {
   UnknownHttpMethod = -5,     // method text did not match any known HTTP verb
   UnterminatedInputText = -6, // no NUL terminator found within the caller-stated size bound
   // -7..-9 reserved, currently empty, for future module-local glue codes
-  ParseError = -10,          // returned by json-flatten for invalid JSON, empty text and invalid UTF-8
+  ParseError = -10,          // invalid JSON, empty text or invalid UTF-8 (FlattenJson); unparseable or trailing-garbage text (ParseLong/ParseDouble)
   PathSyntaxError = -11,     // ParsePath: malformed path text, no document needed
   PathNotFound = -12,        // object key absent
-  IndexOutOfRange = -13,     // array index >= size
+  IndexOutOfRange = -13,     // array index >= size, "-", or an index above the uint32_t maximum
   TypeMismatch = -14,        // segment/container kind mismatch (see docs/json-path.md), or ValueToText on non-leaf node
   NullValue = -15,           // JSON null encountered where a typed value was requested (kept distinct from TypeMismatch -- a null gets a default silently, a wrong-typed value is logged or treated as an error)
   NumericOverflow = -16,     // valid JSON number, out of int32_t range for ToLong
@@ -36,7 +36,7 @@ enum class Status : int32_t {
   UnknownRequestId = -27,     // id is 0, never issued, Consumed, Abandoned, or Free
   WaitTimeout = -28,          // await's deadline reached
   AsyncStartFailed = -29,     // worker thread creation failed
-  // -30..-39 reserved for the mapping layer (src/mapping/); -30..-35 are assigned, -36..-39 are free.
+  // -30..-39 reserved for the mapping layer (src/mapping/).
   NoFreeDocumentSlot = -30,   // parse: all document slots occupied
   UnknownDocumentId = -31,    // document id unknown or already discarded
   DocumentTooLarge = -32,     // JSON input larger than 1 MiB
