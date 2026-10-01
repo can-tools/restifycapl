@@ -107,7 +107,9 @@ These follow the JSON library's (nlohmann/json 3.11.3) scanner.
   a text that is only a BOM.
 - **Comments** (`//` and `/* */`) are not allowed and give `ParseError`.
 - **`-0`** is read as the integer `0`, so its entry text is `0`.
-- **NUL bytes.** A NUL byte anywhere in the input text is `ParseError`. A
+- **NUL bytes.** A NUL byte anywhere in the input text is `ParseError`; this
+  check runs before the scan, so it wins even if a limit (`-33`, `-34`,
+  `-36`) would be reached earlier in the text. A
   `\u0000` escape in an object key is `ParseError` too, so no entry key ever
   contains a NUL and every key can be read back by path. A `\u0000` escape in
   a string value is accepted and the value text then contains a NUL byte. Value

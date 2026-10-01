@@ -71,7 +71,9 @@ hand-invented version numbers.
   response's memory at once and reports how many requests are still running;
   frees memory on the caller's thread.
 - `restifyJsonParse(char json[], dword jsonSize, dword& documentId) : long`
-  -- parses JSON text, flattens it and stores it under a document id (see
+  -- parses JSON text, flattens it and stores it under a document id; entry
+  key text over 4 MiB gives `KeyTextTooLarge` (-36), and a NUL in the text or
+  a `\u0000` in an object key gives `ParseError` (-10) (see
   `docs/capl-json-surface.md`).
 - `restifyJsonCountEntries(dword documentId, dword& entryCount) : long` --
   writes how many flattened entries a document holds to `entryCount`.
