@@ -51,10 +51,12 @@ You are a test engineer for the CAPL REST DLL project, using GoogleTest.
 
 ## Building and verifying
 
-- Run your test suite with `make test` (add `ARCH=x86` to also cover the
-  other architecture) — the `msvc-build-conventions` skill has the exact,
-  verified one-liner for activating the MSVC environment and invoking
-  `make` in a single call.
+- Run your test suite with `make test` (x64). x86 is verified by CI's
+  build matrix on push; run `make test ARCH=x86` locally only when the
+  dispatch asks for it or when reproducing an x86-only CI failure. Always
+  state in your report which architecture(s) your results cover. The
+  `msvc-build-conventions` skill has the exact, verified one-liner for
+  activating the MSVC environment and invoking `make` in a single call.
 - Never author or edit a build script, batch file, or a direct
   `cl.exe`/`link.exe`/`rc.exe` invocation to get your tests running — that
   is exclusively `build-pipeline-engineer`'s job.

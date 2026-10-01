@@ -27,10 +27,19 @@ modules pre-emptively.
 
 ## Build
 
-- `make all` — builds both architectures (default target).
+- `make all` — builds both architectures in CI, where each matrix leg has
+  its own MSVC environment. Locally, one shell only ever has one
+  architecture's `cl.exe`/`link.exe` on `PATH`, so `make all` (or bare
+  `make`) in a single local shell builds `build-x86` first, and that leg
+  fails at link time (`LNK1112`, module/target machine-type mismatch) once
+  it reaches an architecture the active environment doesn't match — run
+  `make build-x86` and `make build-x64` in separate, separately activated
+  shells instead.
 - `make build-x86` — builds `build/x86/restifycapl-x86.dll` (`/MACHINE:X86`).
 - `make build-x64` — builds `build/x64/restifycapl-x64.dll` (`/MACHINE:X64`).
-- `make test` — builds and runs the GoogleTest suite (outside CANoe).
+- `make test` — builds and runs the GoogleTest suite (outside CANoe) for
+  one architecture (default x64; `ARCH=x86` for the other). Local
+  verification defaults to x64; CI runs both.
 - `make clean` — removes all build output and intermediate files.
 - Dependencies live in `lib/x86/` and `lib/x64/`, matched to `/MT`.
 - Both architecture targets are thin wrappers over a single parameterized
@@ -83,7 +92,8 @@ include the CAPL SDK headers.
 ## Agents
 
 See `.claude/agents/`: `planner`, `plan-writer`, `cpp-implementer`,
-`build-pipeline-engineer`, `test-engineer`, `code-reviewer`. Start new
+`build-pipeline-engineer`, `test-engineer`, `code-reviewer`, `docs-writer`
+(sole owner of README.md). Start new
 features or non-trivial changes with `planner` before implementation.
 Delegate build/CI work, testing, and export-contract-sensitive review to
 the matching agent instead of doing it inline in the main session.

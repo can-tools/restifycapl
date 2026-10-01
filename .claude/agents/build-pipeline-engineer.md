@@ -33,9 +33,9 @@ Makefile targets and the GitHub Actions workflow that mirrors them.
 - Own packaging of build artifacts (the two DLLs, and any accompanying
   files) for GitHub Releases.
 - Own `CHANGELOG.md`'s release mechanics (renaming `[Unreleased]` to the
-  tagged version at release time) and `README.md`'s build/install sections
-  — see `project-docs` for the split of responsibility between `README.md`
-  and `CLAUDE.md`.
+  tagged version at release time), and hand `docs-writer` the release/
+  download facts for README.md's install section (Stage 14) — `docs-writer`
+  is the sole editor of `README.md`.
 
 ## Hard rules
 

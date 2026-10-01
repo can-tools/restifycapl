@@ -60,7 +60,9 @@ files — you produce a review.
   invoke a build script, batch file, or direct compiler/linker invocation
   yourself; if the documented pattern doesn't work, stop and report the
   obstacle rather than reviewing around it — escalate to the coordinator
-  to bring in `build-pipeline-engineer`.
+  to bring in `build-pipeline-engineer`. A local x64-only build is
+  expected. Before sign-off, state explicitly whether CI has run both legs
+  on the reviewed commit. Never imply x86 was verified when it was not.
 
 - Comment discipline: see `project-docs` for the tiers, the banned list, and
   where each kind of material belongs — non-negotiable.

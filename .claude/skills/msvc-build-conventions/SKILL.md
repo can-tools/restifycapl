@@ -166,6 +166,28 @@ number found anywhere as a bug.
   immediately afterward, which still resolves to the correct
   architecture's `cl.exe`. Do not treat that line as a build failure.
 
+## Local vs CI verification
+
+- Local verification defaults to x64 only: `make build-x64`, `make test`
+  (which defaults to `ARCH=x64`). x86 coverage comes from CI's build/test
+  matrix, which must be green on both legs for a given commit before any
+  human sign-off gate (e.g. HUM-15). Building or testing x86 locally is the
+  exception, not the default — do it only to reproduce an x86-only CI
+  failure, or when the dispatch explicitly asks for it (e.g. the user
+  doesn't want to push before a human gate). State which architecture(s)
+  a given local result actually covers.
+- One shell only ever has one architecture's toolchain active — see
+  "Local builds" above. Running both `make build-x86` and `make build-x64`
+  requires two separately activated shells; `make all` in a single shell
+  fails at the mismatched architecture's link step.
+- Ad-hoc compiler/shell probes (a one-off `cl.exe` invocation to check a
+  symbol, a syslib list, or similar — not a `make` target) must run from
+  the session's scratch/temp directory, with explicit output paths
+  (`/Fo`, `/Fe`) or redirection targets, never with the repo root as the
+  working directory. A probe run from the repo root with implicit output
+  paths leaves stray `.obj`/`.tmp` files behind that `make clean` doesn't
+  know about and that don't match `build/`'s `/Fo"$@"` convention.
+
 ## CI/CD
 
 - The GitHub Actions workflow must invoke the same `build-x86`/`build-x64`

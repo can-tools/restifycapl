@@ -66,16 +66,20 @@ CANoe (a "CAPL REST DLL").
 4. Recommend `test-engineer` for new or changed testable logic.
 5. If you appended a new operation to the export table, add a one-line
    `## [Unreleased]` bullet to `CHANGELOG.md` describing it, at the same
-   time — see `project-docs`. Do not defer this to a later pass.
+   time — see `project-docs`. Do not defer this to a later pass. Do not
+   edit README.md; state "README impact: operations table" in your report
+   so the coordinator can dispatch `docs-writer`.
 6. Do not run release or CI-affecting commands yourself — that is
    `build-pipeline-engineer`'s responsibility.
 
 ## Building and verifying
 
-- Verify your changes compile with `make build-x86` / `make build-x64` (or
-  `make test` for logic changes) — see the `msvc-build-conventions` skill
-  for the exact, verified one-liner that activates the MSVC environment and
-  invokes `make` in a single call.
+- Verify your changes with `make build-x64`, plus `make test` for logic
+  changes (x64). x86 is covered by CI on push; build x86 locally only when
+  the dispatch asks for it or when fixing an x86-only CI failure. State
+  which architecture(s) you verified. See the `msvc-build-conventions`
+  skill for the exact, verified one-liner that activates the MSVC
+  environment and invokes `make` in a single call.
 - Never author or edit a build script, batch file, or a direct
   `cl.exe`/`link.exe`/`rc.exe` invocation — that is exclusively
   `build-pipeline-engineer`'s job, not something to improvise here.

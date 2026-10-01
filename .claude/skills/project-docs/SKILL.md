@@ -80,14 +80,32 @@ one of them should link to the other instead.
   - After Stage 5 (Hello DLL proven in CANoe): add a real, verified
     build/usage-from-CAPL snippet — not before, since there's nothing real
     to show.
-  - After each export-contract-append stage (Stages 9–12): update the
+  - After each export-contract-append stage (Stages 10–13): update the
     operations summary to reflect what's actually exported.
-  - After Stage 13 (release pipeline live): add install/download
+  - After Stage 14 (release pipeline live): add install/download
     instructions pointing at GitHub Releases.
-- Do not write "coming soon" sections for the conditional Stage 15/16
+- Do not write "coming soon" sections for the conditional Stage 16/17
   modules (struct mapping, request building) — same rule as `CLAUDE.md`'s
   `## Scope` section: don't document what hasn't been built and may never
-  be.
+  be. Planned, non-conditional work may appear only in a Roadmap section
+  whose exact text the user has approved.
+- Owner: `docs-writer` is the only agent that edits README.md. Other agents
+  report "README impact" instead of editing it.
+- Structure, formatting and the verification workflow come from the
+  `readme-writer` skill; this section governs only what content may appear
+  and when. Where the two conflict, this section wins, and the deviation is
+  reported.
+- README-specific overrides:
+  - No internal stage numbers, task IDs or plan references in README prose
+    or TODO lines — a visitor can't resolve them. Write "once tagged
+    releases are published", not "at Stage 14".
+  - Not-yet-applicable content is a visible plain-language TODO line, not a
+    silent omission.
+  - Never instruct `make all` from a single shell — it fails at the other
+    architecture's link step. Show `make build-x64` / `make build-x86`,
+    each from a matching MSVC shell.
+  - Runtime claims match what has actually been verified in CANoe; never
+    show invented output.
 
 ## examples/*.can
 

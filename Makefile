@@ -78,6 +78,10 @@ SRC_DIRS := src/core src/http src/registry src/mapping src/module
 SRCS     := $(wildcard $(addsuffix /*.cpp,$(SRC_DIRS)))
 OBJS     := $(patsubst src/%.cpp,$(BUILDDIR)/obj/%.obj,$(SRCS))
 
+# -include, not include: silently does nothing on a fresh checkout where no
+# .d files exist yet -- see GEN_DEPFILE below for how they're produced.
+-include $(wildcard $(BUILDDIR)/obj/*/*.d)
+
 INCLUDES := /I include /I include/vendor /I include/vendor/capl-dll-sdk /I src
 
 # Required by curl.h when linking the static libcurl.lib: without it, curl.h
@@ -104,6 +108,27 @@ VERSION_RC  := src/module/version.rc
 VERSION_RES := $(BUILDDIR)/version.res
 
 DEF_FILE := src/module/exports.def
+
+# ------------------------------------------------------------------------------
+# Header dependency tracking -- GEN_DEPFILE is called from every .obj pattern
+# rule below (product and test) so an incremental build-x86/build-x64/test
+# rebuilds whatever a changed header transitively touches.
+# ------------------------------------------------------------------------------
+
+# Editing trap: never chain more commands with `&` after an `if COND (...)`
+# inside the for /f loop below. On this cmd.exe, once COND is false in a
+# parenthesized FOR body, everything after that if -- not just its own
+# action -- silently stops running. Use `cmd && (set VAR=1)` twice instead
+# of `if not defined VAR (cmd && ...)`, and keep any trailing
+# `if defined ...` as the last statement in the block. Filters cl.exe's
+# /sourceDependencies JSON down to src/include headers only: system header
+# paths contain spaces GNU Make 3.81 can't express as a prerequisite; a
+# missing/stale .d is harmless since src/%.cpp is still a prerequisite.
+# findstr, unlike cl.exe/rc.exe/mkdir/> below, cannot open a forward-slash
+# path -- $(subst /,\,...) is needed only on the two findstr file arguments.
+define GEN_DEPFILE
+@setlocal EnableDelayedExpansion & set "PFX_SRC=%CD%\src\\" & set "PFX_INC=%CD%\include\\" & type nul > "$(@:.obj=.d)" & (for /f "usebackq tokens=* delims=" %%L in (`findstr /C:"\\\\" "$(subst /,\,$(@:.obj=.d.json))"`) do (set "LINE=%%L" & for /f "tokens=* delims= " %%T in ("!LINE!") do set "LINE=%%T" & set "LINE=!LINE:,=!" & set "LINE=!LINE:~1,-1!" & set "LINE=!LINE:\\=\!" & (echo !LINE!)>"$(@:.obj=.line)" & set "MATCH=" & findstr /B /I /C:"!PFX_SRC!" "$(subst /,\,$(@:.obj=.line))" >nul && (set "MATCH=1") & findstr /B /I /C:"!PFX_INC!" "$(subst /,\,$(@:.obj=.line))" >nul && (set "MATCH=1") & if defined MATCH (echo $@: !LINE!>>"$(@:.obj=.d)")) & del "$(subst /,\,$(@:.obj=.line))")
+endef
 
 # ------------------------------------------------------------------------------
 # Phony targets
@@ -155,7 +180,8 @@ $(VERSION_RES): $(VERSION_RC)
 
 $(BUILDDIR)/obj/%.obj: src/%.cpp
 	@if not exist "$(dir $@)" mkdir "$(dir $@)"
-	cl.exe $(CXXFLAGS) /Fo"$@" "$<"
+	cl.exe $(CXXFLAGS) /sourceDependencies "$(@:.obj=.d.json)" /Fo"$@" "$<"
+	$(GEN_DEPFILE)
 
 # ------------------------------------------------------------------------------
 # test -- builds and runs the GoogleTest suite outside CANoe. Only
@@ -177,6 +203,8 @@ TEST_BUILDDIR    := build/test/$(ARCH)
 TEST_LOGIC_OBJS  := $(patsubst src/%.cpp,$(TEST_BUILDDIR)/obj/src/%.obj,$(TEST_LOGIC_SRCS))
 TEST_CASE_OBJS   := $(patsubst tests/%.cpp,$(TEST_BUILDDIR)/obj/tests/%.obj,$(TEST_CASE_SRCS))
 TEST_OBJS        := $(TEST_LOGIC_OBJS) $(TEST_CASE_OBJS)
+
+-include $(wildcard $(TEST_BUILDDIR)/obj/src/*/*.d $(TEST_BUILDDIR)/obj/tests/*/*.d)
 
 # GoogleTest headers are architecture-agnostic and live alongside the other
 # vendored third-party headers; only the .lib binaries are per-architecture
@@ -201,11 +229,13 @@ $(TEST_EXE): $(TEST_OBJS)
 
 $(TEST_BUILDDIR)/obj/src/%.obj: src/%.cpp
 	@if not exist "$(dir $@)" mkdir "$(dir $@)"
-	cl.exe $(TEST_CXXFLAGS) /Fo"$@" "$<"
+	cl.exe $(TEST_CXXFLAGS) /sourceDependencies "$(@:.obj=.d.json)" /Fo"$@" "$<"
+	$(GEN_DEPFILE)
 
 $(TEST_BUILDDIR)/obj/tests/%.obj: tests/%.cpp
 	@if not exist "$(dir $@)" mkdir "$(dir $@)"
-	cl.exe $(TEST_CXXFLAGS) /Fo"$@" "$<"
+	cl.exe $(TEST_CXXFLAGS) /sourceDependencies "$(@:.obj=.d.json)" /Fo"$@" "$<"
+	$(GEN_DEPFILE)
 
 # ------------------------------------------------------------------------------
 # clean -- removes ALL intermediates under build/ (both architectures' DLL

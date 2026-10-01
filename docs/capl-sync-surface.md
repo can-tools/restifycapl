@@ -15,7 +15,7 @@ CANoe's function browser. Three groups exist:
 |---|---|---|
 | `Common` | Non-HTTP utility operations. | `restifyReadVersion` |
 | `Sync` | Synchronous (blocking) HTTP operations. | `restifyGetSync`, `restifyDeleteSync`, `restifyPostSync`, `restifyPutSync`, `restifyPatchSync`, `restifyRequestSync` |
-| `Async` | Reserved for Stage 11's async exports. Nothing uses it yet. | none |
+| `Async` | Asynchronous (non-blocking dispatch) HTTP operations and their lifecycle management. | `restifyGetAsync`, `restifyDeleteAsync`, `restifyPostAsync`, `restifyPutAsync`, `restifyPatchAsync`, `restifyRequestAsync`, `restifyPollResponse`, `restifyAwaitResponse`, `restifyReadResponse`, `restifyDiscardResponse`, `restifyDiscardAllResponses` (see `docs/capl-async-surface.md`) |
 
 **Case-sensitivity trap:** `"Sync"` is a case-insensitive substring of
 `"Async"` -- the last four letters of `Async` are `sync`. Anything that

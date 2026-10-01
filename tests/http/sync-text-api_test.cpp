@@ -508,7 +508,7 @@ TEST(ExecuteRequestSync, ValidLowercaseMethodMapsCorrectlyAndReturnsOk) {
   EXPECT_EQ(transport.LastRequest().method, HttpMethod::Delete);
 }
 
-// HEAD has no dedicated verb row (D3) -- restifyRequestSync is the only way
+// HEAD has no dedicated verb row -- restifyRequestSync is the only way
 // to reach it, and it forbids a body the same as GET/DELETE.
 TEST(ExecuteRequestSync, HeadMethodIsOnlyReachableThroughThisFunction) {
   FakeTransport transport;
