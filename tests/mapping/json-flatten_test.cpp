@@ -3,6 +3,7 @@
 #include "mapping/json-flatten.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <set>
 #include <string>
@@ -14,9 +15,13 @@
 #include "core/json-path.h"
 #include "core/json-value.h"
 #include "core/status.h"
+#include "../test-support/status-print.h"
 #include "core/type-conversion.h"
 
 namespace {
+
+// Not an enumerator, so no successful call can produce it.
+constexpr JsonEntryType kNoType = static_cast<JsonEntryType>(-1);
 
 int TypeNumber(JsonEntryType type) { return static_cast<int>(type); }
 
@@ -27,6 +32,7 @@ FlattenResult MakeSentinel() {
   return result;
 }
 
+// A fatal ASSERT_* inside a void helper below ends only that helper; the calling test carries on.
 void ExpectSentinel(const FlattenResult& result) {
   EXPECT_TRUE(result.document.is_string());
   EXPECT_EQ(result.document.get<std::string>(), "sentinel");
@@ -70,20 +76,32 @@ std::size_t CountLeaves(const JsonValue& node) {
   return 1;
 }
 
+// The expected text is rebuilt from the node's own accessors, not from ValueToText, which is what
+// produced the entry text under test.
 void ExpectNodeMatchesEntry(const JsonValue& node, const FlatEntry& entry) {
   switch (entry.type) {
     case JsonEntryType::String:
-      EXPECT_TRUE(node.is_string());
-      break;
+      ASSERT_TRUE(node.is_string());
+      EXPECT_EQ(node.get<std::string>(), entry.value);
+      return;
     case JsonEntryType::Number:
-      EXPECT_TRUE(node.is_number());
-      break;
+      ASSERT_TRUE(node.is_number());
+      if (node.is_number_unsigned()) {
+        EXPECT_EQ(std::to_string(node.get<std::uint64_t>()), entry.value);
+      } else if (node.is_number_integer()) {
+        EXPECT_EQ(std::to_string(node.get<std::int64_t>()), entry.value);
+      } else {
+        EXPECT_DOUBLE_EQ(std::strtod(entry.value.c_str(), nullptr), node.get<double>());
+      }
+      return;
     case JsonEntryType::Bool:
-      EXPECT_TRUE(node.is_boolean());
-      break;
+      ASSERT_TRUE(node.is_boolean());
+      EXPECT_EQ(node.get<bool>() ? "true" : "false", entry.value);
+      return;
     case JsonEntryType::Null:
       EXPECT_TRUE(node.is_null());
-      break;
+      EXPECT_EQ(entry.value, "null");
+      return;
     case JsonEntryType::EmptyObject:
       EXPECT_TRUE(node.is_object() && node.empty());
       EXPECT_EQ(entry.value, "{}");
@@ -96,9 +114,6 @@ void ExpectNodeMatchesEntry(const JsonValue& node, const FlatEntry& entry) {
       ADD_FAILURE() << "an entry must never carry type None";
       return;
   }
-  std::string text;
-  EXPECT_EQ(ValueToText(node, text), Status::Ok);
-  EXPECT_EQ(text, entry.value);
 }
 
 void ExpectRoundTrips(std::string_view text) {
@@ -124,6 +139,10 @@ std::string NestedArrays(std::size_t depth) {
 }
 
 std::string NestedObjects(std::size_t depth) {
+  if (depth == 0) {
+    ADD_FAILURE() << "depth counts the root container and must be at least 1";
+    return "{}";
+  }
   std::string text;
   for (std::size_t i = 1; i < depth; ++i) {
     text += "{\"a\":";
@@ -179,6 +198,7 @@ std::string ObjectRepeatingKey(std::size_t count) {
 }
 
 std::string PaddedToSize(std::string text, std::size_t size) {
+  EXPECT_LE(text.size(), size) << "padding must not truncate the text";
   text.resize(size, ' ');
   return text;
 }
@@ -219,6 +239,7 @@ TEST(FlattenJson, KeysWithSpecialCharactersResolveBackToTheirValues) {
       R"({"\u00e9":"\u00fc","\u65e5\u672c":"\ud83d\ude00"})",
       R"({"a\/b":{"c~d":[{"e/f":null}]}})",
       R"({"0":{"1":[{"2":3}]}})",
+      R"({"a\u0000b":"c\u0000d"})",
   };
   for (const char* document : documents) {
     ExpectRoundTrips(document);
@@ -226,8 +247,8 @@ TEST(FlattenJson, KeysWithSpecialCharactersResolveBackToTheirValues) {
 }
 
 TEST(FlattenJson, ScalarAndEmptyRootsResolveBackThroughTheEmptyPath) {
-  const char* const documents[] = {"42", "-7", "2.5", "\"text\"", "\"\"", "true",
-                                   "false", "null", "{}", "[]"};
+  const char* const documents[] = {"42",   "-7",    "2.5",  "\"text\"", "\"\"",
+                                   "true", "false", "null", "{}",       "[]"};
   for (const char* document : documents) {
     ExpectRoundTrips(document);
   }
@@ -286,21 +307,20 @@ TEST(FlattenJson, ContainerEntriesComeBeforeTheNextSibling) {
 }
 
 TEST(FlattenJson, ArrayElementsFollowIndexOrderPastTen) {
-  ExpectFlattens("[0,1,2,3,4,5,6,7,8,9,10,11]",
-                 {
-                     {"/0", "0", JsonEntryType::Number},
-                     {"/1", "1", JsonEntryType::Number},
-                     {"/2", "2", JsonEntryType::Number},
-                     {"/3", "3", JsonEntryType::Number},
-                     {"/4", "4", JsonEntryType::Number},
-                     {"/5", "5", JsonEntryType::Number},
-                     {"/6", "6", JsonEntryType::Number},
-                     {"/7", "7", JsonEntryType::Number},
-                     {"/8", "8", JsonEntryType::Number},
-                     {"/9", "9", JsonEntryType::Number},
-                     {"/10", "10", JsonEntryType::Number},
-                     {"/11", "11", JsonEntryType::Number},
-                 });
+  ExpectFlattens("[0,1,2,3,4,5,6,7,8,9,10,11]", {
+                                                    {"/0", "0", JsonEntryType::Number},
+                                                    {"/1", "1", JsonEntryType::Number},
+                                                    {"/2", "2", JsonEntryType::Number},
+                                                    {"/3", "3", JsonEntryType::Number},
+                                                    {"/4", "4", JsonEntryType::Number},
+                                                    {"/5", "5", JsonEntryType::Number},
+                                                    {"/6", "6", JsonEntryType::Number},
+                                                    {"/7", "7", JsonEntryType::Number},
+                                                    {"/8", "8", JsonEntryType::Number},
+                                                    {"/9", "9", JsonEntryType::Number},
+                                                    {"/10", "10", JsonEntryType::Number},
+                                                    {"/11", "11", JsonEntryType::Number},
+                                                });
 }
 
 TEST(FlattenJson, ObjectsInsideArraysKeepTheirOwnDocumentOrder) {
@@ -478,9 +498,10 @@ TEST(FlattenJson, IntegersWithinSixtyFourBitsKeepAllDigits) {
 
 TEST(FlattenJson, IntegersBeyondSixtyFourBitsAreNumbersThatLosePrecision) {
   FlattenResult result;
-  ASSERT_EQ(FlattenJson("[18446744073709551616,-9223372036854775809,123456789012345678901234567890]",
-                        result),
-            Status::Ok);
+  ASSERT_EQ(
+      FlattenJson("[18446744073709551616,-9223372036854775809,123456789012345678901234567890]",
+                  result),
+      Status::Ok);
   ASSERT_EQ(result.entries.size(), 3u);
   for (const FlatEntry& entry : result.entries) {
     EXPECT_EQ(TypeNumber(entry.type), TypeNumber(JsonEntryType::Number));
@@ -490,6 +511,27 @@ TEST(FlattenJson, IntegersBeyondSixtyFourBitsAreNumbersThatLosePrecision) {
   EXPECT_NE(result.entries[2].value, "123456789012345678901234567890");
   EXPECT_DOUBLE_EQ(std::strtod(result.entries[2].value.c_str(), nullptr),
                    123456789012345678901234567890.0);
+}
+
+TEST(FlattenJson, ExponentAndZeroFormsUseTheLibrarySerializerText) {
+  ExpectFlattens("[1e2,1E5,100.0,0.0,-0.0,-0,1.5e+10]",
+                 {
+                     {"/0", "100.0", JsonEntryType::Number},
+                     {"/1", "100000.0", JsonEntryType::Number},
+                     {"/2", "100.0", JsonEntryType::Number},
+                     {"/3", "0.0", JsonEntryType::Number},
+                     {"/4", "-0.0", JsonEntryType::Number},
+                     {"/5", "0", JsonEntryType::Number},
+                     {"/6", "15000000000.0", JsonEntryType::Number},
+                 });
+}
+
+TEST(FlattenJson, DecodedNulInAStringValueIsKeptInTheEntryText) {
+  ExpectFlattens(R"({"k":"a\u0000b"})", {{"/k", std::string("a\0b", 3), JsonEntryType::String}});
+}
+
+TEST(FlattenJson, DecodedNulInAKeyIsKeptInTheEntryKey) {
+  ExpectFlattens(R"({"a\u0000b":1})", {{std::string("/a\0b", 4), "1", JsonEntryType::Number}});
 }
 
 TEST(FlattenJson, NonEmptyContainersProduceNoEntryOfTheirOwn) {
@@ -508,12 +550,12 @@ TEST(FlattenJson, EmptyContainersAreEntriesEvenWhenNested) {
   ExpectFlattens("[[[]]]", {{"/0/0", "[]", JsonEntryType::EmptyArray}});
   ExpectFlattens(R"({"a":{"b":{}}})", {{"/a/b", "{}", JsonEntryType::EmptyObject}});
   ExpectFlattens(R"({"a":[{}],"b":[[]]})", {
-                                              {"/a/0", "{}", JsonEntryType::EmptyObject},
-                                              {"/b/0", "[]", JsonEntryType::EmptyArray},
-                                          });
+                                               {"/a/0", "{}", JsonEntryType::EmptyObject},
+                                               {"/b/0", "[]", JsonEntryType::EmptyArray},
+                                           });
 }
 
-TEST(FlattenJson, ScalarRootHasExactlyOneEntryWithTheEmptyKey) {
+TEST(FlattenJson, ScalarAndNullRootsHaveExactlyOneEntryWithTheEmptyKey) {
   ExpectFlattens("42", {{"", "42", JsonEntryType::Number}});
   ExpectFlattens("-7", {{"", "-7", JsonEntryType::Number}});
   ExpectFlattens("2.5", {{"", "2.5", JsonEntryType::Number}});
@@ -521,9 +563,6 @@ TEST(FlattenJson, ScalarRootHasExactlyOneEntryWithTheEmptyKey) {
   ExpectFlattens(R"("")", {{"", "", JsonEntryType::String}});
   ExpectFlattens("true", {{"", "true", JsonEntryType::Bool}});
   ExpectFlattens("false", {{"", "false", JsonEntryType::Bool}});
-}
-
-TEST(FlattenJson, NullRootHasOneNullEntryWithTheEmptyKey) {
   ExpectFlattens("null", {{"", "null", JsonEntryType::Null}});
 }
 
@@ -535,6 +574,23 @@ TEST(FlattenJson, EmptyContainerRootsHaveOneEntryWithTheEmptyKey) {
 TEST(FlattenJson, SurroundingWhitespaceIsAccepted) {
   ExpectFlattens(" \t\r\n[1]\n ", {{"/0", "1", JsonEntryType::Number}});
   ExpectFlattens("  42  ", {{"", "42", JsonEntryType::Number}});
+}
+
+TEST(FlattenJson, LeadingUtf8ByteOrderMarkIsSkipped) {
+  ExpectFlattens(std::string("\xEF\xBB\xBF") + "[1]", {{"/0", "1", JsonEntryType::Number}});
+}
+
+TEST(FlattenJson, ByteOrderMarkWithoutTextOrWithAPartialMarkIsParseError) {
+  ExpectFails("\xEF\xBB\xBF", Status::ParseError);
+  ExpectFails("\xEF\xBB", Status::ParseError);
+}
+
+TEST(FlattenJson, StringViewSizeDecidesTheTextNotAnyLaterBytes) {
+  ExpectFlattens(std::string_view("[1]garbage", 3), {{"/0", "1", JsonEntryType::Number}});
+}
+
+TEST(FlattenJson, NulAfterTheDocumentEndsTheInput) {
+  ExpectFlattens(std::string("[1]\0", 4), {{"/0", "1", JsonEntryType::Number}});
 }
 
 TEST(FlattenJson, SuccessReplacesThePreviousResultCompletely) {
@@ -589,6 +645,14 @@ TEST(FlattenJson, KeyContainingTildeOneLiterallyBecomesTildeZeroOne) {
                                        });
 }
 
+TEST(FlattenJson, KeysMadeOnlyOfTildesAndSlashesAreEscapedPerCharacter) {
+  ExpectFlattens(R"({"~~":1,"//":2,"~/~":3})", {
+                                                   {"/~0~0", "1", JsonEntryType::Number},
+                                                   {"/~1~1", "2", JsonEntryType::Number},
+                                                   {"/~0~1~0", "3", JsonEntryType::Number},
+                                               });
+}
+
 TEST(FlattenJson, DotKeyAndNestedKeyProduceDifferentPaths) {
   ExpectFlattens(R"({"a.b":1,"a":{"b":2}})", {
                                                  {"/a.b", "1", JsonEntryType::Number},
@@ -619,9 +683,7 @@ TEST(FlattenJson, ArrayIndicesAreDecimalWithoutLeadingZeros) {
   FlattenResult result;
   ASSERT_EQ(FlattenJson(text, result), Status::Ok);
   ASSERT_EQ(result.entries.size(), 101u);
-  EXPECT_EQ(result.entries[0].key, "/0");
-  EXPECT_EQ(result.entries[9].key, "/9");
-  EXPECT_EQ(result.entries[10].key, "/10");
+  EXPECT_EQ(result.entries[99].key, "/99");
   EXPECT_EQ(result.entries[100].key, "/100");
 }
 
@@ -657,14 +719,37 @@ TEST(FlattenJson, WhitespaceOnlyTextIsParseError) {
 
 TEST(FlattenJson, InvalidJsonIsParseError) {
   const char* const texts[] = {
-      "{",          "}",           "[",          "]",
-      "{\"a\":}",   "{\"a\" 1}",   "{\"a\":1,}", "[1,]",
-      "[,1]",       "[1 2]",       "{a:1}",      "{'a':1}",
-      "{\"a\":1 \"b\":2}",         "tru",        "nul",
-      "nullx",      "True",        "01",         "+1",
-      ".5",         "1.",          "-",          "NaN",
-      "Infinity",   "'a'",         "abc",        "\"\\x\"",
-      "\"\\u12\"",  "{1:2}",       ":",          ",",
+      "{",
+      "}",
+      "[",
+      "]",
+      "{\"a\":}",
+      "{\"a\" 1}",
+      "{\"a\":1,}",
+      "[1,]",
+      "[,1]",
+      "[1 2]",
+      "{a:1}",
+      "{'a':1}",
+      "{\"a\":1 \"b\":2}",
+      "tru",
+      "nul",
+      "nullx",
+      "True",
+      "01",
+      "+1",
+      ".5",
+      "1.",
+      "-",
+      "NaN",
+      "Infinity",
+      "'a'",
+      "abc",
+      "\"\\x\"",
+      "\"\\u12\"",
+      "{1:2}",
+      ":",
+      ",",
   };
   for (const char* text : texts) {
     SCOPED_TRACE(text);
@@ -674,9 +759,8 @@ TEST(FlattenJson, InvalidJsonIsParseError) {
 
 TEST(FlattenJson, TruncatedJsonIsParseError) {
   const char* const texts[] = {
-      "{\"a\":1",       "{\"a\":",     "{\"a\"",   "{\"a",     "[1,2",
-      "[1,",            "{\"a\":[1,2", "\"abc",    "[\"abc",   "{\"a\":{\"b\":1}",
-      "[[[[1,2],[3]]]",
+      "{\"a\":1", "{\"a\":", "{\"a\"",           "{\"a",           "[1,2", "[1,", "{\"a\":[1,2",
+      "\"abc",    "[\"abc",  "{\"a\":{\"b\":1}", "[[[[1,2],[3]]]",
   };
   for (const char* text : texts) {
     SCOPED_TRACE(text);
@@ -686,8 +770,8 @@ TEST(FlattenJson, TruncatedJsonIsParseError) {
 
 TEST(FlattenJson, TrailingGarbageIsParseError) {
   const char* const texts[] = {
-      "{} x", "1 2", "[]]", "{\"a\":1}}", "true false", "[1] ,", "\"a\" \"b\"", "{}{}", "[][]",
-      "null null",
+      "{} x",  "1 2",         "[]]",  "{\"a\":1}}", "true false",
+      "[1] ,", "\"a\" \"b\"", "{}{}", "[][]",       "null null",
   };
   for (const char* text : texts) {
     SCOPED_TRACE(text);
@@ -697,14 +781,10 @@ TEST(FlattenJson, TrailingGarbageIsParseError) {
 
 TEST(FlattenJson, InvalidUtf8InAStringValueIsParseError) {
   const std::string texts[] = {
-      "\"\xC3\x28\"",
-      "\"\xFF\"",
-      "\"\xC0\x80\"",
-      "\"\xE2\x82\"",
-      "\"\xED\xA0\x80\"",
-      "\"\xF8\x88\x80\x80\x80\"",
-      "\"\x80\"",
-      "[\"ok\",\"\xC3\x28\"]",
+      "\"\xC3\x28\"",     "\"\xFF\"",
+      "\"\xC0\x80\"",     "\"\xE2\x82\"",
+      "\"\xED\xA0\x80\"", "\"\xF8\x88\x80\x80\x80\"",
+      "\"\x80\"",         "[\"ok\",\"\xC3\x28\"]",
   };
   for (const std::string& text : texts) {
     SCOPED_TRACE(text);
@@ -723,16 +803,41 @@ TEST(FlattenJson, InvalidUtf8OutsideStringsIsParseError) {
   ExpectFails("[1,\xFF]", Status::ParseError);
 }
 
+TEST(FlattenJson, UnpairedSurrogateEscapesAreParseError) {
+  const char* const texts[] = {
+      R"("\ud800")",  R"("\udc00")",       R"("\ud83d")",
+      R"("\ud800x")", R"("\ud800\u0041")", R"({"\ud800":1})",
+  };
+  for (const char* text : texts) {
+    SCOPED_TRACE(text);
+    ExpectFails(text, Status::ParseError);
+  }
+}
+
+TEST(FlattenJson, FormFeedAndVerticalTabOutsideStringsAreParseError) {
+  const std::string texts[] = {"\f[1]", "[1]\f", "[\v1]", "\v[1]", "[1,\f2]"};
+  for (const std::string& text : texts) {
+    SCOPED_TRACE(text);
+    ExpectFails(text, Status::ParseError);
+  }
+}
+
+TEST(FlattenJson, CommentsAreParseError) {
+  ExpectFails("/* c */ [1]", Status::ParseError);
+  ExpectFails("[1] // c", Status::ParseError);
+  ExpectFails("[1, /* c */ 2]", Status::ParseError);
+}
+
+TEST(FlattenJson, NulBeforeOrInsideTheDocumentIsParseError) {
+  ExpectFails(std::string("\0[1]", 4), Status::ParseError);
+  ExpectFails(std::string("[1,\0 2]", 7), Status::ParseError);
+}
+
 TEST(FlattenJson, UnescapedControlCharactersInStringsAreParseError) {
   const std::string texts[] = {
-      "\"a\tb\"",
-      "\"a\nb\"",
-      "\"a\rb\"",
-      "\"\x01\"",
-      "\"\x1f\"",
-      std::string("\"a\0b\"", 5),
-      "{\"k\nk\":1}",
-      "{\"k\":\"v\nv\"}",
+      "\"a\tb\"",     "\"a\nb\"",         "\"a\rb\"",
+      "\"\x01\"",     "\"\x1f\"",         std::string("\"a\0b\"", 5),
+      "{\"k\nk\":1}", "{\"k\":\"v\nv\"}",
   };
   for (const std::string& text : texts) {
     SCOPED_TRACE(text);
@@ -789,6 +894,31 @@ TEST(FlattenJson, OversizedInputIsDocumentTooLargeEvenWhenNotJson) {
   ExpectFails(std::string(kMaxJsonInputBytes + 1, 'x'), Status::DocumentTooLarge);
 }
 
+TEST(FlattenJson, NulAsTheLastByteOfAMaximumSizeInputIsAcceptedAndOneMoreByteIsTooLarge) {
+  std::string text = PaddedToSize("[0]", kMaxJsonInputBytes - 1);
+  text.push_back('\0');
+  ASSERT_EQ(text.size(), kMaxJsonInputBytes);
+  FlattenResult result;
+  ASSERT_EQ(FlattenJson(text, result), Status::Ok);
+  ExpectEntries(result, {{"/0", "0", JsonEntryType::Number}});
+
+  text = PaddedToSize("[0]", kMaxJsonInputBytes);
+  text.push_back('\0');
+  ExpectFails(text, Status::DocumentTooLarge);
+}
+
+TEST(FlattenJson, ByteOrderMarkCountsTowardsTheMaximumSize) {
+  const std::string bom("\xEF\xBB\xBF");
+  const std::string atLimit = bom + PaddedToSize("[0]", kMaxJsonInputBytes - bom.size());
+  ASSERT_EQ(atLimit.size(), kMaxJsonInputBytes);
+  FlattenResult result;
+  ASSERT_EQ(FlattenJson(atLimit, result), Status::Ok);
+  ExpectEntries(result, {{"/0", "0", JsonEntryType::Number}});
+
+  ExpectFails(bom + PaddedToSize("[0]", kMaxJsonInputBytes - bom.size() + 1),
+              Status::DocumentTooLarge);
+}
+
 // ---------------------------------------------------------------------------
 // Limits: nesting depth (root container = depth 1).
 // ---------------------------------------------------------------------------
@@ -820,8 +950,7 @@ TEST(FlattenJson, NestedObjectsOneLevelOverTheMaximumAreNestingTooDeep) {
 }
 
 TEST(FlattenJson, LeafInsideTheDeepestAllowedContainerIsAccepted) {
-  const std::string text =
-      std::string(kMaxJsonDepth, '[') + "1" + std::string(kMaxJsonDepth, ']');
+  const std::string text = std::string(kMaxJsonDepth, '[') + "1" + std::string(kMaxJsonDepth, ']');
   FlattenResult result;
   ASSERT_EQ(FlattenJson(text, result), Status::Ok);
   ASSERT_EQ(result.entries.size(), 1u);
@@ -871,6 +1000,18 @@ TEST(FlattenJson, UnterminatedDeepNestingIsNestingTooDeepWithoutCrashing) {
 
 TEST(FlattenJson, TooDeepAndMalformedFurtherOnReportsNestingTooDeep) {
   ExpectFails(NestedArrays(kMaxJsonDepth + 1) + " garbage", Status::NestingTooDeep);
+}
+
+TEST(FlattenJson, MoreThanTheMaximumLeavesBeforeTooDeepNestingIsTooManyEntries) {
+  const std::string text =
+      "[" + Repeated("0,", kMaxFlatEntries + 1) + NestedArrays(kMaxJsonDepth + 1) + "]";
+  ExpectFails(text, Status::TooManyEntries);
+}
+
+TEST(FlattenJson, TooDeepNestingBeforeMoreThanTheMaximumLeavesIsNestingTooDeep) {
+  const std::string text =
+      "[" + NestedArrays(kMaxJsonDepth + 1) + "," + Repeated("0,", kMaxFlatEntries + 1) + "0]";
+  ExpectFails(text, Status::NestingTooDeep);
 }
 
 TEST(FlattenJson, DepthLimitIsNotReportedForShallowMalformedInput) {
@@ -969,4 +1110,61 @@ TEST(FlattenJson, TooManyEntriesIsReportedBeforeLaterMalformedText) {
 
 TEST(FlattenJson, EntryLimitIsNotReportedForAShortMalformedText) {
   ExpectFails("[0,0,garbage", Status::ParseError);
+}
+
+// ---------------------------------------------------------------------------
+// DescribeLeaf.
+// ---------------------------------------------------------------------------
+
+TEST(DescribeLeaf, NonEmptyObjectAndArrayAreTypeMismatchAndLeaveTheOutputsUntouched) {
+  const JsonValue nodes[] = {JsonValue::parse(R"({"a":1})"), JsonValue::parse("[1]"),
+                             JsonValue::parse(R"({"a":{}})"), JsonValue::parse("[[]]")};
+  for (const JsonValue& node : nodes) {
+    SCOPED_TRACE(node.dump());
+    std::string text = "sentinel";
+    JsonEntryType type = kNoType;
+    EXPECT_EQ(DescribeLeaf(node, text, type), Status::TypeMismatch);
+    EXPECT_EQ(text, "sentinel");
+    EXPECT_EQ(TypeNumber(type), TypeNumber(kNoType));
+  }
+}
+
+TEST(DescribeLeaf, EmptyObjectAndEmptyArrayAreLeaves) {
+  std::string text = "sentinel";
+  JsonEntryType type = kNoType;
+  ASSERT_EQ(DescribeLeaf(JsonValue::object(), text, type), Status::Ok);
+  EXPECT_EQ(text, "{}");
+  EXPECT_EQ(TypeNumber(type), TypeNumber(JsonEntryType::EmptyObject));
+
+  text = "sentinel";
+  type = kNoType;
+  ASSERT_EQ(DescribeLeaf(JsonValue::array(), text, type), Status::Ok);
+  EXPECT_EQ(text, "[]");
+  EXPECT_EQ(TypeNumber(type), TypeNumber(JsonEntryType::EmptyArray));
+}
+
+TEST(DescribeLeaf, ScalarsGetTheirTextAndType) {
+  struct Case {
+    JsonValue node;
+    const char* text;
+    JsonEntryType type;
+  };
+  const Case cases[] = {
+      {JsonValue(42), "42", JsonEntryType::Number},
+      {JsonValue(-7), "-7", JsonEntryType::Number},
+      {JsonValue(2.5), "2.5", JsonEntryType::Number},
+      {JsonValue("text"), "text", JsonEntryType::String},
+      {JsonValue(""), "", JsonEntryType::String},
+      {JsonValue(true), "true", JsonEntryType::Bool},
+      {JsonValue(false), "false", JsonEntryType::Bool},
+      {JsonValue(nullptr), "null", JsonEntryType::Null},
+  };
+  for (const Case& c : cases) {
+    SCOPED_TRACE(c.text);
+    std::string text = "sentinel";
+    JsonEntryType type = kNoType;
+    EXPECT_EQ(DescribeLeaf(c.node, text, type), Status::Ok);
+    EXPECT_EQ(text, c.text);
+    EXPECT_EQ(TypeNumber(type), TypeNumber(c.type));
+  }
 }

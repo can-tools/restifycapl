@@ -10,6 +10,7 @@
 
 #include "core/json-value.h"
 #include "core/status.h"
+#include "../test-support/status-print.h"
 
 namespace {
 
@@ -247,21 +248,6 @@ TEST(ValueToText, ArrayIsTypeMismatchAndOutUntouched) {
   std::string out = "sentinel";
   EXPECT_EQ(ValueToText(value, out), Status::TypeMismatch);
   EXPECT_EQ(out, "sentinel");
-}
-
-// ---------------------------------------------------------------------------
-// JsonValue field order
-// ---------------------------------------------------------------------------
-
-TEST(JsonValue, ObjectKeepsDocumentOrderNotAlphabetical) {
-  const JsonValue value = JsonValue::parse(R"({"c":1,"b":2,"a":3})");
-  EXPECT_EQ(value.dump(), R"({"c":1,"b":2,"a":3})");
-
-  std::string keys;
-  for (const auto& item : value.items()) {
-    keys += item.key();
-  }
-  EXPECT_EQ(keys, "cba");
 }
 
 // ---------------------------------------------------------------------------

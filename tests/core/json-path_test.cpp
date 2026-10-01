@@ -12,17 +12,13 @@
 
 #include "core/json-value.h"
 #include "core/status.h"
+#include "../test-support/status-print.h"
 
 namespace {
 
 struct TokenCase {
   const char* path;
   std::vector<std::string> tokens;
-};
-
-struct StatusCase {
-  const char* path;
-  Status status;
 };
 
 }  // namespace
@@ -37,13 +33,9 @@ TEST(ParsePath, EmptyPathIsOkWithNoTokens) {
   EXPECT_TRUE(tokens.empty());
 }
 
-TEST(ParsePath, LeadingDotIsSyntaxError) {
-  std::vector<std::string> tokens;
-  EXPECT_EQ(ParsePath(".items[0]", tokens), Status::PathSyntaxError);
-}
-
 TEST(ParsePath, TextWithoutLeadingSlashIsSyntaxError) {
-  const char* const paths[] = {"data.items[0].name", "a", "a/b", "[0]", " /a", "~", "~0"};
+  const char* const paths[] = {".items[0]", "data.items[0].name", "a",  "a/b",
+                               "[0]",       " /a",                "~",  "~0"};
   for (const char* path : paths) {
     SCOPED_TRACE(path);
     std::vector<std::string> tokens;
@@ -121,7 +113,8 @@ TEST(ParsePath, TildeZeroOneDecodesToTildeOneNotSlash) {
 }
 
 TEST(ParsePath, BadTildeEscapeIsSyntaxError) {
-  const char* const paths[] = {"/a~2", "/~", "/a~", "/a~/b", "/~x", "/~ ", "/a/b~", "/~~", "/~00~"};
+  const char* const paths[] = {"/a~2", "/~",    "/a~",   "/a~/b", "/~x",
+                               "/~ ",  "/a/b~", "/~~",   "/~00~"};
   for (const char* path : paths) {
     SCOPED_TRACE(path);
     std::vector<std::string> tokens;
@@ -374,6 +367,8 @@ TEST(ResolvePath, SlashAloneDiffersFromEmptyPath) {
   const JsonValue* inner = nullptr;
   ASSERT_EQ(ResolvePath(document, "", whole), Status::Ok);
   ASSERT_EQ(ResolvePath(document, "/", inner), Status::Ok);
+  ASSERT_NE(whole, nullptr);
+  ASSERT_NE(inner, nullptr);
   EXPECT_NE(whole, inner);
   EXPECT_TRUE(whole->is_object());
   EXPECT_TRUE(inner->is_string());
@@ -407,12 +402,6 @@ TEST(ResolvePath, DoubleSlashThenZeroOnObjectIsKeyLookup) {
   EXPECT_EQ(ResolvePath(document, "//0", out), Status::Ok);
   ASSERT_NE(out, nullptr);
   EXPECT_EQ(out->get<std::string>(), "key-zero");
-}
-
-TEST(ResolvePath, EmptyKeyOnArrayIsTypeMismatch) {
-  const JsonValue document = JsonValue::array({1, 2, 3});
-  const JsonValue* out = nullptr;
-  EXPECT_EQ(ResolvePath(document, "/", out), Status::TypeMismatch);
 }
 
 TEST(ResolvePath, EmptyKeyOnScalarIsTypeMismatch) {
@@ -456,24 +445,13 @@ TEST(ResolvePath, DashOnEmptyArrayIsIndexOutOfRange) {
 }
 
 TEST(ResolvePath, NonCanonicalIndexOnArrayIsTypeMismatch) {
-  const StatusCase cases[] = {
-      {"/01", Status::TypeMismatch},
-      {"/00", Status::TypeMismatch},
-      {"/-1", Status::TypeMismatch},
-      {"/-0", Status::TypeMismatch},
-      {"/+1", Status::TypeMismatch},
-      {"/x", Status::TypeMismatch},
-      {"/1x", Status::TypeMismatch},
-      {"/1.0", Status::TypeMismatch},
-      {"/ 1", Status::TypeMismatch},
-      {"/1 ", Status::TypeMismatch},
-      {"/", Status::TypeMismatch},
-  };
+  const char* const paths[] = {"/01", "/00", "/-1", "/-0", "/+1", "/x",
+                               "/1x", "/1.0", "/ 1", "/1 ", "/"};
   const JsonValue document = JsonValue::array({1, 2, 3});
-  for (const StatusCase& c : cases) {
-    SCOPED_TRACE(c.path);
+  for (const char* path : paths) {
+    SCOPED_TRACE(path);
     const JsonValue* out = nullptr;
-    EXPECT_EQ(ResolvePath(document, c.path, out), c.status);
+    EXPECT_EQ(ResolvePath(document, path, out), Status::TypeMismatch);
   }
 }
 
@@ -483,18 +461,45 @@ TEST(ResolvePath, KeyOnArrayIsTypeMismatch) {
   EXPECT_EQ(ResolvePath(document, "/key", out), Status::TypeMismatch);
 }
 
-TEST(ResolvePath, IndexAtUint32BoundaryIsIndexOutOfRange) {
+TEST(ResolvePath, IndexesAtAndAboveTheUint32MaximumAreIndexOutOfRange) {
   const JsonValue document = JsonValue::array({1, 2, 3});
-  const StatusCase cases[] = {
-      {"/4294967295", Status::IndexOutOfRange},
-      {"/4294967296", Status::IndexOutOfRange},
-      {"/99999999999", Status::IndexOutOfRange},
-  };
-  for (const StatusCase& c : cases) {
-    SCOPED_TRACE(c.path);
+  const char* const paths[] = {"/4294967295", "/4294967296", "/99999999999"};
+  for (const char* path : paths) {
+    SCOPED_TRACE(path);
     const JsonValue* out = nullptr;
-    EXPECT_EQ(ResolvePath(document, c.path, out), c.status);
+    EXPECT_EQ(ResolvePath(document, path, out), Status::IndexOutOfRange);
   }
+}
+
+TEST(ResolvePath, MultiDigitIndexResolvesToThatElement) {
+  JsonValue document = JsonValue::array();
+  for (std::int32_t i = 0; i < 11; ++i) {
+    document.push_back(i * 10);
+  }
+  const JsonValue* out = nullptr;
+  ASSERT_EQ(ResolvePath(document, "/10", out), Status::Ok);
+  ASSERT_NE(out, nullptr);
+  EXPECT_EQ(out->get<std::int32_t>(), 100);
+  EXPECT_EQ(ResolvePath(document, "/11", out), Status::IndexOutOfRange);
+}
+
+TEST(ResolvePath, KeyWithAnEmbeddedNulIsAddressedByAPathWithThatNul) {
+  const JsonValue document = JsonValue::parse(R"({"a\u0000b":1})");
+  const JsonValue* out = nullptr;
+  ASSERT_EQ(ResolvePath(document, std::string("/a\0b", 4), out), Status::Ok);
+  ASSERT_NE(out, nullptr);
+  EXPECT_EQ(out->get<std::int32_t>(), 1);
+  EXPECT_EQ(ResolvePath(document, "/a", out), Status::PathNotFound);
+}
+
+TEST(ResolvePath, KeyBytesAreComparedWithoutUtf8Validation) {
+  JsonValue document = JsonValue::object();
+  document[std::string("\xFF")] = 5;
+  const JsonValue* out = nullptr;
+  ASSERT_EQ(ResolvePath(document, std::string("/\xFF"), out), Status::Ok);
+  ASSERT_NE(out, nullptr);
+  EXPECT_EQ(out->get<std::int32_t>(), 5);
+  EXPECT_EQ(ResolvePath(document, std::string("/\xFE"), out), Status::PathNotFound);
 }
 
 TEST(ResolvePath, VeryLongDigitStringOnArrayIsIndexOutOfRange) {
@@ -632,6 +637,8 @@ TEST(ResolvePath, ResolvedPointerAliasesContainerNodes) {
 TEST(ResolvePath, ResolutionDoesNotDependOnKeyOrderInDocument) {
   const JsonValue forward = JsonValue::parse(R"({"a":1,"b":2,"c":{"x":3,"y":4}})");
   const JsonValue reversed = JsonValue::parse(R"({"c":{"y":4,"x":3},"b":2,"a":1})");
+  EXPECT_EQ(forward.dump(), R"({"a":1,"b":2,"c":{"x":3,"y":4}})");
+  EXPECT_EQ(reversed.dump(), R"({"c":{"y":4,"x":3},"b":2,"a":1})");
   const char* const paths[] = {"/a", "/b", "/c/x", "/c/y"};
   const std::int32_t expected[] = {1, 2, 3, 4};
   for (std::size_t i = 0; i < 4; ++i) {
@@ -647,6 +654,7 @@ TEST(ResolvePath, ResolutionDoesNotDependOnKeyOrderInDocument) {
 
 TEST(ResolvePath, NonAlphabeticalDocumentOrderStillResolvesInPlace) {
   const JsonValue document = JsonValue::parse(R"({"z":1,"a":2})");
+  ASSERT_EQ(document.dump(), R"({"z":1,"a":2})");
   const JsonValue* out = nullptr;
 
   EXPECT_EQ(ResolvePath(document, "/a", out), Status::Ok);
@@ -662,7 +670,8 @@ TEST(ResolvePath, NonAlphabeticalDocumentOrderStillResolvesInPlace) {
 
 TEST(ResolvePath, Rfc6901SectionFiveExamples) {
   const JsonValue document = JsonValue::parse(
-      R"({"foo":["bar","baz"],"":0,"a/b":1,"c%d":2,"e^f":3,"g|h":4,"i\\j":5,"k\"l":6," ":7,"m~n":8})");
+      R"({"foo":["bar","baz"],"":0,"a/b":1,"c%d":2,"e^f":3,"g|h":4,)"
+      R"("i\\j":5,"k\"l":6," ":7,"m~n":8})");
 
   const JsonValue* out = nullptr;
 
@@ -670,9 +679,11 @@ TEST(ResolvePath, Rfc6901SectionFiveExamples) {
   EXPECT_EQ(out, &document);
 
   ASSERT_EQ(ResolvePath(document, "/foo", out), Status::Ok);
+  ASSERT_NE(out, nullptr);
   EXPECT_EQ(*out, JsonValue::parse(R"(["bar","baz"])"));
 
   ASSERT_EQ(ResolvePath(document, "/foo/0", out), Status::Ok);
+  ASSERT_NE(out, nullptr);
   EXPECT_EQ(out->get<std::string>(), "bar");
 
   const struct {

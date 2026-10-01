@@ -5,20 +5,46 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <set>
 #include <string>
+#include <string_view>
 #include <utility>
+#include <vector>
 
 #include <gtest/gtest.h>
 
 #include "core/status.h"
+#include "../test-support/status-print.h"
 #include "mapping/json-flatten.h"
 
 namespace {
 
+// Stores built from kFirstId mint ids kFirstId..kFirstId+7 in these tests, so kIdSentinel cannot be a real id.
+constexpr std::uint32_t kFirstId = 1000;
 constexpr std::uint32_t kIdSentinel = 0xDEADBEEFu;
-constexpr std::uint32_t kCountSentinel = 0xDEADBEEFu;
-constexpr JsonEntryType kTypeSentinel = JsonEntryType::Bool;
+constexpr std::uint32_t kCountSentinel = 0xC0FFEE11u;
+// Not an enumerator, so a real entry type can never equal it.
+constexpr JsonEntryType kTypeSentinel = static_cast<JsonEntryType>(-1);
 constexpr char kFill = 'Z';
+
+using TextBuffer = std::array<char, 16>;
+
+TextBuffer FilledBuffer() {
+  TextBuffer buffer;
+  buffer.fill(kFill);
+  return buffer;
+}
+
+bool IsUntouched(const TextBuffer& buffer) {
+  for (const char c : buffer) {
+    if (c != kFill) {
+      return false;
+    }
+  }
+  return true;
+}
+
+std::uint32_t SizeOf(const TextBuffer& buffer) { return static_cast<std::uint32_t>(buffer.size()); }
 
 FlattenResult Flat(const std::string& text) {
   FlattenResult result;
@@ -27,15 +53,63 @@ FlattenResult Flat(const std::string& text) {
 }
 
 std::uint32_t InsertOrDie(JsonDocumentStore& store, const std::string& text) {
-  std::uint32_t id = kIdSentinel;
+  std::uint32_t id = 0;
   EXPECT_EQ(store.Insert(Flat(text), id), Status::Ok);
+  EXPECT_NE(id, 0u);
   return id;
 }
 
-void FillStore(JsonDocumentStore& store) {
+std::vector<std::uint32_t> FillStore(JsonDocumentStore& store) {
+  std::vector<std::uint32_t> ids;
   for (std::size_t i = 0; i < kJsonDocumentSlotCount; ++i) {
-    EXPECT_NE(InsertOrDie(store, "[1]"), kIdSentinel);
+    ids.push_back(InsertOrDie(store, "{\"n\":" + std::to_string(i) + "}"));
   }
+  return ids;
+}
+
+struct ValueResult {
+  Status status;
+  std::string text;
+  JsonEntryType type;
+};
+
+ValueResult ReadValueAt(JsonDocumentStore& store, std::uint32_t id, std::string_view path) {
+  TextBuffer value = FilledBuffer();
+  JsonEntryType type = kTypeSentinel;
+  const Status status = store.ReadValue(id, path, value.data(), SizeOf(value), type);
+  return ValueResult{status, status == Status::Ok ? std::string(value.data()) : std::string(),
+                     type};
+}
+
+// For every status except BufferTooSmall the caller's buffer must stay as it was.
+void ExpectReadValueFails(JsonDocumentStore& store, std::uint32_t id, std::string_view path,
+                          Status expected) {
+  SCOPED_TRACE("path '" + std::string(path) + "'");
+  TextBuffer value = FilledBuffer();
+  JsonEntryType type = kTypeSentinel;
+  EXPECT_EQ(store.ReadValue(id, path, value.data(), SizeOf(value), type), expected);
+  EXPECT_EQ(type, kTypeSentinel);
+  EXPECT_TRUE(IsUntouched(value));
+}
+
+void ExpectUnknownEverywhere(JsonDocumentStore& store, std::uint32_t id) {
+  SCOPED_TRACE("id " + std::to_string(id));
+
+  std::uint32_t count = kCountSentinel;
+  EXPECT_EQ(store.Count(id, count), Status::UnknownDocumentId);
+  EXPECT_EQ(count, kCountSentinel);
+
+  TextBuffer key = FilledBuffer();
+  TextBuffer value = FilledBuffer();
+  JsonEntryType type = kTypeSentinel;
+  EXPECT_EQ(store.ReadEntry(id, 0, key.data(), SizeOf(key), value.data(), SizeOf(value), type),
+            Status::UnknownDocumentId);
+  EXPECT_EQ(type, kTypeSentinel);
+  EXPECT_TRUE(IsUntouched(key));
+  EXPECT_TRUE(IsUntouched(value));
+
+  ExpectReadValueFails(store, id, "", Status::UnknownDocumentId);
+  EXPECT_EQ(store.Discard(id), Status::UnknownDocumentId);
 }
 
 }  // namespace
@@ -44,32 +118,37 @@ TEST(JsonDocumentStore, SlotCountIsEight) {
   EXPECT_EQ(kJsonDocumentSlotCount, 8u);
 }
 
+// ---------------------------------------------------------------------------
+// Insert and Count.
+// ---------------------------------------------------------------------------
+
 TEST(JsonDocumentStore, InsertStoresTheDocumentAndCountReportsItsEntries) {
-  JsonDocumentStore store;
+  JsonDocumentStore store(kFirstId);
   std::uint32_t id = kIdSentinel;
   ASSERT_EQ(store.Insert(Flat(R"({"a":1,"b":[2,3]})"), id), Status::Ok);
-  EXPECT_NE(id, 0u);
-  EXPECT_NE(id, kIdSentinel);
+  EXPECT_EQ(id, kFirstId);
 
   std::uint32_t count = kCountSentinel;
   EXPECT_EQ(store.Count(id, count), Status::Ok);
   EXPECT_EQ(count, 3u);
 }
 
-TEST(JsonDocumentStore, FirstIdOfAStoreBuiltWithAStartValueIsThatValue) {
+TEST(JsonDocumentStore, IdsOfAStoreBuiltWithAStartValueCountUpFromIt) {
   JsonDocumentStore store(100);
   EXPECT_EQ(InsertOrDie(store, "[1]"), 100u);
   EXPECT_EQ(InsertOrDie(store, "[1]"), 101u);
+  EXPECT_EQ(InsertOrDie(store, "[1]"), 102u);
 }
 
-TEST(JsonDocumentStore, StartValueZeroNeverYieldsIdZero) {
+TEST(JsonDocumentStore, StartValueZeroSkipsZeroAndYieldsOne) {
   JsonDocumentStore store(0);
-  EXPECT_NE(InsertOrDie(store, "[1]"), 0u);
+  EXPECT_EQ(InsertOrDie(store, "[1]"), 1u);
+  EXPECT_EQ(InsertOrDie(store, "[1]"), 2u);
 }
 
 TEST(JsonDocumentStore, InsertIntoAFullStoreKeepsTheResultAndTheIdUntouched) {
-  JsonDocumentStore store;
-  FillStore(store);
+  JsonDocumentStore store(kFirstId);
+  const std::vector<std::uint32_t> ids = FillStore(store);
 
   FlattenResult extra = Flat(R"({"a":1,"b":2})");
   std::uint32_t id = kIdSentinel;
@@ -77,113 +156,194 @@ TEST(JsonDocumentStore, InsertIntoAFullStoreKeepsTheResultAndTheIdUntouched) {
   EXPECT_EQ(id, kIdSentinel);
   EXPECT_EQ(extra.entries.size(), 2u);
   EXPECT_EQ(extra.document.dump(), R"({"a":1,"b":2})");
+
+  for (const std::uint32_t held : ids) {
+    std::uint32_t count = kCountSentinel;
+    EXPECT_EQ(store.Count(held, count), Status::Ok);
+    EXPECT_EQ(count, 1u);
+  }
 }
 
-TEST(JsonDocumentStore, InsertIntoAFreedSlotSucceedsAfterTheStoreWasFull) {
-  JsonDocumentStore store;
-  std::uint32_t first = InsertOrDie(store, "[1]");
-  for (std::size_t i = 1; i < kJsonDocumentSlotCount; ++i) {
-    InsertOrDie(store, "[1]");
-  }
+TEST(JsonDocumentStore, InsertIntoAFreedSlotSucceedsAndTheRejectedInsertConsumedNoId) {
+  JsonDocumentStore store(kFirstId);
+  const std::vector<std::uint32_t> ids = FillStore(store);
+  ASSERT_EQ(ids.front(), kFirstId);
+  ASSERT_EQ(ids.back(), kFirstId + 7);
+
   std::uint32_t rejected = kIdSentinel;
   ASSERT_EQ(store.Insert(Flat("[2]"), rejected), Status::NoFreeDocumentSlot);
 
-  ASSERT_EQ(store.Discard(first), Status::Ok);
+  ASSERT_EQ(store.Discard(ids.front()), Status::Ok);
   std::uint32_t reused = kIdSentinel;
-  EXPECT_EQ(store.Insert(Flat("[2]"), reused), Status::Ok);
-  EXPECT_NE(reused, first);
-  EXPECT_NE(reused, 0u);
+  ASSERT_EQ(store.Insert(Flat("[2,3]"), reused), Status::Ok);
+  EXPECT_EQ(reused, kFirstId + 8);
+
+  std::uint32_t count = kCountSentinel;
+  EXPECT_EQ(store.Count(reused, count), Status::Ok);
+  EXPECT_EQ(count, 2u);
+  ExpectUnknownEverywhere(store, ids.front());
 }
 
 TEST(JsonDocumentStore, CountOfAnUnknownIdLeavesTheOutParameterUntouched) {
-  JsonDocumentStore store;
+  JsonDocumentStore store(kFirstId);
   InsertOrDie(store, "[1]");
-  std::uint32_t count = kCountSentinel;
-  EXPECT_EQ(store.Count(0, count), Status::UnknownDocumentId);
-  EXPECT_EQ(count, kCountSentinel);
+  const std::uint32_t unknownIds[] = {0u, kFirstId - 1, kFirstId + 1, 0xFFFFFFFFu};
+  for (const std::uint32_t unknown : unknownIds) {
+    SCOPED_TRACE("id " + std::to_string(unknown));
+    std::uint32_t count = kCountSentinel;
+    EXPECT_EQ(store.Count(unknown, count), Status::UnknownDocumentId);
+    EXPECT_EQ(count, kCountSentinel);
+  }
 }
 
-TEST(JsonDocumentStore, ReadEntryFailuresLeaveValueTypeUntouched) {
-  JsonDocumentStore store;
-  const std::uint32_t id = InsertOrDie(store, R"({"key":"value"})");
-  std::array<char, 16> key;
-  std::array<char, 16> value;
-  key.fill(kFill);
-  value.fill(kFill);
-  const auto keySize = static_cast<std::uint32_t>(key.size());
-  const auto valueSize = static_cast<std::uint32_t>(value.size());
+// ---------------------------------------------------------------------------
+// ReadEntry.
+// ---------------------------------------------------------------------------
 
+TEST(JsonDocumentStore, ReadEntryFailuresLeaveBuffersAndValueTypeAsTheyWere) {
+  JsonDocumentStore store(kFirstId);
+  const std::uint32_t id = InsertOrDie(store, R"({"key":"value"})");
+
+  TextBuffer key = FilledBuffer();
+  TextBuffer value = FilledBuffer();
   JsonEntryType type = kTypeSentinel;
-  EXPECT_EQ(store.ReadEntry(0, 0, key.data(), keySize, value.data(), valueSize, type),
+
+  EXPECT_EQ(store.ReadEntry(0, 0, key.data(), SizeOf(key), value.data(), SizeOf(value), type),
             Status::UnknownDocumentId);
   EXPECT_EQ(type, kTypeSentinel);
+  EXPECT_TRUE(IsUntouched(key));
+  EXPECT_TRUE(IsUntouched(value));
 
-  EXPECT_EQ(store.ReadEntry(id, 1, key.data(), keySize, value.data(), valueSize, type),
+  EXPECT_EQ(store.ReadEntry(id, 1, key.data(), SizeOf(key), value.data(), SizeOf(value), type),
             Status::IndexOutOfRange);
   EXPECT_EQ(type, kTypeSentinel);
+  EXPECT_TRUE(IsUntouched(key));
+  EXPECT_TRUE(IsUntouched(value));
 
-  EXPECT_EQ(store.ReadEntry(id, 0, nullptr, keySize, value.data(), valueSize, type),
+  EXPECT_EQ(store.ReadEntry(id, 0, nullptr, SizeOf(key), value.data(), SizeOf(value), type),
             Status::InvalidArgument);
   EXPECT_EQ(type, kTypeSentinel);
+  EXPECT_TRUE(IsUntouched(value));
 
-  EXPECT_EQ(store.ReadEntry(id, 0, key.data(), 2, value.data(), valueSize, type),
+  EXPECT_EQ(store.ReadEntry(id, 0, key.data(), SizeOf(key), value.data(), 0, type),
+            Status::InvalidArgument);
+  EXPECT_EQ(type, kTypeSentinel);
+  EXPECT_TRUE(IsUntouched(key));
+  EXPECT_TRUE(IsUntouched(value));
+}
+
+TEST(JsonDocumentStore, ReadEntryTooSmallABufferEmptiesBothBuffersAndLeavesTheType) {
+  JsonDocumentStore store(kFirstId);
+  const std::uint32_t id = InsertOrDie(store, R"({"key":"value"})");
+
+  TextBuffer key = FilledBuffer();
+  TextBuffer value = FilledBuffer();
+  JsonEntryType type = kTypeSentinel;
+
+  EXPECT_EQ(store.ReadEntry(id, 0, key.data(), 2, value.data(), SizeOf(value), type),
             Status::BufferTooSmall);
   EXPECT_EQ(type, kTypeSentinel);
+  EXPECT_EQ(key[0], '\0');
+  EXPECT_EQ(value[0], '\0');
+
+  key = FilledBuffer();
+  value = FilledBuffer();
+  EXPECT_EQ(store.ReadEntry(id, 0, key.data(), SizeOf(key), value.data(), 2, type),
+            Status::BufferTooSmall);
+  EXPECT_EQ(type, kTypeSentinel);
+  EXPECT_EQ(key[0], '\0');
+  EXPECT_EQ(value[0], '\0');
+
+  key = FilledBuffer();
+  value = FilledBuffer();
+  EXPECT_EQ(store.ReadEntry(id, 0, key.data(), 2, value.data(), 2, type), Status::BufferTooSmall);
+  EXPECT_EQ(type, kTypeSentinel);
+  EXPECT_EQ(key[0], '\0');
+  EXPECT_EQ(value[0], '\0');
+}
+
+TEST(JsonDocumentStore, ReadEntryBufferArgumentErrorOutranksATooSmallOtherBuffer) {
+  JsonDocumentStore store(kFirstId);
+  const std::uint32_t id = InsertOrDie(store, R"({"key":"value"})");
+
+  TextBuffer key = FilledBuffer();
+  TextBuffer value = FilledBuffer();
+  JsonEntryType type = kTypeSentinel;
+
+  EXPECT_EQ(store.ReadEntry(id, 0, nullptr, 0, value.data(), 2, type), Status::InvalidArgument);
+  EXPECT_EQ(type, kTypeSentinel);
+  EXPECT_TRUE(IsUntouched(value));
+
+  EXPECT_EQ(store.ReadEntry(id, 0, key.data(), 2, nullptr, 0, type), Status::InvalidArgument);
+  EXPECT_EQ(type, kTypeSentinel);
+  EXPECT_TRUE(IsUntouched(key));
 }
 
 TEST(JsonDocumentStore, ReadEntrySuccessWritesTextAndType) {
-  JsonDocumentStore store;
+  JsonDocumentStore store(kFirstId);
   const std::uint32_t id = InsertOrDie(store, R"({"key":"value"})");
-  std::array<char, 16> key;
-  std::array<char, 16> value;
+  TextBuffer key = FilledBuffer();
+  TextBuffer value = FilledBuffer();
   JsonEntryType type = kTypeSentinel;
-  ASSERT_EQ(store.ReadEntry(id, 0, key.data(), static_cast<std::uint32_t>(key.size()),
-                            value.data(), static_cast<std::uint32_t>(value.size()), type),
+  ASSERT_EQ(store.ReadEntry(id, 0, key.data(), SizeOf(key), value.data(), SizeOf(value), type),
             Status::Ok);
   EXPECT_STREQ(key.data(), "/key");
   EXPECT_STREQ(value.data(), "value");
   EXPECT_EQ(type, JsonEntryType::String);
 }
 
-TEST(JsonDocumentStore, ReadValueFailuresLeaveValueTypeAndBufferUntouched) {
-  JsonDocumentStore store;
-  const std::uint32_t id = InsertOrDie(store, R"({"o":{"k":1},"a":[1]})");
-  std::array<char, 16> value;
-  value.fill(kFill);
-  const auto valueSize = static_cast<std::uint32_t>(value.size());
+// ---------------------------------------------------------------------------
+// ReadValue.
+// ---------------------------------------------------------------------------
 
+TEST(JsonDocumentStore, ReadValueFailuresLeaveValueTypeAndBufferUntouched) {
+  JsonDocumentStore store(kFirstId);
+  const std::uint32_t id = InsertOrDie(store, R"({"o":{"k":1},"a":[1]})");
+
+  ExpectReadValueFails(store, 0, "", Status::UnknownDocumentId);
+  ExpectReadValueFails(store, id, "bad", Status::PathSyntaxError);
+  ExpectReadValueFails(store, id, "/x", Status::PathNotFound);
+  ExpectReadValueFails(store, id, "/a/3", Status::IndexOutOfRange);
+  ExpectReadValueFails(store, id, "/o", Status::TypeMismatch);
+  ExpectReadValueFails(store, id, "/a/0/x", Status::TypeMismatch);
+}
+
+TEST(JsonDocumentStore, ReadValueBufferArgumentsAreCheckedAfterThePath) {
+  JsonDocumentStore store(kFirstId);
+  const std::uint32_t id = InsertOrDie(store, R"({"o":{"k":1},"s":"text"})");
   JsonEntryType type = kTypeSentinel;
-  EXPECT_EQ(store.ReadValue(0, "", value.data(), valueSize, type), Status::UnknownDocumentId);
-  EXPECT_EQ(store.ReadValue(id, "bad", value.data(), valueSize, type), Status::PathSyntaxError);
-  EXPECT_EQ(store.ReadValue(id, "/x", value.data(), valueSize, type), Status::PathNotFound);
-  EXPECT_EQ(store.ReadValue(id, "/a/3", value.data(), valueSize, type), Status::IndexOutOfRange);
-  EXPECT_EQ(store.ReadValue(id, "/o", value.data(), valueSize, type), Status::TypeMismatch);
+
+  EXPECT_EQ(store.ReadValue(id, "bad", nullptr, 0, type), Status::PathSyntaxError);
+  EXPECT_EQ(store.ReadValue(id, "/missing", nullptr, 0, type), Status::PathNotFound);
+  EXPECT_EQ(store.ReadValue(id, "/o", nullptr, 0, type), Status::TypeMismatch);
   EXPECT_EQ(type, kTypeSentinel);
-  for (const char c : value) {
-    EXPECT_EQ(c, kFill);
-  }
+
+  EXPECT_EQ(store.ReadValue(id, "/s", nullptr, 8, type), Status::InvalidArgument);
+  TextBuffer value = FilledBuffer();
+  EXPECT_EQ(store.ReadValue(id, "/s", value.data(), 0, type), Status::InvalidArgument);
+  EXPECT_EQ(type, kTypeSentinel);
+  EXPECT_TRUE(IsUntouched(value));
 }
 
 TEST(JsonDocumentStore, ReadValueOnANonEmptyContainerIsTypeMismatchButAnEmptyOneIsALeaf) {
-  JsonDocumentStore store;
+  JsonDocumentStore store(kFirstId);
   const std::uint32_t id = InsertOrDie(store, R"({"full":{"k":1},"none":{},"list":[]})");
-  std::array<char, 16> value;
-  JsonEntryType type = kTypeSentinel;
-  const auto valueSize = static_cast<std::uint32_t>(value.size());
 
-  EXPECT_EQ(store.ReadValue(id, "/full", value.data(), valueSize, type), Status::TypeMismatch);
+  ExpectReadValueFails(store, id, "/full", Status::TypeMismatch);
 
-  ASSERT_EQ(store.ReadValue(id, "/none", value.data(), valueSize, type), Status::Ok);
-  EXPECT_STREQ(value.data(), "{}");
-  EXPECT_EQ(type, JsonEntryType::EmptyObject);
+  const ValueResult none = ReadValueAt(store, id, "/none");
+  EXPECT_EQ(none.status, Status::Ok);
+  EXPECT_EQ(none.text, "{}");
+  EXPECT_EQ(none.type, JsonEntryType::EmptyObject);
 
-  ASSERT_EQ(store.ReadValue(id, "/list", value.data(), valueSize, type), Status::Ok);
-  EXPECT_STREQ(value.data(), "[]");
-  EXPECT_EQ(type, JsonEntryType::EmptyArray);
+  const ValueResult list = ReadValueAt(store, id, "/list");
+  EXPECT_EQ(list.status, Status::Ok);
+  EXPECT_EQ(list.text, "[]");
+  EXPECT_EQ(list.type, JsonEntryType::EmptyArray);
 }
 
 TEST(JsonDocumentStore, ReadValueWithTooSmallABufferEmptiesItAndLeavesTheTypeUntouched) {
-  JsonDocumentStore store;
+  JsonDocumentStore store(kFirstId);
   const std::uint32_t id = InsertOrDie(store, R"({"k":"hello"})");
   std::array<char, 5> value;
   value.fill(kFill);
@@ -194,18 +354,29 @@ TEST(JsonDocumentStore, ReadValueWithTooSmallABufferEmptiesItAndLeavesTheTypeUnt
   EXPECT_EQ(type, kTypeSentinel);
 }
 
+TEST(JsonDocumentStore, ReadValueSuccessWritesTextAndType) {
+  JsonDocumentStore store(kFirstId);
+  const std::uint32_t id = InsertOrDie(store, R"({"k":false})");
+  const ValueResult read = ReadValueAt(store, id, "/k");
+  EXPECT_EQ(read.status, Status::Ok);
+  EXPECT_EQ(read.text, "false");
+  EXPECT_EQ(read.type, JsonEntryType::Bool);
+}
+
+// ---------------------------------------------------------------------------
+// Discard and DiscardAll.
+// ---------------------------------------------------------------------------
+
 TEST(JsonDocumentStore, DiscardFreesTheDocumentAndRejectsAnyFurtherUse) {
-  JsonDocumentStore store;
+  JsonDocumentStore store(kFirstId);
   const std::uint32_t id = InsertOrDie(store, "[1]");
   EXPECT_EQ(store.Discard(id), Status::Ok);
   EXPECT_EQ(store.Discard(id), Status::UnknownDocumentId);
-
-  std::uint32_t count = kCountSentinel;
-  EXPECT_EQ(store.Count(id, count), Status::UnknownDocumentId);
+  ExpectUnknownEverywhere(store, id);
 }
 
 TEST(JsonDocumentStore, DiscardAllReportsTheNumberFreedAndEmptiesTheStore) {
-  JsonDocumentStore store;
+  JsonDocumentStore store(kFirstId);
   const std::uint32_t a = InsertOrDie(store, "[1]");
   const std::uint32_t b = InsertOrDie(store, "[2]");
 
@@ -213,14 +384,112 @@ TEST(JsonDocumentStore, DiscardAllReportsTheNumberFreedAndEmptiesTheStore) {
   EXPECT_EQ(store.DiscardAll(discarded), Status::Ok);
   EXPECT_EQ(discarded, 2u);
 
-  std::uint32_t count = 0;
-  EXPECT_EQ(store.Count(a, count), Status::UnknownDocumentId);
-  EXPECT_EQ(store.Count(b, count), Status::UnknownDocumentId);
+  ExpectUnknownEverywhere(store, a);
+  ExpectUnknownEverywhere(store, b);
 
+  discarded = kCountSentinel;
   EXPECT_EQ(store.DiscardAll(discarded), Status::Ok);
   EXPECT_EQ(discarded, 0u);
 }
 
+TEST(JsonDocumentStore, DiscardAllFreesEverySlotForNewInserts) {
+  JsonDocumentStore store(kFirstId);
+  FillStore(store);
+
+  std::uint32_t discarded = kCountSentinel;
+  ASSERT_EQ(store.DiscardAll(discarded), Status::Ok);
+  ASSERT_EQ(discarded, 8u);
+
+  EXPECT_EQ(FillStore(store).front(), kFirstId + 8);
+}
+
 TEST(JsonDocumentStore, DefaultStoreIsOneProcessWideInstance) {
   EXPECT_EQ(&DefaultJsonDocumentStore(), &DefaultJsonDocumentStore());
+}
+
+// ---------------------------------------------------------------------------
+// Document ids.
+// ---------------------------------------------------------------------------
+
+TEST(JsonDocumentIds, ZeroNeverIssuedAndDiscardedIdsAreUnknownForEveryOperation) {
+  JsonDocumentStore store(kFirstId);
+  const std::uint32_t discarded = InsertOrDie(store, "[1]");
+  ASSERT_EQ(store.Discard(discarded), Status::Ok);
+
+  ExpectUnknownEverywhere(store, 0);
+  ExpectUnknownEverywhere(store, 5);
+  ExpectUnknownEverywhere(store, 0xFFFFFFFFu);
+  ExpectUnknownEverywhere(store, discarded);
+}
+
+TEST(JsonDocumentIds, UnknownIdOnAnEmptyStoreIsUnknown) {
+  JsonDocumentStore store(kFirstId);
+  ExpectUnknownEverywhere(store, 1);
+  ExpectUnknownEverywhere(store, 0);
+}
+
+TEST(JsonDocumentIds, DiscardedIdStaysUnknownAfterItsSlotIsReused) {
+  JsonDocumentStore store(kFirstId);
+  const std::uint32_t first = InsertOrDie(store, R"({"v":1})");
+  ASSERT_EQ(store.Discard(first), Status::Ok);
+  const std::uint32_t second = InsertOrDie(store, R"({"v":2})");
+  EXPECT_EQ(first, kFirstId);
+  EXPECT_EQ(second, kFirstId + 1);
+
+  ExpectUnknownEverywhere(store, first);
+  const ValueResult read = ReadValueAt(store, second, "/v");
+  EXPECT_EQ(read.status, Status::Ok);
+  EXPECT_EQ(read.text, "2");
+}
+
+TEST(JsonDocumentIds, StaleIdDoesNotDiscardTheDocumentThatReusedItsSlot) {
+  JsonDocumentStore store(kFirstId);
+  const std::uint32_t first = InsertOrDie(store, "[1]");
+  ASSERT_EQ(store.Discard(first), Status::Ok);
+  const std::uint32_t second = InsertOrDie(store, "[2]");
+
+  EXPECT_EQ(store.Discard(first), Status::UnknownDocumentId);
+  const ValueResult read = ReadValueAt(store, second, "/0");
+  EXPECT_EQ(read.status, Status::Ok);
+  EXPECT_EQ(read.text, "2");
+}
+
+TEST(JsonDocumentIds, CounterWrapSkipsZeroAndContinuesAtOne) {
+  JsonDocumentStore store(0xFFFFFFFDu);
+  const std::uint32_t expected[] = {0xFFFFFFFDu, 0xFFFFFFFEu, 0xFFFFFFFFu, 1u, 2u, 3u, 4u, 5u};
+  std::vector<std::uint32_t> issued;
+  for (const std::uint32_t id : expected) {
+    const std::uint32_t minted = InsertOrDie(store, "[1]");
+    EXPECT_EQ(minted, id);
+    issued.push_back(minted);
+    EXPECT_EQ(store.Discard(minted), Status::Ok);
+  }
+  for (const std::uint32_t id : issued) {
+    ExpectUnknownEverywhere(store, id);
+  }
+}
+
+TEST(JsonDocumentIds, DocumentsLiveAcrossTheCounterWrapStayDistinctAndReadable) {
+  JsonDocumentStore store(0xFFFFFFFFu);
+  const std::uint32_t beforeWrap = InsertOrDie(store, R"({"v":"before"})");
+  const std::uint32_t afterWrap = InsertOrDie(store, R"({"v":"after"})");
+  EXPECT_EQ(beforeWrap, 0xFFFFFFFFu);
+  EXPECT_EQ(afterWrap, 1u);
+
+  const ValueResult before = ReadValueAt(store, beforeWrap, "/v");
+  EXPECT_EQ(before.status, Status::Ok);
+  EXPECT_EQ(before.text, "before");
+  const ValueResult after = ReadValueAt(store, afterWrap, "/v");
+  EXPECT_EQ(after.status, Status::Ok);
+  EXPECT_EQ(after.text, "after");
+}
+
+TEST(JsonDocumentIds, ClockSeededStoreIssuesNonzeroDistinctIds) {
+  JsonDocumentStore store;
+  std::set<std::uint32_t> seen;
+  for (std::size_t i = 0; i < kJsonDocumentSlotCount; ++i) {
+    const std::uint32_t id = InsertOrDie(store, "[1]");
+    EXPECT_NE(id, 0u);
+    EXPECT_TRUE(seen.insert(id).second);
+  }
 }

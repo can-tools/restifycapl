@@ -4,25 +4,65 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
+#include <new>
 #include <set>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <gtest/gtest.h>
 
 #include "core/status.h"
+#include "../test-support/status-print.h"
 #include "mapping/json-document-store.h"
 #include "mapping/json-flatten.h"
 
 namespace {
 
+// While a FailAllocations is alive, every operator new on this thread throws std::bad_alloc.
+thread_local bool t_failAllocations = false;
+thread_local int t_failedAllocations = 0;
+
+class FailAllocations {
+ public:
+  FailAllocations() {
+    t_failedAllocations = 0;
+    t_failAllocations = true;
+  }
+  ~FailAllocations() { t_failAllocations = false; }
+  FailAllocations(const FailAllocations&) = delete;
+  FailAllocations& operator=(const FailAllocations&) = delete;
+};
+
+}  // namespace
+
+void* operator new(std::size_t size) {
+  if (t_failAllocations) {
+    ++t_failedAllocations;
+    throw std::bad_alloc();
+  }
+  if (void* const memory = std::malloc(size != 0 ? size : 1)) {
+    return memory;
+  }
+  throw std::bad_alloc();
+}
+
+void operator delete(void* memory) noexcept { std::free(memory); }
+
+void operator delete(void* memory, std::size_t) noexcept { std::free(memory); }
+
+namespace {
+
 constexpr char kFill = 'Z';
+// Sentinels no successful call can produce: types are 0..6, counts are at most 10000.
 constexpr std::int32_t kTypeSentinel = -777;
 constexpr std::uint32_t kIdSentinel = 0xDEADBEEFu;
-constexpr std::uint32_t kCountSentinel = 0xDEADBEEFu;
+constexpr std::uint32_t kCountSentinel = 0xC0FFEE11u;
 
 constexpr std::int32_t kString = 1;
 constexpr std::int32_t kNumber = 2;
@@ -64,6 +104,8 @@ class Buffer {
                        : bytes_.size();
     return std::string(bytes_.data(), length);
   }
+
+  std::string Raw(std::size_t length) const { return std::string(bytes_.data(), length); }
 
   bool Untouched() const {
     return std::all_of(bytes_.begin(), bytes_.end(), [](char c) { return c == kFill; });
@@ -234,8 +276,7 @@ TEST(ParseJsonDocument, SuccessOverwritesAPresetDocumentId) {
   JsonDocumentStore store(100);
   std::uint32_t id = kIdSentinel;
   ASSERT_EQ(ParseText(store, "[1]", id), Status::Ok);
-  EXPECT_NE(id, kIdSentinel);
-  EXPECT_NE(id, 0u);
+  EXPECT_EQ(id, 100u);
 }
 
 TEST(ParseJsonDocument, ScalarAndEmptyContainerRootsAreAccepted) {
@@ -247,6 +288,13 @@ TEST(ParseJsonDocument, ScalarAndEmptyContainerRootsAreAccepted) {
     EXPECT_EQ(CountOf(store, id), 1u);
     EXPECT_EQ(DiscardJsonDocument(store, id), Status::Ok);
   }
+}
+
+TEST(ParseJsonDocument, LeadingUtf8ByteOrderMarkIsSkippedAndNotPartOfTheDocument) {
+  JsonDocumentStore store;
+  const std::uint32_t id = MustParse(store, std::string("\xEF\xBB\xBF") + "[1]");
+  EXPECT_EQ(CountOf(store, id), 1u);
+  ExpectEntry(store, id, 0, {"/0", "1", kNumber});
 }
 
 TEST(ParseJsonDocument, NullTextIsInvalidArgumentAndZeroesTheId) {
@@ -368,8 +416,7 @@ TEST(ParseJsonDocument, InputOneByteOverOneMiBIsDocumentTooLarge) {
 TEST(ParseJsonDocument, SizeLimitCountsBytesBeforeTheNulNotTheStatedSize) {
   JsonDocumentStore store;
   std::string text = PaddedToSize("[0]", kMaxJsonInputBytes);
-  text.append(1000, '\0');
-  text.push_back('\0');
+  text.append(1001, '\0');
   std::uint32_t id = kIdSentinel;
   EXPECT_EQ(ParseJsonDocument(store, text.data(), static_cast<std::uint32_t>(text.size()), id),
             Status::Ok);
@@ -477,92 +524,6 @@ TEST(ParseJsonDocument, ValidDocumentIsNoFreeDocumentSlotOnlyWhenThePoolIsFull) 
   ExpectParseFails(store, R"({"a":1})", Status::NoFreeDocumentSlot);
   ASSERT_EQ(DiscardJsonDocument(store, ids[0]), Status::Ok);
   EXPECT_NE(MustParse(store, R"({"a":1})"), 0u);
-}
-
-// ---------------------------------------------------------------------------
-// Document ids.
-// ---------------------------------------------------------------------------
-
-TEST(JsonDocumentIds, ZeroNeverIssuedAndDiscardedIdsAreUnknownForEveryOperation) {
-  JsonDocumentStore store(1000);
-  const std::uint32_t discarded = MustParse(store, "[1]");
-  ASSERT_EQ(DiscardJsonDocument(store, discarded), Status::Ok);
-
-  ExpectUnknownEverywhere(store, 0);
-  ExpectUnknownEverywhere(store, 5);
-  ExpectUnknownEverywhere(store, 0xFFFFFFFFu);
-  ExpectUnknownEverywhere(store, discarded);
-}
-
-TEST(JsonDocumentIds, UnknownIdOnAnEmptyStoreIsUnknown) {
-  JsonDocumentStore store;
-  ExpectUnknownEverywhere(store, 1);
-  ExpectUnknownEverywhere(store, 0);
-}
-
-TEST(JsonDocumentIds, DiscardedIdStaysUnknownAfterItsSlotIsReused) {
-  JsonDocumentStore store;
-  const std::uint32_t first = MustParse(store, R"({"v":1})");
-  ASSERT_EQ(DiscardJsonDocument(store, first), Status::Ok);
-  const std::uint32_t second = MustParse(store, R"({"v":2})");
-  ASSERT_NE(second, first);
-
-  ExpectUnknownEverywhere(store, first);
-  ExpectValue(store, second, "/v", "2", kNumber);
-  EXPECT_EQ(CountOf(store, second), 1u);
-}
-
-TEST(JsonDocumentIds, StaleIdDoesNotDiscardTheDocumentThatReusedItsSlot) {
-  JsonDocumentStore store;
-  const std::uint32_t first = MustParse(store, "[1]");
-  ASSERT_EQ(DiscardJsonDocument(store, first), Status::Ok);
-  const std::uint32_t second = MustParse(store, "[2]");
-
-  EXPECT_EQ(DiscardJsonDocument(store, first), Status::UnknownDocumentId);
-  ExpectValue(store, second, "/0", "2", kNumber);
-}
-
-TEST(JsonDocumentIds, CounterWrapNeverIssuesZeroOrARepeat) {
-  JsonDocumentStore store(0xFFFFFFFDu);
-  std::set<std::uint32_t> seen;
-  for (int i = 0; i < 8; ++i) {
-    const std::uint32_t id = MustParse(store, "[1]");
-    EXPECT_NE(id, 0u);
-    EXPECT_TRUE(seen.insert(id).second);
-    EXPECT_EQ(CountOf(store, id), 1u);
-    EXPECT_EQ(DiscardJsonDocument(store, id), Status::Ok);
-  }
-  for (const std::uint32_t id : seen) {
-    ExpectUnknownEverywhere(store, id);
-  }
-}
-
-TEST(JsonDocumentIds, DocumentsLiveAcrossTheCounterWrapStayDistinctAndReadable) {
-  JsonDocumentStore store(0xFFFFFFFFu);
-  const std::uint32_t beforeWrap = MustParse(store, R"({"v":"before"})");
-  const std::uint32_t afterWrap = MustParse(store, R"({"v":"after"})");
-  EXPECT_NE(beforeWrap, 0u);
-  EXPECT_NE(afterWrap, 0u);
-  EXPECT_NE(beforeWrap, afterWrap);
-  ExpectValue(store, beforeWrap, "/v", "before", kString);
-  ExpectValue(store, afterWrap, "/v", "after", kString);
-}
-
-TEST(JsonDocumentIds, StartingTheCounterAtZeroStillIssuesANonzeroId) {
-  JsonDocumentStore store(0u);
-  const std::uint32_t id = MustParse(store, "[1]");
-  EXPECT_NE(id, 0u);
-  EXPECT_EQ(CountOf(store, id), 1u);
-}
-
-TEST(JsonDocumentIds, ClockSeededStoreIssuesNonzeroDistinctIds) {
-  JsonDocumentStore store;
-  std::set<std::uint32_t> seen;
-  for (int i = 0; i < 8; ++i) {
-    const std::uint32_t id = MustParse(store, "[1]");
-    EXPECT_NE(id, 0u);
-    EXPECT_TRUE(seen.insert(id).second);
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -797,6 +758,109 @@ TEST(ReadJsonEntry, NullOrZeroSizeBufferIsInvalidArgumentAndNeitherBufferIsWritt
   }
 }
 
+TEST(ReadJsonEntry, NullOrZeroSizeBufferOutranksATooSmallOtherBuffer) {
+  JsonDocumentStore store;
+  const std::uint32_t id = MustParse(store, R"({"key":"value"})");
+
+  {
+    Buffer value(2);
+    std::int32_t type = kTypeSentinel;
+    EXPECT_EQ(ReadJsonEntry(store, id, 0, nullptr, 64, value.Data(), value.Size(), type),
+              Status::InvalidArgument);
+    EXPECT_EQ(type, 0);
+    EXPECT_TRUE(value.Untouched());
+  }
+  {
+    Buffer key(2);
+    std::int32_t type = kTypeSentinel;
+    EXPECT_EQ(ReadJsonEntry(store, id, 0, key.Data(), key.Size(), nullptr, 64, type),
+              Status::InvalidArgument);
+    EXPECT_EQ(type, 0);
+    EXPECT_TRUE(key.Untouched());
+  }
+  {
+    Buffer key(64);
+    Buffer value(2);
+    std::int32_t type = kTypeSentinel;
+    EXPECT_EQ(ReadJsonEntry(store, id, 0, key.Data(), 0, value.Data(), value.Size(), type),
+              Status::InvalidArgument);
+    EXPECT_EQ(type, 0);
+    EXPECT_TRUE(key.Untouched());
+    EXPECT_TRUE(value.Untouched());
+  }
+}
+
+TEST(ReadJsonEntry, BothBuffersTooSmallIsBufferTooSmallAndBothAreEmptied) {
+  JsonDocumentStore store;
+  const std::uint32_t id = MustParse(store, R"({"key":"value"})");
+  Buffer key(2);
+  Buffer value(2);
+  std::int32_t type = kTypeSentinel;
+  EXPECT_EQ(ReadJsonEntry(store, id, 0, key.Data(), key.Size(), value.Data(), value.Size(), type),
+            Status::BufferTooSmall);
+  EXPECT_EQ(type, 0);
+  EXPECT_TRUE(key.HoldsEmptyText());
+  EXPECT_TRUE(value.HoldsEmptyText());
+}
+
+TEST(ReadJsonEntry, BooleanFalseIsReadAsBoolWithTheTextFalse) {
+  JsonDocumentStore store;
+  const std::uint32_t id = MustParse(store, R"({"on":true,"off":false})");
+  ExpectEntry(store, id, 0, {"/on", "true", kBool});
+  ExpectEntry(store, id, 1, {"/off", "false", kBool});
+}
+
+TEST(ReadJsonEntry, NulInsideAStringValueIsCopiedWithItsFullLength) {
+  JsonDocumentStore store;
+  const std::uint32_t id = MustParse(store, R"({"k":"a\u0000b"})");
+
+  Buffer key(8);
+  Buffer value(4);
+  std::int32_t type = kTypeSentinel;
+  ASSERT_EQ(ReadJsonEntry(store, id, 0, key.Data(), key.Size(), value.Data(), value.Size(), type),
+            Status::Ok);
+  EXPECT_EQ(type, kString);
+  EXPECT_EQ(value.Raw(4), std::string("a\0b\0", 4));
+  EXPECT_EQ(value.Text(), "a");
+
+  Buffer tightKey(8);
+  Buffer tightValue(3);
+  type = kTypeSentinel;
+  EXPECT_EQ(ReadJsonEntry(store, id, 0, tightKey.Data(), tightKey.Size(), tightValue.Data(),
+                          tightValue.Size(), type),
+            Status::BufferTooSmall);
+  EXPECT_TRUE(tightValue.HoldsEmptyText());
+}
+
+TEST(ReadJsonEntry, NulInsideAKeyIsCopiedWithItsFullLength) {
+  JsonDocumentStore store;
+  const std::uint32_t id = MustParse(store, R"({"a\u0000b":"v"})");
+
+  Buffer key(5);
+  Buffer value(8);
+  std::int32_t type = kTypeSentinel;
+  ASSERT_EQ(ReadJsonEntry(store, id, 0, key.Data(), key.Size(), value.Data(), value.Size(), type),
+            Status::Ok);
+  EXPECT_EQ(key.Raw(5), std::string("/a\0b\0", 5));
+  EXPECT_EQ(key.Text(), "/a");
+  EXPECT_EQ(value.Text(), "v");
+
+  Buffer tightKey(4);
+  Buffer tightValue(8);
+  type = kTypeSentinel;
+  EXPECT_EQ(ReadJsonEntry(store, id, 0, tightKey.Data(), tightKey.Size(), tightValue.Data(),
+                          tightValue.Size(), type),
+            Status::BufferTooSmall);
+  EXPECT_TRUE(tightKey.HoldsEmptyText());
+  EXPECT_TRUE(tightValue.HoldsEmptyText());
+}
+
+TEST(ReadJsonEntry, NonAsciiKeyIsReadBackAsItsUtf8Bytes) {
+  JsonDocumentStore store;
+  const std::uint32_t id = MustParse(store, "{\"\xC3\xA9\":1}");
+  ExpectEntry(store, id, 0, {"/\xC3\xA9", "1", kNumber});
+}
+
 TEST(ReadJsonEntry, KeyBufferExactFitSucceedsAndOneByteShortIsBufferTooSmall) {
   JsonDocumentStore store;
   const std::uint32_t id = MustParse(store, R"({"abc":"v"})");
@@ -913,7 +977,9 @@ TEST(ReadJsonValue, ScalarNullAndEmptyContainerLeavesAreReadByPath) {
 TEST(ReadJsonValue, EveryKeyFromReadEntryResolvesToTheSameValueAndType) {
   JsonDocumentStore store;
   const std::uint32_t id = MustParse(
-      store, R"({"a/b":1,"m~n":"x","":{"0":[true,null]},"q":{"":{}},"u":"é","big":[[],{}]})");
+      store, R"({"a/b":1,"m~n":"x","":{"0":[true,null]},"q":{"":{}},"u":")"
+             "\xC3\xA9"
+             R"(","big":[[],{}]})");
   const std::uint32_t count = CountOf(store, id);
   ASSERT_GT(count, 0u);
   for (std::uint32_t i = 0; i < count; ++i) {
@@ -925,6 +991,36 @@ TEST(ReadJsonValue, EveryKeyFromReadEntryResolvesToTheSameValueAndType) {
     EXPECT_EQ(value.value, entry.value);
     EXPECT_EQ(value.type, entry.type);
   }
+}
+
+TEST(ReadJsonValue, BooleanFalseIsReadAsBoolWithTheTextFalse) {
+  JsonDocumentStore store;
+  const std::uint32_t id = MustParse(store, R"({"on":true,"off":false})");
+  ExpectValue(store, id, "/on", "true", kBool);
+  ExpectValue(store, id, "/off", "false", kBool);
+}
+
+TEST(ReadJsonValue, NonAsciiPathAddressesTheNonAsciiKey) {
+  JsonDocumentStore store;
+  const std::uint32_t id = MustParse(store, "{\"\xC3\xA9\":1,\"e\":2}");
+  ExpectValue(store, id, "/\xC3\xA9", "1", kNumber);
+  ExpectValue(store, id, "/e", "2", kNumber);
+  ExpectValueRejected(store, id, "/\xC3\xA8", Status::PathNotFound);
+  ExpectValueRejected(store, id, "/\xFF", Status::PathNotFound);
+}
+
+TEST(ReadJsonValue, NulInsideAStringValueIsCopiedWithItsFullLength) {
+  JsonDocumentStore store;
+  const std::uint32_t id = MustParse(store, R"({"k":"a\u0000b"})");
+
+  Buffer value(4);
+  std::int32_t type = kTypeSentinel;
+  ASSERT_EQ(ReadJsonValue(store, id, "/k", 3, value.Data(), value.Size(), type), Status::Ok);
+  EXPECT_EQ(type, kString);
+  EXPECT_EQ(value.Raw(4), std::string("a\0b\0", 4));
+  EXPECT_EQ(value.Text(), "a");
+
+  EXPECT_EQ(ReadValueAt(store, id, "/k", 3).status, Status::BufferTooSmall);
 }
 
 TEST(ReadJsonValue, EscapedAndEmptyTokensAreAddressable) {
@@ -1257,10 +1353,10 @@ TEST(DiscardJsonDocument, DiscardingOneDocumentLeavesTheOthersReadable) {
 
 TEST(DiscardJsonDocument, FreedSlotIsUsableAgainUntilThePoolIsFull) {
   JsonDocumentStore store;
-  std::vector<std::uint32_t> ids = FillPool(store);
+  const std::vector<std::uint32_t> ids = FillPool(store);
   for (std::size_t round = 0; round < 3; ++round) {
     ASSERT_EQ(DiscardJsonDocument(store, ids[round]), Status::Ok);
-    ids[round] = MustParse(store, "[1]");
+    MustParse(store, "[1]");
     ExpectParseFails(store, "[2]", Status::NoFreeDocumentSlot);
   }
 }
@@ -1371,10 +1467,10 @@ TEST(JsonDocuments, FailedReadsOnOneDocumentDoNotAffectAnother) {
 
 TEST(ProcessWideJsonStore, TextLayerWorksAgainstTheDefaultStore) {
   JsonDocumentStore& store = DefaultJsonDocumentStore();
-  EXPECT_EQ(&store, &DefaultJsonDocumentStore());
 
-  std::uint32_t discardedBefore = 0;
+  std::uint32_t discardedBefore = kCountSentinel;
   ASSERT_EQ(DiscardAllJsonDocuments(store, discardedBefore), Status::Ok);
+  EXPECT_LE(discardedBefore, kJsonDocumentSlotCount);
 
   const std::uint32_t id = MustParse(store, R"({"k":[1,2]})");
   EXPECT_EQ(CountOf(store, id), 2u);
@@ -1386,4 +1482,150 @@ TEST(ProcessWideJsonStore, TextLayerWorksAgainstTheDefaultStore) {
   std::uint32_t discardedAfter = kCountSentinel;
   EXPECT_EQ(DiscardAllJsonDocuments(store, discardedAfter), Status::Ok);
   EXPECT_EQ(discardedAfter, 0u);
+}
+
+// ---------------------------------------------------------------------------
+// InternalError: allocation failure inside the DLL (Count, ReadEntry, Discard and
+// DiscardAll allocate nothing, so only Parse and ReadValue can be driven here).
+// ---------------------------------------------------------------------------
+
+TEST(TextApiInternalError, ParseReportsInternalErrorWhenAllocationFailsAndConsumesNothing) {
+  JsonDocumentStore store;
+  const std::string json = R"({"a":[1,2,3],"b":{"c":"text"}})";
+  std::uint32_t id = kIdSentinel;
+  Status status = Status::Ok;
+  int failedAllocations = 0;
+  {
+    FailAllocations failAllocations;
+    status = ParseJsonDocument(store, json.c_str(), static_cast<std::uint32_t>(json.size() + 1), id);
+    failedAllocations = t_failedAllocations;
+  }
+  EXPECT_EQ(status, Status::InternalError);
+  EXPECT_GT(failedAllocations, 0);
+  EXPECT_EQ(id, 0u);
+
+  EXPECT_EQ(FillPool(store).size(), kJsonDocumentSlotCount);
+}
+
+TEST(TextApiInternalError, ReadValueReportsInternalErrorWhenAllocationFailsAndStaysUsable) {
+  JsonDocumentStore store;
+  const std::uint32_t id = MustParse(store, R"({"k":"v"})");
+  Buffer value(8);
+  std::int32_t type = kTypeSentinel;
+  Status status = Status::Ok;
+  int failedAllocations = 0;
+  {
+    FailAllocations failAllocations;
+    status = ReadJsonValue(store, id, "/k", 3, value.Data(), value.Size(), type);
+    failedAllocations = t_failedAllocations;
+  }
+  EXPECT_EQ(status, Status::InternalError);
+  EXPECT_GT(failedAllocations, 0);
+  EXPECT_EQ(type, 0);
+  EXPECT_TRUE(value.Untouched());
+
+  ExpectValue(store, id, "/k", "v", kString);
+  EXPECT_EQ(CountOf(store, id), 1u);
+}
+
+// ---------------------------------------------------------------------------
+// Concurrency: one store shared by several threads.
+// ---------------------------------------------------------------------------
+
+TEST(JsonTextApiConcurrency, ParallelParseCountReadAndDiscardStayConsistent) {
+  constexpr int kThreads = 6;
+  constexpr int kIterations = 200;
+
+  JsonDocumentStore store;
+  std::atomic<std::uint32_t> published{0};
+  std::atomic<int> badStatuses{0};
+  std::atomic<int> badValues{0};
+  std::atomic<int> firstBadStatus{0};
+
+  const auto noteBadStatus = [&](Status status) {
+    int expected = 0;
+    firstBadStatus.compare_exchange_strong(expected, static_cast<int>(status));
+    ++badStatuses;
+  };
+
+  const auto worker = [&](int threadIndex) {
+    const std::string json = "{\"t\":" + std::to_string(threadIndex) + ",\"list\":[1,2]}";
+    for (int iteration = 0; iteration < kIterations; ++iteration) {
+      std::uint32_t ids[2] = {0, 0};
+      for (std::uint32_t& id : ids) {
+        const Status status = ParseText(store, json, id);
+        if (status == Status::Ok) {
+          if (id == 0) {
+            ++badValues;
+          }
+          published.store(id);
+        } else if (status != Status::NoFreeDocumentSlot || id != 0) {
+          noteBadStatus(status);
+        }
+      }
+
+      for (const std::uint32_t id : ids) {
+        if (id == 0) {
+          continue;
+        }
+        std::uint32_t count = 0;
+        const Status countStatus = CountJsonEntries(store, id, count);
+        if (countStatus != Status::Ok) {
+          noteBadStatus(countStatus);
+        } else if (count != 3) {
+          ++badValues;
+        }
+
+        char key[32] = {};
+        char value[32] = {};
+        std::int32_t type = 0;
+        const Status entryStatus = ReadJsonEntry(store, id, 2, key, sizeof(key), value,
+                                                 sizeof(value), type);
+        if (entryStatus != Status::Ok) {
+          noteBadStatus(entryStatus);
+        } else if (std::string(key) != "/list/1" || std::string(value) != "2" ||
+                   type != kNumber) {
+          ++badValues;
+        }
+      }
+
+      const std::uint32_t foreign = published.load();
+      if (foreign != 0) {
+        std::uint32_t count = 0;
+        const Status status = CountJsonEntries(store, foreign, count);
+        if (status == Status::Ok) {
+          if (count != 3) {
+            ++badValues;
+          }
+        } else if (status != Status::UnknownDocumentId) {
+          noteBadStatus(status);
+        }
+      }
+
+      for (const std::uint32_t id : ids) {
+        if (id != 0) {
+          const Status status = DiscardJsonDocument(store, id);
+          if (status != Status::Ok) {
+            noteBadStatus(status);
+          }
+        }
+      }
+    }
+  };
+
+  std::vector<std::thread> threads;
+  for (int i = 0; i < kThreads; ++i) {
+    threads.emplace_back(worker, i);
+  }
+  for (std::thread& thread : threads) {
+    thread.join();
+  }
+
+  EXPECT_EQ(badStatuses.load(), 0) << "first unexpected status: "
+                                   << StatusName(static_cast<Status>(firstBadStatus.load()));
+  EXPECT_EQ(badValues.load(), 0);
+
+  std::uint32_t leftover = kCountSentinel;
+  EXPECT_EQ(DiscardAllJsonDocuments(store, leftover), Status::Ok);
+  EXPECT_EQ(leftover, 0u);
 }

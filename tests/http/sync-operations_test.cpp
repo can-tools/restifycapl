@@ -9,6 +9,7 @@
 #include <gtest/gtest.h>
 
 #include "core/status.h"
+#include "../test-support/status-print.h"
 #include "fake-transport.h"
 
 namespace {
