@@ -143,6 +143,7 @@ Parses `json`, flattens it and stores it in a free slot.
 | `DocumentTooLarge` (`-32`) | Input larger than 1 MiB. |
 | `NestingTooDeep` (`-33`) | Nesting deeper than 64. |
 | `TooManyEntries` (`-34`) | More than 10,000 entries. |
+| `InternalError` (`-35`) | Unexpected failure inside the DLL, see "Unexpected internal failure". |
 
 ## `restifyJsonCountEntries` (row 20)
 
@@ -154,6 +155,7 @@ document. Valid `entryIndex` values for `restifyJsonReadEntry` are
 |---|---|
 | `Ok` (`0`) | `entryCount` written. |
 | `UnknownDocumentId` (`-31`) | The id is `0`, was never issued, or was discarded. |
+| `InternalError` (`-35`) | Unexpected failure inside the DLL, see "Unexpected internal failure". |
 
 ## `restifyJsonReadEntry` (row 21)
 
@@ -176,6 +178,7 @@ Checks run in this order, and the first failure decides the status:
 | `BufferTooSmall` (`-2`) | The key or the value does not fit; both buffers set to the empty text. |
 | `IndexOutOfRange` (`-13`) | `entryIndex` is not below `entryCount`. |
 | `UnknownDocumentId` (`-31`) | The id is `0`, was never issued, or was discarded. |
+| `InternalError` (`-35`) | Unexpected failure inside the DLL, see "Unexpected internal failure". |
 
 ## `restifyJsonReadValue` (row 22)
 
@@ -206,6 +209,7 @@ Checks run in this order, and the first failure decides the status:
 | `IndexOutOfRange` (`-13`) | An array index is at or above the array size, is `-`, or is above the `uint32` maximum. |
 | `TypeMismatch` (`-14`) | Non-canonical array token, a scalar or `null` met with path tokens left, or the path ends on a non-empty object or array. |
 | `UnknownDocumentId` (`-31`) | The id is `0`, was never issued, or was discarded. |
+| `InternalError` (`-35`) | Unexpected failure inside the DLL, see "Unexpected internal failure". |
 
 Path rules are in `docs/json-path.md`; the old dot-and-bracket syntax is not
 accepted and gives `-11`.
@@ -220,11 +224,18 @@ therefore returns `-31`.
 |---|---|
 | `Ok` (`0`) | Document freed. |
 | `UnknownDocumentId` (`-31`) | The id is `0`, was never issued, or was discarded. |
+| `InternalError` (`-35`) | Unexpected failure inside the DLL, see "Unexpected internal failure". |
 
 ## `restifyJsonDiscardAllDocuments` (row 24)
 
-Frees every document. Always returns `0`; `discardedCount` is the number of
-documents that were freed (`0` when none were held).
+Frees every document. Returns `0` unless something unexpected fails;
+`discardedCount` is the number of documents that were freed (`0` when none
+were held).
+
+| `Status` | Condition |
+|---|---|
+| `Ok` (`0`) | All documents freed; `discardedCount` written. |
+| `InternalError` (`-35`) | Unexpected failure inside the DLL, see "Unexpected internal failure". |
 
 ## Limits
 
@@ -242,10 +253,10 @@ limit in a later release is compatible; lowering one is not.
 ## Unexpected internal failure
 
 No exception crosses into CANoe. If something unexpected fails inside the DLL
-(for example, memory runs out), the operation returns `InvalidArgument`
-(`-1`) and writes none of its out-parameters; the same happens for all six
-operations, including those whose tables above do not list `-1`. There is no
-dedicated status for it.
+(for example, memory runs out), the operation returns `InternalError`
+(`-35`) and writes none of its out-parameters; the same happens for all six
+operations. It is distinct from `InvalidArgument` (`-1`), which always means
+the caller passed a bad argument.
 
 ## Realtime-safety summary
 

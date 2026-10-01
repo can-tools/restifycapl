@@ -6,7 +6,7 @@
 #include "core/status.h"
 #include "mapping/json-document-store.h"
 
-// Out-parameters are zeroed on entry and written only on Ok; an unexpected internal failure is reported as InvalidArgument.
+// Out-parameters are zeroed on entry and written only on Ok; an unexpected internal failure is reported as InternalError.
 Status ParseJsonDocument(JsonDocumentStore& store, const char* jsonText, std::uint32_t jsonSize,
                          std::uint32_t& documentId);
 

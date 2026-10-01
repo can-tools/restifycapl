@@ -29,7 +29,7 @@ Status ParseJsonDocument(JsonDocumentStore& store, const char* jsonText, std::ui
     }
     return status;
   } catch (...) {
-    return Status::InvalidArgument;
+    return Status::InternalError;
   }
 }
 
@@ -39,7 +39,7 @@ Status CountJsonEntries(JsonDocumentStore& store, std::uint32_t documentId,
   try {
     return store.Count(documentId, entryCount);
   } catch (...) {
-    return Status::InvalidArgument;
+    return Status::InternalError;
   }
 }
 
@@ -56,7 +56,7 @@ Status ReadJsonEntry(JsonDocumentStore& store, std::uint32_t documentId, std::ui
     }
     return status;
   } catch (...) {
-    return Status::InvalidArgument;
+    return Status::InternalError;
   }
 }
 
@@ -78,7 +78,7 @@ Status ReadJsonValue(JsonDocumentStore& store, std::uint32_t documentId, const c
     }
     return status;
   } catch (...) {
-    return Status::InvalidArgument;
+    return Status::InternalError;
   }
 }
 
@@ -86,7 +86,7 @@ Status DiscardJsonDocument(JsonDocumentStore& store, std::uint32_t documentId) {
   try {
     return store.Discard(documentId);
   } catch (...) {
-    return Status::InvalidArgument;
+    return Status::InternalError;
   }
 }
 
@@ -95,6 +95,6 @@ Status DiscardAllJsonDocuments(JsonDocumentStore& store, std::uint32_t& discarde
   try {
     return store.DiscardAll(discardedCount);
   } catch (...) {
-    return Status::InvalidArgument;
+    return Status::InternalError;
   }
 }
