@@ -97,6 +97,23 @@ A number beyond 64 bits is held as a double and loses precision, so its text
 may differ from the digits in the input. A number too large even for a
 double is invalid JSON for this purpose (`ParseError`).
 
+## Input text rules
+
+These follow the JSON library's (nlohmann/json 3.11.3) scanner.
+
+- **BOM.** A UTF-8 byte order mark (`EF BB BF`) at the very start of the text
+  is accepted and skipped. It counts towards the 1 MiB input limit. A partial
+  BOM (`EF BB` or a lone `EF` not followed by `BB BF`) is `ParseError`, as is
+  a text that is only a BOM.
+- **Comments** (`//` and `/* */`) are not allowed and give `ParseError`.
+- **`-0`** is read as the integer `0`, so its entry text is `0`.
+- **`\u0000`** is accepted inside strings and object keys, and the decoded
+  text then contains a NUL byte. A raw NUL byte in a string is invalid JSON.
+  Entry value and key texts are copied into CAPL buffers with their full
+  length (the `-2` size check counts the NUL byte and what follows it), but a
+  CAPL script reads them as NUL-terminated text, so it sees only the part
+  before the first NUL.
+
 ## Limits
 
 | Limit | Value | Status when exceeded |

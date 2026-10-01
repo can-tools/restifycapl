@@ -68,6 +68,11 @@ to the first NUL within that size.
 
 For `Parse`, the size limit of 1 MiB counts the bytes before the NUL.
 
+`Parse` accepts a UTF-8 byte order mark (`EF BB BF`) at the very start of the
+text and skips it; the BOM counts towards the 1 MiB limit. A partial BOM
+(`EF BB`) is `ParseError`. Other input rules (comments, `-0`, `\u0000`):
+`docs/json-flatten.md`.
+
 ## Out-parameters
 
 `documentId`, `entryCount`, `valueType` and `discardedCount` are set to `0`
