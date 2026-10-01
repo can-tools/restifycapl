@@ -41,7 +41,7 @@ Status FractionalTextToLong(std::string_view text, std::int32_t& out) {
 
 }  // namespace
 
-Status ToLong(const nlohmann::json& value, std::int32_t& out) {
+Status ToLong(const JsonValue& value, std::int32_t& out) {
   if (value.is_null()) {
     return Status::NullValue;
   }
@@ -88,7 +88,7 @@ Status ToLong(const nlohmann::json& value, std::int32_t& out) {
   return Status::Ok;
 }
 
-Status ToDouble(const nlohmann::json& value, double& out) {
+Status ToDouble(const JsonValue& value, double& out) {
   if (value.is_null()) {
     return Status::NullValue;
   }
@@ -99,7 +99,7 @@ Status ToDouble(const nlohmann::json& value, double& out) {
   return Status::Ok;
 }
 
-Status ToBool(const nlohmann::json& value, bool& out) {
+Status ToBool(const JsonValue& value, bool& out) {
   if (value.is_null()) {
     return Status::NullValue;
   }
@@ -110,7 +110,7 @@ Status ToBool(const nlohmann::json& value, bool& out) {
   return Status::Ok;
 }
 
-Status ToText(const nlohmann::json& value, std::string& out) {
+Status ToText(const JsonValue& value, std::string& out) {
   if (value.is_null()) {
     return Status::NullValue;
   }
@@ -121,7 +121,7 @@ Status ToText(const nlohmann::json& value, std::string& out) {
   return Status::Ok;
 }
 
-Status ValueToText(const nlohmann::json& value, std::string& out) {
+Status ValueToText(const JsonValue& value, std::string& out) {
   if (value.is_null()) {
     out = "null";
     return Status::Ok;

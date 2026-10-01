@@ -8,10 +8,8 @@
 
 #include <gtest/gtest.h>
 
+#include "core/json-value.h"
 #include "core/status.h"
-#include "json.hpp"
-
-using nlohmann::json;
 
 namespace {
 
@@ -25,14 +23,14 @@ constexpr double kSentinelDouble = -999.0;
 // ---------------------------------------------------------------------------
 
 TEST(ToLong, ValidInteger) {
-  json value = 42;
+  JsonValue value =42;
   std::int32_t out = kSentinelLong;
   EXPECT_EQ(ToLong(value, out), Status::Ok);
   EXPECT_EQ(out, 42);
 }
 
 TEST(ToLong, FractionalNumberIsNotIntegral) {
-  json value = 3.7;
+  JsonValue value =3.7;
   std::int32_t out = kSentinelLong;
   EXPECT_EQ(ToLong(value, out), Status::NotIntegral);
   EXPECT_NE(out, 3);
@@ -40,20 +38,20 @@ TEST(ToLong, FractionalNumberIsNotIntegral) {
 }
 
 TEST(ToLong, WholeValuedFloatIsOk) {
-  json value = 3.0;
+  JsonValue value =3.0;
   std::int32_t out = kSentinelLong;
   EXPECT_EQ(ToLong(value, out), Status::Ok);
   EXPECT_EQ(out, 3);
 }
 
 TEST(ToLong, OneAboveInt32MaxIsOverflow) {
-  json value = 2147483648LL;
+  JsonValue value =2147483648LL;
   std::int32_t out = kSentinelLong;
   EXPECT_EQ(ToLong(value, out), Status::NumericOverflow);
 }
 
 TEST(ToLong, OneBelowInt32MinIsOverflow) {
-  json value = -2147483649LL;
+  JsonValue value =-2147483649LL;
   std::int32_t out = kSentinelLong;
   EXPECT_EQ(ToLong(value, out), Status::NumericOverflow);
 }
@@ -62,37 +60,37 @@ TEST(ToLong, OneBelowInt32MinIsOverflow) {
 // this case is the architecture-parity check -- int32_t range checks must
 // not vary with pointer width.
 TEST(ToLong, BeyondInt64RangeIsOverflow) {
-  json value = 1e300;
+  JsonValue value =1e300;
   std::int32_t out = kSentinelLong;
   EXPECT_EQ(ToLong(value, out), Status::NumericOverflow);
 }
 
 TEST(ToLong, NullIsNullValue) {
-  json value = nullptr;
+  JsonValue value =nullptr;
   std::int32_t out = kSentinelLong;
   EXPECT_EQ(ToLong(value, out), Status::NullValue);
 }
 
 TEST(ToLong, StringIsTypeMismatch) {
-  json value = "42";
+  JsonValue value ="42";
   std::int32_t out = kSentinelLong;
   EXPECT_EQ(ToLong(value, out), Status::TypeMismatch);
 }
 
 TEST(ToLong, BoolIsTypeMismatch) {
-  json value = true;
+  JsonValue value =true;
   std::int32_t out = kSentinelLong;
   EXPECT_EQ(ToLong(value, out), Status::TypeMismatch);
 }
 
 TEST(ToLong, ObjectIsTypeMismatch) {
-  json value = json::object({{"a", 1}});
+  JsonValue value =JsonValue::object({{"a", 1}});
   std::int32_t out = kSentinelLong;
   EXPECT_EQ(ToLong(value, out), Status::TypeMismatch);
 }
 
 TEST(ToLong, ArrayIsTypeMismatch) {
-  json value = json::array({1, 2, 3});
+  JsonValue value =JsonValue::array({1, 2, 3});
   std::int32_t out = kSentinelLong;
   EXPECT_EQ(ToLong(value, out), Status::TypeMismatch);
 }
@@ -102,27 +100,27 @@ TEST(ToLong, ArrayIsTypeMismatch) {
 // ---------------------------------------------------------------------------
 
 TEST(ToDouble, FloatValue) {
-  json value = 3.5;
+  JsonValue value =3.5;
   double out = kSentinelDouble;
   EXPECT_EQ(ToDouble(value, out), Status::Ok);
   EXPECT_DOUBLE_EQ(out, 3.5);
 }
 
 TEST(ToDouble, IntegerTypedNumber) {
-  json value = 7;
+  JsonValue value =7;
   double out = kSentinelDouble;
   EXPECT_EQ(ToDouble(value, out), Status::Ok);
   EXPECT_DOUBLE_EQ(out, 7.0);
 }
 
 TEST(ToDouble, NullIsNullValue) {
-  json value = nullptr;
+  JsonValue value =nullptr;
   double out = kSentinelDouble;
   EXPECT_EQ(ToDouble(value, out), Status::NullValue);
 }
 
 TEST(ToDouble, StringIsTypeMismatch) {
-  json value = "3.5";
+  JsonValue value ="3.5";
   double out = kSentinelDouble;
   EXPECT_EQ(ToDouble(value, out), Status::TypeMismatch);
 }
@@ -132,39 +130,39 @@ TEST(ToDouble, StringIsTypeMismatch) {
 // ---------------------------------------------------------------------------
 
 TEST(ToBool, TrueValue) {
-  json value = true;
+  JsonValue value =true;
   bool out = false;
   EXPECT_EQ(ToBool(value, out), Status::Ok);
   EXPECT_TRUE(out);
 }
 
 TEST(ToBool, FalseValue) {
-  json value = false;
+  JsonValue value =false;
   bool out = true;
   EXPECT_EQ(ToBool(value, out), Status::Ok);
   EXPECT_FALSE(out);
 }
 
 TEST(ToBool, NumericZeroIsTypeMismatch) {
-  json value = 0;
+  JsonValue value =0;
   bool out = false;
   EXPECT_EQ(ToBool(value, out), Status::TypeMismatch);
 }
 
 TEST(ToBool, NumericOneIsTypeMismatch) {
-  json value = 1;
+  JsonValue value =1;
   bool out = false;
   EXPECT_EQ(ToBool(value, out), Status::TypeMismatch);
 }
 
 TEST(ToBool, StringTrueIsTypeMismatch) {
-  json value = "true";
+  JsonValue value ="true";
   bool out = false;
   EXPECT_EQ(ToBool(value, out), Status::TypeMismatch);
 }
 
 TEST(ToBool, NullIsNullValue) {
-  json value = nullptr;
+  JsonValue value =nullptr;
   bool out = false;
   EXPECT_EQ(ToBool(value, out), Status::NullValue);
 }
@@ -174,32 +172,32 @@ TEST(ToBool, NullIsNullValue) {
 // ---------------------------------------------------------------------------
 
 TEST(ToText, StringReturnsUnquotedContents) {
-  json value = "hello world";
+  JsonValue value ="hello world";
   std::string out;
   EXPECT_EQ(ToText(value, out), Status::Ok);
   EXPECT_EQ(out, "hello world");
 }
 
 TEST(ToText, NumberIsTypeMismatch) {
-  json value = 42;
+  JsonValue value =42;
   std::string out;
   EXPECT_EQ(ToText(value, out), Status::TypeMismatch);
 }
 
 TEST(ToText, NullIsNullValue) {
-  json value = nullptr;
+  JsonValue value =nullptr;
   std::string out;
   EXPECT_EQ(ToText(value, out), Status::NullValue);
 }
 
 TEST(ToText, ObjectIsTypeMismatch) {
-  json value = json::object({{"a", 1}});
+  JsonValue value =JsonValue::object({{"a", 1}});
   std::string out;
   EXPECT_EQ(ToText(value, out), Status::TypeMismatch);
 }
 
 TEST(ToText, ArrayIsTypeMismatch) {
-  json value = json::array({1, 2, 3});
+  JsonValue value =JsonValue::array({1, 2, 3});
   std::string out;
   EXPECT_EQ(ToText(value, out), Status::TypeMismatch);
 }
@@ -210,45 +208,60 @@ TEST(ToText, ArrayIsTypeMismatch) {
 // ---------------------------------------------------------------------------
 
 TEST(ValueToText, NullBecomesLiteralNullText) {
-  json value = nullptr;
+  JsonValue value =nullptr;
   std::string out;
   EXPECT_EQ(ValueToText(value, out), Status::Ok);
   EXPECT_EQ(out, "null");
 }
 
 TEST(ValueToText, NumberIsStringified) {
-  json value = 42;
+  JsonValue value =42;
   std::string out;
   EXPECT_EQ(ValueToText(value, out), Status::Ok);
   EXPECT_EQ(out, "42");
 }
 
 TEST(ValueToText, BoolIsStringified) {
-  json value = true;
+  JsonValue value =true;
   std::string out;
   EXPECT_EQ(ValueToText(value, out), Status::Ok);
   EXPECT_EQ(out, "true");
 }
 
 TEST(ValueToText, StringIsItsOwnContents) {
-  json value = "hello";
+  JsonValue value ="hello";
   std::string out;
   EXPECT_EQ(ValueToText(value, out), Status::Ok);
   EXPECT_EQ(out, "hello");
 }
 
 TEST(ValueToText, ObjectIsTypeMismatchAndOutUntouched) {
-  json value = json::object({{"a", 1}});
+  JsonValue value =JsonValue::object({{"a", 1}});
   std::string out = "sentinel";
   EXPECT_EQ(ValueToText(value, out), Status::TypeMismatch);
   EXPECT_EQ(out, "sentinel");
 }
 
 TEST(ValueToText, ArrayIsTypeMismatchAndOutUntouched) {
-  json value = json::array({1, 2, 3});
+  JsonValue value =JsonValue::array({1, 2, 3});
   std::string out = "sentinel";
   EXPECT_EQ(ValueToText(value, out), Status::TypeMismatch);
   EXPECT_EQ(out, "sentinel");
+}
+
+// ---------------------------------------------------------------------------
+// JsonValue field order
+// ---------------------------------------------------------------------------
+
+TEST(JsonValue, ObjectKeepsDocumentOrderNotAlphabetical) {
+  const JsonValue value = JsonValue::parse(R"({"c":1,"b":2,"a":3})");
+  EXPECT_EQ(value.dump(), R"({"c":1,"b":2,"a":3})");
+
+  std::string keys;
+  for (const auto& item : value.items()) {
+    keys += item.key();
+  }
+  EXPECT_EQ(keys, "cba");
 }
 
 // ---------------------------------------------------------------------------
@@ -338,7 +351,7 @@ TEST(LocaleIndependence, ValueToTextAndParseDoubleUseDotDecimal) {
     GTEST_SKIP() << "de-DE locale not available on this system";
   }
 
-  json value = 3.5;
+  JsonValue value =3.5;
   std::string text;
   EXPECT_EQ(ValueToText(value, text), Status::Ok);
   EXPECT_EQ(text.find(','), std::string::npos);

@@ -4,7 +4,8 @@ Archival rationale and behavior tables for `src/core/type-conversion.h`.
 
 ## Why `To*` and `Parse*` are kept as two separate families
 
-`To*` takes `const nlohmann::json&` in and returns a typed C++ value:
+`To*` takes `const JsonValue&` in (`nlohmann::ordered_json` via the
+`JsonValue` alias in `src/core/json-value.h`) and returns a typed C++ value:
 strict, a JSON string arriving where a number was requested is
 `TypeMismatch`, never a silent fall-through to `ParseLong`/`ParseDouble`.
 

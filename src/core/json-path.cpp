@@ -1,136 +1,131 @@
 #include "core/json-path.h"
 
 #include <charconv>
+#include <cstddef>
+#include <cstdint>
+#include <system_error>
+#include <utility>
 
 namespace {
 
-// A key segment runs until the next '.' or '[', or end of text -- these are
-// the only delimiters this interim syntax recognizes (see json-path.h's
-// note on keys containing '.' or '[').
-std::string_view ScanKey(std::string_view path, std::size_t pos) {
-  std::size_t end = pos;
-  while (end < path.size() && path[end] != '.' && path[end] != '[') {
-    ++end;
+bool DecodeToken(std::string_view raw, std::string& out) {
+  out.clear();
+  out.reserve(raw.size());
+  for (std::size_t i = 0; i < raw.size(); ++i) {
+    const char c = raw[i];
+    if (c != '~') {
+      out.push_back(c);
+      continue;
+    }
+    if (i + 1 >= raw.size()) {
+      return false;
+    }
+    // Each escape is decoded once, left to right. Replacing "~0" before "~1"
+    // would turn "~01" into "/" instead of the correct "~1".
+    const char next = raw[++i];
+    if (next == '1') {
+      out.push_back('/');
+    } else if (next == '0') {
+      out.push_back('~');
+    } else {
+      return false;
+    }
   }
-  return path.substr(pos, end - pos);
+  return true;
 }
 
-// `pos` points at the opening '[' on entry; advanced past the closing ']'
-// on success. std::from_chars does the range check directly into uint32_t,
-// so no size_t-width narrowing cast is ever needed here.
-Status ScanIndex(std::string_view path, std::size_t& pos, std::uint32_t& index) {
-  const std::size_t open = pos;
-  const std::size_t close = path.find(']', open);
-  if (close == std::string_view::npos) {
-    return Status::PathSyntaxError;  // unclosed bracket, e.g. "items[0"
+bool IsDigit(char c) { return c >= '0' && c <= '9'; }
+
+Status ParseIndex(const std::string& token, std::uint32_t& index) {
+  if (token == "-") {
+    return Status::IndexOutOfRange;
+  }
+  if (token.empty() || (token.size() > 1 && token.front() == '0')) {
+    return Status::TypeMismatch;
+  }
+  for (const char c : token) {
+    if (!IsDigit(c)) {
+      return Status::TypeMismatch;
+    }
   }
 
-  const std::string_view digits = path.substr(open + 1, close - open - 1);
-  if (digits.empty()) {
-    return Status::PathSyntaxError;  // "[]"
-  }
-
-  const char* begin = digits.data();
-  const char* end = digits.data() + digits.size();
-  const auto result = std::from_chars(begin, end, index);
+  const char* begin = token.data();
+  const char* end = token.data() + token.size();
+  std::uint32_t value = 0;
+  const auto result = std::from_chars(begin, end, value);
   if (result.ec == std::errc::result_out_of_range) {
-    return Status::PathSyntaxError;  // valid digits, too large for uint32_t
+    return Status::IndexOutOfRange;
   }
   if (result.ec != std::errc{} || result.ptr != end) {
-    // from_chars into an unsigned type rejects a leading '-' outright, so
-    // this single check also covers "[-1]" as well as "[x]".
-    return Status::PathSyntaxError;
+    return Status::TypeMismatch;
   }
-
-  pos = close + 1;
+  index = value;
   return Status::Ok;
 }
 
 }  // namespace
 
-Status ParsePath(std::string_view path, std::vector<PathSegment>& out) {
+Status ParsePath(std::string_view path, std::vector<std::string>& out) {
   if (path.data() == nullptr) {
     return Status::InvalidArgument;
   }
-  if (path.empty() || path.front() == '.') {
+  if (path.empty()) {
+    out.clear();
+    return Status::Ok;
+  }
+  if (path.front() != '/') {
     return Status::PathSyntaxError;
   }
 
-  std::vector<PathSegment> segments;
-  std::size_t pos = 0;
-
-  while (pos < path.size()) {
-    if (path[pos] == '[') {
-      std::uint32_t index = 0;
-      const Status status = ScanIndex(path, pos, index);
-      if (status != Status::Ok) {
-        return status;
-      }
-      segments.push_back(PathSegment{PathSegment::Kind::Index, std::string{}, index});
-      continue;
-    }
-
-    if (path[pos] == '.') {
-      ++pos;
-      if (pos >= path.size() || path[pos] == '.' || path[pos] == '[') {
-        return Status::PathSyntaxError;  // trailing '.', "..", or ".["
-      }
-      const std::string_view key = ScanKey(path, pos);
-      segments.push_back(PathSegment{PathSegment::Kind::Key, std::string{key}, 0});
-      pos += key.size();
-      continue;
-    }
-
-    if (pos != 0) {
-      // A bare key char is only valid at the very start of the path or
-      // right after a '.'; reaching here means a key glued directly onto a
-      // prior segment with no separator, e.g. "items[0]name".
+  std::vector<std::string> tokens;
+  std::size_t start = 1;
+  for (;;) {
+    const std::size_t end = path.find('/', start);
+    const std::size_t length =
+        (end == std::string_view::npos) ? std::string_view::npos : end - start;
+    std::string token;
+    if (!DecodeToken(path.substr(start, length), token)) {
       return Status::PathSyntaxError;
     }
-    const std::string_view key = ScanKey(path, pos);
-    segments.push_back(PathSegment{PathSegment::Kind::Key, std::string{key}, 0});
-    pos += key.size();
+    tokens.push_back(std::move(token));
+    if (end == std::string_view::npos) {
+      break;
+    }
+    start = end + 1;
   }
 
-  out = std::move(segments);
+  out = std::move(tokens);
   return Status::Ok;
 }
 
-Status ResolvePath(const nlohmann::json& document, std::string_view path,
-                    const nlohmann::json*& out) {
-  std::vector<PathSegment> segments;
-  const Status parseStatus = ParsePath(path, segments);
+Status ResolvePath(const JsonValue& document, std::string_view path,
+                   const JsonValue*& out) {
+  std::vector<std::string> tokens;
+  const Status parseStatus = ParsePath(path, tokens);
   if (parseStatus != Status::Ok) {
     return parseStatus;
   }
 
-  const nlohmann::json* current = &document;
-  for (const auto& segment : segments) {
-    if (segment.kind == PathSegment::Kind::Index) {
-      // Anything that is not an array here -- object, scalar, or null --
-      // is the table's "[n] on object" / "container expected" TypeMismatch
-      // row; bounds are only meaningful once we know it IS an array.
-      if (!current->is_array()) {
-        return Status::TypeMismatch;
-      }
-      if (segment.index >= current->size()) {
-        return Status::IndexOutOfRange;
-      }
-      // Bounds already checked above, so this const operator[] is safe --
-      // nlohmann's const array operator[] performs no bounds check itself.
-      current = &(*current)[segment.index];
-    } else {
-      // Symmetric to the Index branch: anything that is not an object --
-      // array, scalar, or null -- is the table's ".key on array" /
-      // "container expected" TypeMismatch row.
-      if (!current->is_object()) {
-        return Status::TypeMismatch;
-      }
-      const auto it = current->find(segment.key);
+  const JsonValue* current = &document;
+  for (const std::string& token : tokens) {
+    if (current->is_object()) {
+      const auto it = current->find(token);
       if (it == current->end()) {
         return Status::PathNotFound;
       }
       current = &(*it);
+    } else if (current->is_array()) {
+      std::uint32_t index = 0;
+      const Status indexStatus = ParseIndex(token, index);
+      if (indexStatus != Status::Ok) {
+        return indexStatus;
+      }
+      if (static_cast<std::size_t>(index) >= current->size()) {
+        return Status::IndexOutOfRange;
+      }
+      current = &(*current)[static_cast<std::size_t>(index)];
+    } else {
+      return Status::TypeMismatch;
     }
   }
 
