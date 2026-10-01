@@ -23,14 +23,14 @@ constexpr double kSentinelDouble = -999.0;
 // ---------------------------------------------------------------------------
 
 TEST(ToLong, ValidInteger) {
-  JsonValue value =42;
+  JsonValue value = 42;
   std::int32_t out = kSentinelLong;
   EXPECT_EQ(ToLong(value, out), Status::Ok);
   EXPECT_EQ(out, 42);
 }
 
 TEST(ToLong, FractionalNumberIsNotIntegral) {
-  JsonValue value =3.7;
+  JsonValue value = 3.7;
   std::int32_t out = kSentinelLong;
   EXPECT_EQ(ToLong(value, out), Status::NotIntegral);
   EXPECT_NE(out, 3);
@@ -38,20 +38,20 @@ TEST(ToLong, FractionalNumberIsNotIntegral) {
 }
 
 TEST(ToLong, WholeValuedFloatIsOk) {
-  JsonValue value =3.0;
+  JsonValue value = 3.0;
   std::int32_t out = kSentinelLong;
   EXPECT_EQ(ToLong(value, out), Status::Ok);
   EXPECT_EQ(out, 3);
 }
 
 TEST(ToLong, OneAboveInt32MaxIsOverflow) {
-  JsonValue value =2147483648LL;
+  JsonValue value = 2147483648LL;
   std::int32_t out = kSentinelLong;
   EXPECT_EQ(ToLong(value, out), Status::NumericOverflow);
 }
 
 TEST(ToLong, OneBelowInt32MinIsOverflow) {
-  JsonValue value =-2147483649LL;
+  JsonValue value = -2147483649LL;
   std::int32_t out = kSentinelLong;
   EXPECT_EQ(ToLong(value, out), Status::NumericOverflow);
 }
@@ -60,37 +60,37 @@ TEST(ToLong, OneBelowInt32MinIsOverflow) {
 // this case is the architecture-parity check -- int32_t range checks must
 // not vary with pointer width.
 TEST(ToLong, BeyondInt64RangeIsOverflow) {
-  JsonValue value =1e300;
+  JsonValue value = 1e300;
   std::int32_t out = kSentinelLong;
   EXPECT_EQ(ToLong(value, out), Status::NumericOverflow);
 }
 
 TEST(ToLong, NullIsNullValue) {
-  JsonValue value =nullptr;
+  JsonValue value = nullptr;
   std::int32_t out = kSentinelLong;
   EXPECT_EQ(ToLong(value, out), Status::NullValue);
 }
 
 TEST(ToLong, StringIsTypeMismatch) {
-  JsonValue value ="42";
+  JsonValue value = "42";
   std::int32_t out = kSentinelLong;
   EXPECT_EQ(ToLong(value, out), Status::TypeMismatch);
 }
 
 TEST(ToLong, BoolIsTypeMismatch) {
-  JsonValue value =true;
+  JsonValue value = true;
   std::int32_t out = kSentinelLong;
   EXPECT_EQ(ToLong(value, out), Status::TypeMismatch);
 }
 
 TEST(ToLong, ObjectIsTypeMismatch) {
-  JsonValue value =JsonValue::object({{"a", 1}});
+  JsonValue value = JsonValue::object({{"a", 1}});
   std::int32_t out = kSentinelLong;
   EXPECT_EQ(ToLong(value, out), Status::TypeMismatch);
 }
 
 TEST(ToLong, ArrayIsTypeMismatch) {
-  JsonValue value =JsonValue::array({1, 2, 3});
+  JsonValue value = JsonValue::array({1, 2, 3});
   std::int32_t out = kSentinelLong;
   EXPECT_EQ(ToLong(value, out), Status::TypeMismatch);
 }
@@ -100,27 +100,27 @@ TEST(ToLong, ArrayIsTypeMismatch) {
 // ---------------------------------------------------------------------------
 
 TEST(ToDouble, FloatValue) {
-  JsonValue value =3.5;
+  JsonValue value = 3.5;
   double out = kSentinelDouble;
   EXPECT_EQ(ToDouble(value, out), Status::Ok);
   EXPECT_DOUBLE_EQ(out, 3.5);
 }
 
 TEST(ToDouble, IntegerTypedNumber) {
-  JsonValue value =7;
+  JsonValue value = 7;
   double out = kSentinelDouble;
   EXPECT_EQ(ToDouble(value, out), Status::Ok);
   EXPECT_DOUBLE_EQ(out, 7.0);
 }
 
 TEST(ToDouble, NullIsNullValue) {
-  JsonValue value =nullptr;
+  JsonValue value = nullptr;
   double out = kSentinelDouble;
   EXPECT_EQ(ToDouble(value, out), Status::NullValue);
 }
 
 TEST(ToDouble, StringIsTypeMismatch) {
-  JsonValue value ="3.5";
+  JsonValue value = "3.5";
   double out = kSentinelDouble;
   EXPECT_EQ(ToDouble(value, out), Status::TypeMismatch);
 }
@@ -130,39 +130,39 @@ TEST(ToDouble, StringIsTypeMismatch) {
 // ---------------------------------------------------------------------------
 
 TEST(ToBool, TrueValue) {
-  JsonValue value =true;
+  JsonValue value = true;
   bool out = false;
   EXPECT_EQ(ToBool(value, out), Status::Ok);
   EXPECT_TRUE(out);
 }
 
 TEST(ToBool, FalseValue) {
-  JsonValue value =false;
+  JsonValue value = false;
   bool out = true;
   EXPECT_EQ(ToBool(value, out), Status::Ok);
   EXPECT_FALSE(out);
 }
 
 TEST(ToBool, NumericZeroIsTypeMismatch) {
-  JsonValue value =0;
+  JsonValue value = 0;
   bool out = false;
   EXPECT_EQ(ToBool(value, out), Status::TypeMismatch);
 }
 
 TEST(ToBool, NumericOneIsTypeMismatch) {
-  JsonValue value =1;
+  JsonValue value = 1;
   bool out = false;
   EXPECT_EQ(ToBool(value, out), Status::TypeMismatch);
 }
 
 TEST(ToBool, StringTrueIsTypeMismatch) {
-  JsonValue value ="true";
+  JsonValue value = "true";
   bool out = false;
   EXPECT_EQ(ToBool(value, out), Status::TypeMismatch);
 }
 
 TEST(ToBool, NullIsNullValue) {
-  JsonValue value =nullptr;
+  JsonValue value = nullptr;
   bool out = false;
   EXPECT_EQ(ToBool(value, out), Status::NullValue);
 }
@@ -172,32 +172,32 @@ TEST(ToBool, NullIsNullValue) {
 // ---------------------------------------------------------------------------
 
 TEST(ToText, StringReturnsUnquotedContents) {
-  JsonValue value ="hello world";
+  JsonValue value = "hello world";
   std::string out;
   EXPECT_EQ(ToText(value, out), Status::Ok);
   EXPECT_EQ(out, "hello world");
 }
 
 TEST(ToText, NumberIsTypeMismatch) {
-  JsonValue value =42;
+  JsonValue value = 42;
   std::string out;
   EXPECT_EQ(ToText(value, out), Status::TypeMismatch);
 }
 
 TEST(ToText, NullIsNullValue) {
-  JsonValue value =nullptr;
+  JsonValue value = nullptr;
   std::string out;
   EXPECT_EQ(ToText(value, out), Status::NullValue);
 }
 
 TEST(ToText, ObjectIsTypeMismatch) {
-  JsonValue value =JsonValue::object({{"a", 1}});
+  JsonValue value = JsonValue::object({{"a", 1}});
   std::string out;
   EXPECT_EQ(ToText(value, out), Status::TypeMismatch);
 }
 
 TEST(ToText, ArrayIsTypeMismatch) {
-  JsonValue value =JsonValue::array({1, 2, 3});
+  JsonValue value = JsonValue::array({1, 2, 3});
   std::string out;
   EXPECT_EQ(ToText(value, out), Status::TypeMismatch);
 }
@@ -208,42 +208,42 @@ TEST(ToText, ArrayIsTypeMismatch) {
 // ---------------------------------------------------------------------------
 
 TEST(ValueToText, NullBecomesLiteralNullText) {
-  JsonValue value =nullptr;
+  JsonValue value = nullptr;
   std::string out;
   EXPECT_EQ(ValueToText(value, out), Status::Ok);
   EXPECT_EQ(out, "null");
 }
 
 TEST(ValueToText, NumberIsStringified) {
-  JsonValue value =42;
+  JsonValue value = 42;
   std::string out;
   EXPECT_EQ(ValueToText(value, out), Status::Ok);
   EXPECT_EQ(out, "42");
 }
 
 TEST(ValueToText, BoolIsStringified) {
-  JsonValue value =true;
+  JsonValue value = true;
   std::string out;
   EXPECT_EQ(ValueToText(value, out), Status::Ok);
   EXPECT_EQ(out, "true");
 }
 
 TEST(ValueToText, StringIsItsOwnContents) {
-  JsonValue value ="hello";
+  JsonValue value = "hello";
   std::string out;
   EXPECT_EQ(ValueToText(value, out), Status::Ok);
   EXPECT_EQ(out, "hello");
 }
 
 TEST(ValueToText, ObjectIsTypeMismatchAndOutUntouched) {
-  JsonValue value =JsonValue::object({{"a", 1}});
+  JsonValue value = JsonValue::object({{"a", 1}});
   std::string out = "sentinel";
   EXPECT_EQ(ValueToText(value, out), Status::TypeMismatch);
   EXPECT_EQ(out, "sentinel");
 }
 
 TEST(ValueToText, ArrayIsTypeMismatchAndOutUntouched) {
-  JsonValue value =JsonValue::array({1, 2, 3});
+  JsonValue value = JsonValue::array({1, 2, 3});
   std::string out = "sentinel";
   EXPECT_EQ(ValueToText(value, out), Status::TypeMismatch);
   EXPECT_EQ(out, "sentinel");
@@ -351,7 +351,7 @@ TEST(LocaleIndependence, ValueToTextAndParseDoubleUseDotDecimal) {
     GTEST_SKIP() << "de-DE locale not available on this system";
   }
 
-  JsonValue value =3.5;
+  JsonValue value = 3.5;
   std::string text;
   EXPECT_EQ(ValueToText(value, text), Status::Ok);
   EXPECT_EQ(text.find(','), std::string::npos);
