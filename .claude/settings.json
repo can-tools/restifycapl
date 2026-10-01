@@ -42,7 +42,6 @@
       "Bash(git push origin docs/*)"
     ],
     "deny": [
-      "Bash(git push *)",
       "Bash(git tag *)",
       "Bash(git reset --hard *)",
       "Bash(git branch -D *)",
