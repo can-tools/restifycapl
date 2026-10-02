@@ -1,0 +1,29 @@
+long restLibGetSync(char url[], char requestHeaders[], char responseBody[], long &httpStatusCode, dword &responseBodyLength)
+{
+  return restifyGetSync(url, elcount(url), requestHeaders, elcount(requestHeaders), responseBody, elcount(responseBody), httpStatusCode, responseBodyLength);
+}
+
+long restLibDeleteSync(char url[], char requestHeaders[], char responseBody[], long &httpStatusCode, dword &responseBodyLength)
+{
+  return restifyDeleteSync(url, elcount(url), requestHeaders, elcount(requestHeaders), responseBody, elcount(responseBody), httpStatusCode, responseBodyLength);
+}
+
+long restLibPostSync(char url[], char requestHeaders[], char requestBody[], char responseBody[], long &httpStatusCode, dword &responseBodyLength)
+{
+  return restifyPostSync(url, elcount(url), requestHeaders, elcount(requestHeaders), requestBody, elcount(requestBody), responseBody, elcount(responseBody), httpStatusCode, responseBodyLength);
+}
+
+long restLibPutSync(char url[], char requestHeaders[], char requestBody[], char responseBody[], long &httpStatusCode, dword &responseBodyLength)
+{
+  return restifyPutSync(url, elcount(url), requestHeaders, elcount(requestHeaders), requestBody, elcount(requestBody), responseBody, elcount(responseBody), httpStatusCode, responseBodyLength);
+}
+
+long restLibPatchSync(char url[], char requestHeaders[], char requestBody[], char responseBody[], long &httpStatusCode, dword &responseBodyLength)
+{
+  return restifyPatchSync(url, elcount(url), requestHeaders, elcount(requestHeaders), requestBody, elcount(requestBody), responseBody, elcount(responseBody), httpStatusCode, responseBodyLength);
+}
+
+long restLibRequestSync(char method[], char url[], char requestHeaders[], char requestBody[], char responseBody[], dword connectTimeoutMs, dword totalTimeoutMs, dword maxResponseBytes, long &httpStatusCode, dword &responseBodyLength)
+{
+  return restifyRequestSync(method, elcount(method), url, elcount(url), requestHeaders, elcount(requestHeaders), requestBody, elcount(requestBody), responseBody, elcount(responseBody), connectTimeoutMs, totalTimeoutMs, maxResponseBytes, httpStatusCode, responseBodyLength);
+}

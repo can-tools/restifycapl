@@ -25,6 +25,9 @@ accessors. Deferred until a demonstrated need: struct registry / JSON→struct
 mapping, and CAPL-side request-body building. Do not build the deferred
 modules pre-emptively.
 
+Every new export-table row gets its 1:1 restLib wrapper (name: restify ->
+restLib) in capl/includes/libs/ in the same change.
+
 ## Build
 
 - `make all` — builds both architectures in CI, where each matrix leg has
@@ -63,6 +66,15 @@ lib/x86/, lib/x64/      static dependencies (.lib), built with /MT
 build/x86/, build/x64/  build output (gitignored)
 tests/                  GoogleTest unit tests, run without CANoe
 examples/               .can examples showing usage from the CAPL side
+capl/                   CAPL framework (preliminary): *.can verification nodes,
+                          each including only includes/includes.cin
+  includes/includes.cin   single master include: #pragma library (x64/x86) and
+                          #include of libs/
+  includes/libs/          restLib wrapper libraries, one .cin per export category
+  includes/dll/win-x64/   restifycapl-x64.dll copied in by the user; never
+                          committed (.gitkeep only)
+  includes/dll/win-x86/   restifycapl-x86.dll copied in by the user; never
+                          committed (.gitkeep only)
 scripts/                setup-dev-env.ps1 — environment bootstrap
 docs/                   project documentation
 ```

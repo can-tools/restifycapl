@@ -87,6 +87,8 @@ hand-invented version numbers.
   document.
 - `restifyJsonDiscardAllDocuments(dword& discardedCount) : long` -- releases
   every document and reports how many were released.
+- Preliminary CAPL framework in `capl/` (include entry point, `restLib`
+  wrapper libraries, verification nodes); see `docs/capl-framework.md`.
 
 ### Changed
 
