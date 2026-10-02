@@ -28,7 +28,6 @@ long restLibJsonDiscardAllDocuments(dword &discardedCount)
   return restifyJsonDiscardAllDocuments(discardedCount);
 }
 
-// Local buffers: key 512 bytes, value 512 bytes; an entry that does not fit is reported and skipped.
 void restLibJsonDump(dword documentId)
 {
   char key[512];

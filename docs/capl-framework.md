@@ -34,7 +34,9 @@ contains one `includes` section with only `#include "includes\includes.cin"`.
 2. Copy `restifycapl-x86.dll` to `capl\includes\dll\win-x86\`: from a local x86
    build (`build\x86\`) or from the CI artifact `restifycapl-x86`.
 3. Attach `capl/restify-verify-http.can` and `capl/restify-verify-json.can` as
-   nodes of a CANoe configuration.
+   nodes of a CANoe configuration, in Measurement Setup (or as a test node):
+   the sync keys call blocking functions that must not run in Simulation Setup
+   (see "Blocking calls").
 
 Close CANoe before overwriting a DLL it has loaded; a loaded DLL cannot be
 replaced. Do not place copies in the `capl_includes` fallback folders (below):
@@ -167,7 +169,8 @@ Nothing is verified yet. The framework has not been compiled or run in
 CANoe; CI cannot compile CAPL. This section is updated after the first
 verification in CANoe.
 
-Items to confirm:
+Items to confirm: CANoe recognizes rows 19-24, and `includes.cin`, the four
+libraries and both nodes compile. Then:
 
 1. The x64 DLL loads through the `#if X64` branch from
    `capl\includes\dll\win-x64\` in a 64-bit configuration (the x86 DLL in a
