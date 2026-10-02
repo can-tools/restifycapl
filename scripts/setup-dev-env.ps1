@@ -20,6 +20,16 @@
       2. If absent, silently install VS Build Tools (VCTools workload).
       3. Resolve vcvarsall.bat; confirm cl/rc/link/dumpbin resolve for both
          x86 and x64, and that each reports the matching architecture.
+      3b. Store each architecture's MSVC build environment as user
+          environment variables (HKCU\Environment, no administrator rights):
+          RESTIFY_MSVC_X64_PATH/INCLUDE/LIB/LIBPATH and the same four with
+          X86. *_PATH holds only the folders vcvarsall.bat adds to PATH, not
+          your whole PATH. x86 comes from `vcvarsall.bat x86` (32-bit-hosted
+          toolset). All eight are overwritten on every run, then verified:
+          cl/link/rc must resolve from each stored *_PATH and cl must be the
+          matching target's compiler. The Makefile uses the set matching
+          ARCH when defined. Open a new window (and restart VS Code) to see
+          them; see docs/development-environment.md#per-architecture-msvc-environment-variables
       4. Detect `make`; install it (MSYS2 / Chocolatey / Scoop) if absent.
       5. Detect or bootstrap vcpkg -- pinning the vcpkg TOOL itself to a
          known-good release tag ($VcpkgPinnedTag), separate from and in
@@ -48,7 +58,9 @@
 
 .NOTES
     Human approval gate: this script installs software and touches global
-    machine state (VS Build Tools, make, vcpkg packages). Per the project
+    machine state (VS Build Tools, make, vcpkg packages, and the eight
+    RESTIFY_MSVC_* user environment variables; remove them with the command
+    in docs/development-environment.md). Per the project
     plan it must be approved before its first run.
 
 .PARAMETER SkipVsBuildTools
@@ -411,6 +423,97 @@ Invoke-Step -Name 'vcvarsall / cl+rc+link+dumpbin' -Body {
         } else {
             Add-Result -Step "Native Tools ($arch)" -Status 'FAIL' -Message $result.Reason
         }
+    }
+}
+
+# ===========================================================================
+# Step 3b -- store each architecture's MSVC environment as user variables
+# ===========================================================================
+
+function Get-VcvarsallEnvironment {
+    param(
+        [Parameter(Mandatory)][string]$VcvarsallPath,
+        [Parameter(Mandatory)][ValidateSet('x86', 'x64')][string]$Arch
+    )
+
+    # Throwaway subshell: the current session's environment stays untouched.
+    $lines = & cmd.exe /c "call `"$VcvarsallPath`" $Arch >nul 2>&1 && set" 2>$null
+    $vars = @{}
+    foreach ($line in $lines) {
+        if ($line -match '^([^=]+)=(.*)$') { $vars[$Matches[1]] = $Matches[2] }
+    }
+    return $vars
+}
+
+function Find-ToolInPath {
+    param([Parameter(Mandatory)][string]$PathList, [Parameter(Mandatory)][string]$Tool)
+    foreach ($dir in ($PathList -split ';' | Where-Object { $_ })) {
+        $candidate = Join-Path $dir $Tool
+        if (Test-Path -LiteralPath $candidate) { return $candidate }
+    }
+    return $null
+}
+
+Invoke-Step -Name 'build environment variables' -Body {
+    $installPath = Get-VsInstallation
+    if (-not $installPath) {
+        Add-Result -Step 'build environment variables' -Status 'SKIP' -Message 'Skipped: no MSVC installation found (see MSVC toolchain step above).'
+        return
+    }
+
+    $vcvarsall = Join-Path $installPath 'VC\Auxiliary\Build\vcvarsall.bat'
+    if (-not (Test-Path -LiteralPath $vcvarsall)) {
+        Add-Result -Step 'build environment variables' -Status 'FAIL' -Message "vcvarsall.bat not found at expected path: $vcvarsall"
+        return
+    }
+
+    $basePathEntries = @($env:PATH -split ';' | Where-Object { $_ })
+    $stored = 0
+
+    foreach ($arch in 'x64', 'x86') {
+        $step = "Build environment ($arch)"
+        $prefix = "RESTIFY_MSVC_$($arch.ToUpper())"
+        $vars = Get-VcvarsallEnvironment -VcvarsallPath $vcvarsall -Arch $arch
+
+        # Only the folders vcvarsall.bat adds: the user's own PATH stays out of the stored value.
+        $addedPath = ($vars['Path'] -split ';' | Where-Object { $_ -and ($_ -notin $basePathEntries) }) -join ';'
+        $values = [ordered]@{
+            PATH    = $addedPath
+            INCLUDE = $vars['INCLUDE']
+            LIB     = $vars['LIB']
+            LIBPATH = $vars['LIBPATH']
+        }
+
+        $empty = @($values.Keys | Where-Object { [string]::IsNullOrWhiteSpace($values[$_]) })
+        if ($empty.Count -gt 0) {
+            Add-Result -Step $step -Status 'FAIL' -Message "vcvarsall.bat $arch produced no value for: $($empty -join ', '); nothing stored for $arch."
+            continue
+        }
+
+        foreach ($name in $values.Keys) {
+            [Environment]::SetEnvironmentVariable("${prefix}_$name", $values[$name], 'User')
+        }
+        $stored++
+
+        $storedPath = [Environment]::GetEnvironmentVariable("${prefix}_PATH", 'User')
+        $missing = @('cl.exe', 'link.exe', 'rc.exe' | Where-Object { -not (Find-ToolInPath -PathList $storedPath -Tool $_) })
+        if ($missing.Count -gt 0) {
+            Add-Result -Step $step -Status 'FAIL' -Message "Stored ${prefix}_PATH does not resolve: $($missing -join ', ')."
+            continue
+        }
+
+        $cl = Find-ToolInPath -PathList $storedPath -Tool 'cl.exe'
+        $expectedDir = "\bin\Host$arch\$arch\"
+        if ($cl.IndexOf($expectedDir, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+            Add-Result -Step $step -Status 'FAIL' -Message "cl.exe resolved from stored ${prefix}_PATH is $cl, expected a path containing $expectedDir"
+            continue
+        }
+
+        Add-Result -Step $step -Status 'OK' -Message "Stored 4 user variables ${prefix}_*; cl, link, rc resolve, cl = $cl"
+    }
+
+    if ($stored -gt 0) {
+        Add-Result -Step 'build environment variables' -Status 'OK' -Message 'Open a new terminal window and restart VS Code to see the stored variables. See docs/development-environment.md for refresh and removal.'
     }
 }
 

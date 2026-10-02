@@ -92,6 +92,11 @@ hand-invented version numbers.
 
 ### Changed
 
+- `scripts/setup-dev-env.ps1` stores per-architecture MSVC environment
+  variables (`RESTIFY_MSVC_X64_*`, `RESTIFY_MSVC_X86_*`, user scope) so
+  `make build-x64` / `make build-x86` work from any new shell; bare `make`
+  now prints the target list instead of building. See
+  `docs/development-environment.md`.
 - Product and test builds now actually link libcurl: `curl/curl.h` is
   provisioned into `include/vendor/curl/` by both `scripts/setup-dev-env.ps1`
   and CI, `CURL_STATICLIB` is defined for both compile paths so the static
