@@ -30,14 +30,21 @@ restLib) in capl/includes/libs/ in the same change.
 
 ## Build
 
-- `make all` — builds both architectures in CI, where each matrix leg has
-  its own MSVC environment. Locally, one shell only ever has one
-  architecture's `cl.exe`/`link.exe` on `PATH`, so `make all` (or bare
-  `make`) in a single local shell builds `build-x86` first, and that leg
-  fails at link time (`LNK1112`, module/target machine-type mismatch) once
-  it reaches an architecture the active environment doesn't match — run
-  `make build-x86` and `make build-x64` in separate, separately activated
-  shells instead.
+- `make` (no target) or `make help` — prints the available targets; builds
+  nothing.
+- `make all` — builds x86, then x64. Works in CI, where each matrix leg has
+  its own MSVC environment, and locally from any shell once
+  `scripts/setup-dev-env.ps1` has stored the build environment (see below).
+  Without those stored variables, one shell only ever has one architecture's
+  `cl.exe`/`link.exe` on `PATH`, so `make all` in such a shell fails at link
+  time (`LNK1112`) at the architecture the shell does not target — run
+  `make build-x86` and `make build-x64` in separately activated shells then.
+- Local build environment: `scripts/setup-dev-env.ps1` stores each
+  architecture's MSVC environment as user environment variables
+  (`RESTIFY_MSVC_X64_*`, `RESTIFY_MSVC_X86_*`). The Makefile uses the set
+  matching `ARCH` when present and the shell's own environment otherwise
+  (CI). Open a new window after running the script; re-run it after a
+  Visual Studio update.
 - `make build-x86` — builds `build/x86/restifycapl-x86.dll` (`/MACHINE:X86`).
 - `make build-x64` — builds `build/x64/restifycapl-x64.dll` (`/MACHINE:X64`).
 - `make test` — builds and runs the GoogleTest suite (outside CANoe) for
@@ -48,7 +55,8 @@ restLib) in capl/includes/libs/ in the same change.
 - Both architecture targets are thin wrappers over a single parameterized
   rule, so compiler and linker flags cannot drift between x86 and x64.
 - First-time local setup: `scripts/setup-dev-env.ps1`. It cannot install
-  CANoe — that step is manual.
+  CANoe — that step is manual. It also stores the per-architecture build
+  environment.
 
 ## Directory layout
 
