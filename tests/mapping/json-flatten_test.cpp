@@ -2,9 +2,9 @@
 
 #include "mapping/json-flatten.h"
 
+#include <charconv>
 #include <cstddef>
 #include <cstdint>
-#include <cstdlib>
 #include <set>
 #include <string>
 #include <string_view>
@@ -22,6 +22,15 @@ namespace {
 
 // Not an enumerator, so no successful call can produce it.
 constexpr JsonEntryType kNoType = static_cast<JsonEntryType>(-1);
+
+double ParseDoubleText(const std::string& text) {
+  double value = 0.0;
+  const char* end = text.data() + text.size();
+  const auto result = std::from_chars(text.data(), end, value);
+  EXPECT_EQ(result.ec, std::errc());
+  EXPECT_EQ(result.ptr, end) << "trailing text in '" << text << "'";
+  return value;
+}
 
 int TypeNumber(JsonEntryType type) { return static_cast<int>(type); }
 
@@ -91,7 +100,7 @@ void ExpectNodeMatchesEntry(const JsonValue& node, const FlatEntry& entry) {
       } else if (node.is_number_integer()) {
         EXPECT_EQ(std::to_string(node.get<std::int64_t>()), entry.value);
       } else {
-        EXPECT_DOUBLE_EQ(std::strtod(entry.value.c_str(), nullptr), node.get<double>());
+        EXPECT_DOUBLE_EQ(ParseDoubleText(entry.value), node.get<double>());
       }
       return;
     case JsonEntryType::Bool:
@@ -555,10 +564,10 @@ TEST(FlattenJson, IntegersBeyondSixtyFourBitsAreNumbersThatLosePrecision) {
   for (const FlatEntry& entry : result.entries) {
     EXPECT_EQ(TypeNumber(entry.type), TypeNumber(JsonEntryType::Number));
   }
-  EXPECT_DOUBLE_EQ(std::strtod(result.entries[0].value.c_str(), nullptr), 18446744073709551616.0);
-  EXPECT_DOUBLE_EQ(std::strtod(result.entries[1].value.c_str(), nullptr), -9223372036854775809.0);
+  EXPECT_DOUBLE_EQ(ParseDoubleText(result.entries[0].value), 18446744073709551616.0);
+  EXPECT_DOUBLE_EQ(ParseDoubleText(result.entries[1].value), -9223372036854775809.0);
   EXPECT_NE(result.entries[2].value, "123456789012345678901234567890");
-  EXPECT_DOUBLE_EQ(std::strtod(result.entries[2].value.c_str(), nullptr),
+  EXPECT_DOUBLE_EQ(ParseDoubleText(result.entries[2].value),
                    123456789012345678901234567890.0);
 }
 

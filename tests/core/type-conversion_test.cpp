@@ -331,7 +331,7 @@ TEST(ParseDouble, TooLargeIsNumericOverflow) {
 // ---------------------------------------------------------------------------
 
 TEST(LocaleIndependence, ValueToTextAndParseDoubleUseDotDecimal) {
-  const char* previous = std::setlocale(LC_NUMERIC, nullptr);
+  const std::string previous = std::setlocale(LC_NUMERIC, nullptr);
   const bool locale_set = std::setlocale(LC_NUMERIC, "de-DE") != nullptr;
   if (!locale_set) {
     GTEST_SKIP() << "de-DE locale not available on this system";
@@ -347,5 +347,5 @@ TEST(LocaleIndependence, ValueToTextAndParseDoubleUseDotDecimal) {
   EXPECT_EQ(ParseDouble("3.5", parsed), Status::Ok);
   EXPECT_DOUBLE_EQ(parsed, 3.5);
 
-  std::setlocale(LC_NUMERIC, previous);
+  std::setlocale(LC_NUMERIC, previous.c_str());
 }
