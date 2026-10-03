@@ -1,5 +1,4 @@
-# Makefile -- restifycapl (CAPL REST DLL).
-# Targets: help (default), all, build-x86, build-x64, test, clean
+# Makefile -- restifycapl. Targets: help (default), all, build-x86, build-x64, test, clean
 # The MSVC environment comes from the active shell, or from the
 # setup-stored RESTIFY_MSVC_<ARCH>_* variables when those are defined.
 

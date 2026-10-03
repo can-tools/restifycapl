@@ -419,10 +419,18 @@ What is stored (user scope, `HKCU\Environment`, no administrator rights):
 - The x64 set comes from `vcvarsall.bat x64`, the x86 set from
   `vcvarsall.bat x86`, which is the 32-bit-hosted toolset (`...\bin\Hostx86\x86\`),
   the same toolset the Native Tools check in the script uses.
-- Every run overwrites all eight variables, so re-running is safe.
-- The script then verifies per architecture that `cl.exe`, `link.exe` and
-  `rc.exe` resolve from the stored `*_PATH`, and that `cl.exe` is the
+- Per architecture, the script verifies first that `cl.exe`, `link.exe` and
+  `rc.exe` resolve from the candidate `*_PATH`, and that `cl.exe` is the
   target's compiler (`...\bin\Hostx64\x64\` or `...\bin\Hostx86\x86\`).
+  Only on success are that architecture's four variables overwritten, so
+  re-running is safe. On FAIL nothing is stored and that architecture's
+  earlier variables are cleared, so a stale or bad set cannot break builds
+  that would work from an activated shell.
+- Run the script in a plain PowerShell window, not in a Developer or Native
+  Tools prompt. `*_PATH` is the `vcvarsall.bat` PATH minus the current
+  process PATH; in a shell that already has an MSVC environment loaded those
+  folders are already in the process PATH, so verification fails (nothing
+  stored, earlier variables cleared).
 - Nothing else is written: no machine-scope variables, shortcuts, Windows
   Terminal profiles, PowerShell profile or `AutoRun` entry.
 - Open a new terminal window and restart VS Code after the first run;
@@ -453,5 +461,6 @@ foreach ($a in 'X64','X86') { foreach ($n in 'PATH','INCLUDE','LIB','LIBPATH') {
 ## Human approval gate
 
 The script installs software and touches global machine state (VS Build
-Tools, `make`, vcpkg packages). Per the project plan it must be approved
-before its first run on a given machine.
+Tools, `make`, vcpkg packages, and the eight `RESTIFY_MSVC_*` user
+environment variables). Per the project plan it must be approved before its
+first run on a given machine.

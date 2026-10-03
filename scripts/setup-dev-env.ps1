@@ -25,10 +25,15 @@
           RESTIFY_MSVC_X64_PATH/INCLUDE/LIB/LIBPATH and the same four with
           X86. *_PATH holds only the folders vcvarsall.bat adds to PATH, not
           your whole PATH. x86 comes from `vcvarsall.bat x86` (32-bit-hosted
-          toolset). All eight are overwritten on every run, then verified:
-          cl/link/rc must resolve from each stored *_PATH and cl must be the
-          matching target's compiler. The Makefile uses the set matching
-          ARCH when defined. Open a new window (and restart VS Code) to see
+          toolset). Each architecture is verified first: cl/link/rc must
+          resolve from the candidate *_PATH and cl must be the matching
+          target's compiler. On success its four variables are overwritten;
+          on FAIL nothing is stored and that architecture's earlier
+          variables are cleared. Run this script in a plain PowerShell
+          window, not in a Developer/Native Tools prompt: the stored PATH
+          is the vcvarsall PATH minus the current process PATH, so from an
+          MSVC shell it fails verification. The Makefile uses the set
+          matching ARCH when defined. Open a new window (and restart VS Code) to see
           them; see docs/development-environment.md#per-architecture-msvc-environment-variables
       4. Detect `make`; install it (MSYS2 / Chocolatey / Scoop) if absent.
       5. Detect or bootstrap vcpkg -- pinning the vcpkg TOOL itself to a
