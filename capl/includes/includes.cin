@@ -1,12 +1,13 @@
+/*@!Encoding:1250*/
 includes
 {
 #if X64
-  #pragma library("dll\win-x64\restifycapl-x64.dll")
+  #pragma library(".\dll\win-x64\restifycapl-x64.dll")
 #else
-  #pragma library("dll\win-x86\restifycapl-x86.dll")
+  #pragma library(".\dll\win-x86\restifycapl-x86.dll")
 #endif
-  #include "libs\restify-common.cin"
-  #include "libs\restify-sync.cin"
-  #include "libs\restify-async.cin"
-  #include "libs\restify-json.cin"
+  #include ".\libs\restify-common.cin"
+  #include ".\libs\restify-sync.cin"
+  #include ".\libs\restify-async.cin"
+  #include ".\libs\restify-json.cin"
 }

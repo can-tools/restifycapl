@@ -1,3 +1,4 @@
+/*@!Encoding:1250*/
 long restLibGetSync(char url[], char requestHeaders[], char responseBody[], long &httpStatusCode, dword &responseBodyLength)
 {
   return restifyGetSync(url, elcount(url), requestHeaders, elcount(requestHeaders), responseBody, elcount(responseBody), httpStatusCode, responseBodyLength);

@@ -1,3 +1,4 @@
+/*@!Encoding:1250*/
 long restLibJsonParse(char json[], dword &documentId)
 {
   return restifyJsonParse(json, elcount(json), documentId);
@@ -8,9 +9,9 @@ long restLibJsonCountEntries(dword documentId, dword &entryCount)
   return restifyJsonCountEntries(documentId, entryCount);
 }
 
-long restLibJsonReadEntry(dword documentId, dword entryIndex, char key[], char value[], long &valueType)
+long restLibJsonReadEntry(dword documentId, dword entryIndex, char keyText[], char value[], long &valueType)
 {
-  return restifyJsonReadEntry(documentId, entryIndex, key, elcount(key), value, elcount(value), valueType);
+  return restifyJsonReadEntry(documentId, entryIndex, keyText, elcount(keyText), value, elcount(value), valueType);
 }
 
 long restLibJsonReadValue(dword documentId, char path[], char value[], long &valueType)
@@ -30,7 +31,7 @@ long restLibJsonDiscardAllDocuments(dword &discardedCount)
 
 void restLibJsonDump(dword documentId)
 {
-  char key[512];
+  char keyText[512];
   char value[512];
   char typeName[16];
   dword count;
@@ -46,7 +47,7 @@ void restLibJsonDump(dword documentId)
   }
   for (index = 0; index < count; index++)
   {
-    rc = restLibJsonReadEntry(documentId, index, key, value, valueType);
+    rc = restLibJsonReadEntry(documentId, index, keyText, value, valueType);
     if (rc == -2)
     {
       write("[%lu] entry does not fit the dump buffers (status -2)", index);
@@ -67,7 +68,7 @@ void restLibJsonDump(dword documentId)
         case 6:  strncpy(typeName, "emptyArray", elcount(typeName)); break;
         default: strncpy(typeName, "unknown", elcount(typeName)); break;
       }
-      write("%s = %s (%s)", key, value, typeName);
+      write("%s = %s (%s)", keyText, value, typeName);
     }
   }
 }

@@ -26,7 +26,9 @@ The layout is fixed.
 | `capl/includes/dll/win-x86/` | Holds `restifycapl-x86.dll`, copied in by hand. Only `.gitkeep` is tracked. |
 
 Libraries include nothing and call no other library file. Every `.can`
-contains one `includes` section with only `#include "includes\includes.cin"`.
+contains one `includes` section with only `#include ".\includes\includes.cin"`.
+Every CAPL file in `capl/` starts with the line `/*@!Encoding:1250*/` and
+stays pure ASCII. `key` is a CAPL keyword; never use it as an identifier.
 
 ## One-time setup
 
@@ -46,17 +48,19 @@ ignore rule covers `capl/includes/dll/`.
 
 ## Path resolution
 
-Per the Vector CANoe 19.3 documentation, a relative path in
-`#pragma library` is resolved against, in order:
+Every `#pragma library` and `#include` path uses the `.\` form, for example
+`#include ".\libs\restify-json.cin"` and
+`#pragma library(".\dll\win-x64\restifycapl-x64.dll")`. Per the Vector CANoe
+19.3 documentation, a relative path in `#pragma library` is resolved against,
+in order:
 
 1. the folder of the file containing the command, here `includes.cin`;
 2. `<User data folder>\Reusable\capl_includes`;
 3. `<Installation directory>\Exec32\capl_includes` or `Exec64\capl_includes`.
 
-The framework uses only the first. That `#include "libs\..."` inside
-`includes.cin` resolves the same way is to be confirmed in CANoe; if it
-resolves relative to the including `.can` instead, the paths become
-`"includes\libs\..."` (still relative). No absolute path is used anywhere.
+The framework uses only the first. Confirmed in CANoe: `.\` include and
+pragma paths resolve relative to the file that contains them. No absolute path
+is used anywhere.
 
 ## Bitness and the library version argument
 
@@ -165,9 +169,10 @@ free document slots; run key `7` after key `5`.
 
 ## Verified in CANoe
 
-Nothing is verified yet. The framework has not been compiled or run in
-CANoe; CI cannot compile CAPL. This section is updated after the first
-verification in CANoe.
+Confirmed in CANoe: `.\` include and pragma paths resolve relative to the
+containing file, and `key` is a CAPL keyword. Nothing else is verified yet; CI
+cannot compile CAPL. This section is updated after the next verification in
+CANoe.
 
 Items to confirm: CANoe recognizes rows 19-24, and `includes.cin`, the four
 libraries and both nodes compile. Then:
@@ -175,14 +180,12 @@ libraries and both nodes compile. Then:
 1. The x64 DLL loads through the `#if X64` branch from
    `capl\includes\dll\win-x64\` in a 64-bit configuration (the x86 DLL in a
    32-bit one, if available).
-2. `#include "libs\..."` inside `includes.cin` resolves relative to
-   `includes.cin`.
-3. User-defined functions in a `.cin` accept reference parameters
+2. User-defined functions in a `.cin` accept reference parameters
    (`long &`, `dword &`).
-4. `elcount()` on an array parameter inside a function yields the caller's
+3. `elcount()` on an array parameter inside a function yields the caller's
    array size.
-5. No name clashes between framework functions and other CAPL code.
-6. Both nodes print the DLL version at measurement start.
+4. No name clashes between framework functions and other CAPL code.
+5. Both nodes print the DLL version at measurement start.
 
 Also unconfirmed: CAPL string-literal initializers with escaped quotes
 (`\"`) as used for the JSON text, large local arrays inside a function

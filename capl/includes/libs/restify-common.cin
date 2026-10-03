@@ -1,3 +1,4 @@
+/*@!Encoding:1250*/
 long restLibReadVersion(char buffer[])
 {
   return restifyReadVersion(buffer, elcount(buffer));

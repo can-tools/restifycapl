@@ -1,3 +1,4 @@
+/*@!Encoding:1250*/
 long restLibGetAsync(char url[], char requestHeaders[], dword &requestId)
 {
   return restifyGetAsync(url, elcount(url), requestHeaders, elcount(requestHeaders), requestId);
