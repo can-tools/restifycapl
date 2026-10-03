@@ -29,8 +29,7 @@ If PowerShell refuses to run the script ("running scripts is disabled on
 this system"), either scope the bypass to the current session only:
 
 ```powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-.\scripts\setup-dev-env.ps1
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass; .\scripts\setup-dev-env.ps1
 ```
 
 or bypass it for a single invocation without changing the session's policy:
