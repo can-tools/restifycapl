@@ -10,14 +10,13 @@ Native Windows DLL for Vector CANoe that gives CAPL scripts synchronous and asyn
 > [!NOTE]
 > This project is pre-1.0 and has no tagged release — the only way to get the DLL today is to build it from source (see [Building the DLL](#building-the-dll)).
 >
-> The CAPL compiler recognises every exported function in a real CANoe instance; this has been confirmed for the x64 build. No request has yet been run against a live server from a running measurement.
->
-> JSON parsing/flattening is not available yet.
+> The CAPL compiler recognises the synchronous and asynchronous operations in a real CANoe instance; this has been confirmed for the x64 build. The JSON operations and the [CAPL framework](#capl-framework-preliminary) have not yet been checked in CANoe. No request has yet been run against a live server from a running measurement.
 
 ## Features
 
 - Synchronous GET, POST, PUT, PATCH and DELETE, plus a general-purpose request function with explicit connect/total timeouts and a response-size cap.
 - Asynchronous dispatch/poll/read/discard, the realtime-safe way to reach REST from a Simulation Setup node.
+- JSON parsing and flattening: parse a response body once, then read its entries by index or by JSON Pointer path.
 - TLS through Windows' own Schannel — no OpenSSL dependency.
 - A single DLL: the C++ runtime (`/MT`) and libcurl are statically linked into it.
 - Both x86 and x64 builds.
@@ -32,6 +31,7 @@ Native Windows DLL for Vector CANoe that gives CAPL scripts synchronous and asyn
 - [Building the DLL](#building-the-dll)
 - [Usage from CAPL](#usage-from-capl)
 - [Operations](#operations)
+- [CAPL framework (preliminary)](#capl-framework-preliminary)
 - [Development and testing](#development-and-testing)
 - [Roadmap](#roadmap)
 - [Changelog](#changelog)
@@ -53,7 +53,7 @@ restifycapl gives CAPL scripts direct REST/HTTP access: blocking calls for Measu
 
 There is no tagged release yet, so building from source is the only way to get the DLL. Running the setup script first is required on a fresh clone — no compiled dependency is committed to this repository.
 
-Run it once, from an elevated PowerShell prompt at the repository root:
+Run it from a plain PowerShell window at the repository root — not from a Developer or Native Tools prompt, where it cannot store the build environment. Elevation is only needed if MSVC Build Tools have to be installed; the script tells you when it is:
 
 ```powershell
 .\scripts\setup-dev-env.ps1
@@ -73,14 +73,24 @@ or bypass it for a single invocation without changing the session's policy:
 powershell -ExecutionPolicy Bypass -File .\scripts\setup-dev-env.ps1
 ```
 
-Then, from a matching MSVC developer command prompt, build one architecture at a time:
+The script stores each architecture's MSVC environment as user environment variables (`RESTIFY_MSVC_X64_*` and `RESTIFY_MSVC_X86_*`). Open a new terminal window afterwards (restart VS Code if you use its terminal); windows opened earlier do not see them. From any new shell:
 
 ```shell
 make build-x64
 make build-x86
+make test ARCH=x86
+make all
 ```
 
-Each must be run from an MSVC developer shell for that architecture; do not run `make all` from a single shell, since it fails at the other architecture's link step. The outputs are `build/x64/restifycapl-x64.dll` and `build/x86/restifycapl-x86.dll`.
+`make all` builds x86, then x64; `make test` runs the x64 tests unless `ARCH=x86` is given. Running `make` with no target only lists the available targets. The outputs are `build/x64/restifycapl-x64.dll` and `build/x86/restifycapl-x86.dll`.
+
+After a Visual Studio or Build Tools update, re-run the setup script to refresh the stored variables; until then builds fail because the old folders are gone. Without the stored variables (CI, or a machine where the script has not been run) a shell holds only one architecture's compiler, so `make all` fails at the other architecture's link step there; build each architecture from a matching MSVC shell instead.
+
+To remove all eight variables:
+
+```powershell
+foreach ($a in 'X64','X86') { foreach ($n in 'PATH','INCLUDE','LIB','LIBPATH') { [Environment]::SetEnvironmentVariable("RESTIFY_MSVC_${a}_$n", $null, 'User') } }
+```
 
 See [`docs/development-environment.md`](docs/development-environment.md) for the script's switches and the engineering rationale behind its design.
 
@@ -129,6 +139,8 @@ TODO: expected output once verified in a running measurement.
 
 > [!IMPORTANT]
 > **Realtime caveat.** Synchronous calls, `restifyAwaitResponse`, and `restifyDiscardAllResponses` block or free memory on the calling thread. Use them only from Measurement Setup or test nodes — never from a Simulation Setup node. From a Simulation Setup node, dispatch asynchronously (e.g. `restifyGetAsync`), poll with `restifyPollResponse` from an `on timer` handler, then read with `restifyReadResponse`.
+>
+> The JSON operations may be called from any context, including Simulation Setup, but they allocate memory and parse (`restifyJsonParse` most noticeably on a large document), which may disturb simulation timing; see the "Risk" section of [`docs/capl-json-surface.md`](docs/capl-json-surface.md).
 
 <details>
 <summary>Async outline (dispatch, poll, read, discard)</summary>
@@ -181,7 +193,28 @@ TODO: link to runnable examples/ once they exist.
 
 Full signature tables and status codes: [`docs/capl-sync-surface.md`](docs/capl-sync-surface.md), [`docs/capl-async-surface.md`](docs/capl-async-surface.md), [`docs/status-codes.md`](docs/status-codes.md).
 
-TODO: JSON operations are not available yet.
+**Json** (parse a JSON text, then read the flattened entries)
+
+| Operation | Purpose |
+|---|---|
+| `restifyJsonParse` | Parses JSON text, flattens it and stores it under a document id. |
+| `restifyJsonCountEntries` | Returns how many flattened entries a document holds. |
+| `restifyJsonReadEntry` | Copies one entry's key (a JSON Pointer) and value text by index and reports its value type. |
+| `restifyJsonReadValue` | Copies the value text at a JSON Pointer path and reports its value type. |
+| `restifyJsonDiscardDocument` | Releases a single document. |
+| `restifyJsonDiscardAllDocuments` | Releases every document and reports how many were released. |
+
+Signatures, limits and status handling: [`docs/capl-json-surface.md`](docs/capl-json-surface.md). How the flattening works: [`docs/json-flatten.md`](docs/json-flatten.md).
+
+## CAPL framework (preliminary)
+
+The `capl/` folder holds a thin CAPL layer over the operations above (`restLib...` wrappers named like the exports) and two verification nodes. It is preliminary: wrapper names and parameters may still change, and it has not yet been compiled or run in CANoe. Take `capl/` from the same commit or tag as the DLL.
+
+- `capl/includes/includes.cin` is the single master include; the nodes include only that file.
+- The wrapper libraries live in `capl/includes/libs/`.
+- Copy the DLLs in by hand: `capl/includes/dll/win-x64/` takes `restifycapl-x64.dll`, `capl/includes/dll/win-x86/` takes `restifycapl-x86.dll`. They are never committed.
+
+See [`docs/capl-framework.md`](docs/capl-framework.md) for the layout, setup steps and what remains to be verified.
 
 ## Development and testing
 
