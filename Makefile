@@ -1,12 +1,11 @@
-# Makefile -- restifycapl (CAPL REST DLL). Targets: all (default),
-# build-x86, build-x64, test, clean -- see msvc-build-conventions.
-# Requires an MSVC dev environment for the target arch already active on
-# PATH (see .github/workflows/ci.yml); never calls vcvarsall.bat itself.
+# Makefile -- restifycapl. Targets: help (default), all, build-x86, build-x64, test, clean
+# The MSVC environment comes from the active shell, or from the
+# setup-stored RESTIFY_MSVC_<ARCH>_* variables when those are defined.
 
 SHELL := cmd.exe
 .SHELLFLAGS := /Q /C
 
-.DEFAULT_GOAL := all
+.DEFAULT_GOAL := help
 
 # ------------------------------------------------------------------------------
 # Architecture selection -- the ONE place x86 vs x64 differs. Everything
@@ -26,6 +25,18 @@ else ifeq ($(ARCH),x64)
   GTESTDIR := lib/gtest/x64
 else
   $(error Unknown ARCH '$(ARCH)' -- must be x86 or x64)
+endif
+
+# Stored variables win over an activated shell, so ARCH alone picks the toolchain.
+# Both PATH spellings are set because Windows exports the variable as Path.
+ifdef RESTIFY_MSVC_$(MACHINE)_PATH
+  RESTIFY_BASE_PATH := $(or $(PATH),$(Path))
+  PATH    := $(RESTIFY_MSVC_$(MACHINE)_PATH);$(RESTIFY_BASE_PATH)
+  Path    := $(PATH)
+  INCLUDE := $(RESTIFY_MSVC_$(MACHINE)_INCLUDE)
+  LIB     := $(RESTIFY_MSVC_$(MACHINE)_LIB)
+  LIBPATH := $(RESTIFY_MSVC_$(MACHINE)_LIBPATH)
+  export PATH Path INCLUDE LIB LIBPATH
 endif
 
 BUILDDIR := build/$(ARCH)
@@ -134,7 +145,16 @@ endef
 # Phony targets
 # ------------------------------------------------------------------------------
 
-.PHONY: all build-x86 build-x64 _build test clean
+.PHONY: help all build-x86 build-x64 _build test clean
+
+help:
+	@echo Targets:
+	@echo   build-x64   build build/x64/restifycapl-x64.dll
+	@echo   build-x86   build build/x86/restifycapl-x86.dll
+	@echo   test        build and run the tests, ARCH=x64 or ARCH=x86, default x64
+	@echo   all         build-x86 and build-x64
+	@echo   clean       remove build/
+	@echo   help        show this list
 
 all: build-x86 build-x64
 

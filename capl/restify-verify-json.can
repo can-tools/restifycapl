@@ -1,0 +1,166 @@
+/*@!Encoding:1250*/
+includes
+{
+  #include ".\includes\includes.cin"
+}
+
+variables
+{
+  char gJsonText[512] = "{\"name\":\"restify\",\"count\":42,\"ratio\":1.5,\"active\":true,\"note\":null,\"nested\":{\"id\":7,\"label\":\"inner\"},\"list\":[10,\"two\",false],\"emptyObject\":{},\"emptyArray\":[]}";
+  char gUrlJson[128] = "https://httpbin.org/json";
+  char gNoHeaders[1] = "";
+  char gPath[32] = "/list/1";
+  char gPathName[32] = "/name";
+  char gBody[8192];
+  char gValue[64];
+  char gSmallValue[4];
+  dword gDocId = 0;
+}
+
+void verifyReport(char what[], long rc)
+{
+  char name[40];
+  restLibStatusText(rc, name);
+  write("%s: status %ld (%s)", what, rc, name);
+}
+
+void verifyOpenAndDump(char text[])
+{
+  long rc;
+  dword count;
+
+  if (gDocId != 0)
+  {
+    restLibJsonDiscardDocument(gDocId);
+    gDocId = 0;
+  }
+  rc = restLibJsonParse(text, gDocId);
+  verifyReport("parse", rc);
+  if (rc != 0)
+  {
+    return;
+  }
+  rc = restLibJsonCountEntries(gDocId, count);
+  verifyReport("count entries", rc);
+  write("  document %lu has %lu entries", gDocId, count);
+  restLibJsonDump(gDocId);
+}
+
+on start
+{
+  char version[64];
+  long rc;
+
+  rc = restLibReadVersion(version);
+  if (rc == 0)
+  {
+    write("restify DLL version: %s", version);
+  }
+  else
+  {
+    verifyReport("restLibReadVersion", rc);
+  }
+}
+
+on key '1'
+{
+  verifyOpenAndDump(gJsonText);
+}
+
+on key '2'
+{
+  long rc;
+  long valueType;
+
+  rc = restLibJsonReadValue(gDocId, gPath, gValue, valueType);
+  verifyReport("read value", rc);
+  if (rc == 0)
+  {
+    write("  %s = %s (type %ld)", gPath, gValue, valueType);
+  }
+}
+
+on key '3'
+{
+  long rc;
+  long httpStatus;
+  dword bodyLength;
+
+  rc = restLibGetSync(gUrlJson, gNoHeaders, gBody, httpStatus, bodyLength);
+  verifyReport("sync GET", rc);
+  write("  HTTP %ld, body %lu bytes", httpStatus, bodyLength);
+  if (rc == 0)
+  {
+    verifyOpenAndDump(gBody);
+  }
+}
+
+on key '4'
+{
+  long rc;
+  long valueType;
+
+  rc = restLibJsonReadValue(gDocId, gPathName, gSmallValue, valueType);
+  verifyReport("read value, small buffer", rc);
+  if (rc == -2)
+  {
+    rc = restLibJsonReadValue(gDocId, gPathName, gValue, valueType);
+    verifyReport("read value, larger buffer", rc);
+    if (rc == 0)
+    {
+      write("  %s = %s (type %ld)", gPathName, gValue, valueType);
+    }
+  }
+}
+
+on key '5'
+{
+  long rc;
+  long i;
+  dword id;
+  dword discarded;
+
+  restLibJsonDiscardAllDocuments(discarded);
+  gDocId = 0;
+  for (i = 0; i < 9; i++)
+  {
+    rc = restLibJsonParse(gJsonText, id);
+    write("open document %ld: status %ld, id %lu", i + 1, rc, id);
+  }
+}
+
+on key '6'
+{
+  long rc;
+  dword id;
+
+  rc = restLibJsonParse(gJsonText, id);
+  verifyReport("parse", rc);
+  if (rc != 0)
+  {
+    return;
+  }
+  verifyReport("first discard", restLibJsonDiscardDocument(id));
+  verifyReport("second discard", restLibJsonDiscardDocument(id));
+}
+
+on key '7'
+{
+  dword discarded;
+  long rc;
+
+  rc = restLibJsonDiscardAllDocuments(discarded);
+  gDocId = 0;
+  verifyReport("discard all documents", rc);
+  write("  discarded: %lu", discarded);
+}
+
+on stopMeasurement
+{
+  dword discarded;
+  dword stillRunning;
+
+  restLibJsonDiscardAllDocuments(discarded);
+  restLibDiscardAllResponses(stillRunning);
+  gDocId = 0;
+}

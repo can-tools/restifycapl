@@ -1,0 +1,141 @@
+/*@!Encoding:1250*/
+includes
+{
+  #include ".\includes\includes.cin"
+}
+
+variables
+{
+  char gUrlGet[128] = "https://httpbin.org/json";
+  char gUrlPost[128] = "https://httpbin.org/post";
+  char gNoHeaders[1] = "";
+  char gJsonHeaders[64] = "Content-Type: application/json";
+  char gPostBody[64] = "{\"name\":\"restify\",\"value\":1}";
+  char gBody[8192];
+  char gSmallBody[16];
+  dword gRequestId = 0;
+  msTimer gPollTimer;
+}
+
+void verifyReport(char what[], long rc)
+{
+  char name[40];
+  restLibStatusText(rc, name);
+  write("%s: status %ld (%s)", what, rc, name);
+}
+
+void verifyPrintResult(char what[], long rc, long httpStatus, dword bodyLength, char body[])
+{
+  verifyReport(what, rc);
+  write("  HTTP %ld, body %lu bytes", httpStatus, bodyLength);
+  if (rc == 0)
+  {
+    write("%s", body);
+  }
+}
+
+on start
+{
+  char version[64];
+  long rc;
+
+  rc = restLibReadVersion(version);
+  if (rc == 0)
+  {
+    write("restify DLL version: %s", version);
+  }
+  else
+  {
+    verifyReport("restLibReadVersion", rc);
+  }
+}
+
+on key '1'
+{
+  long rc;
+  long httpStatus;
+  dword bodyLength;
+
+  rc = restLibGetSync(gUrlGet, gNoHeaders, gBody, httpStatus, bodyLength);
+  verifyPrintResult("sync GET", rc, httpStatus, bodyLength, gBody);
+}
+
+on key '2'
+{
+  long rc;
+  long httpStatus;
+  dword bodyLength;
+
+  rc = restLibPostSync(gUrlPost, gJsonHeaders, gPostBody, gBody, httpStatus, bodyLength);
+  verifyPrintResult("sync POST", rc, httpStatus, bodyLength, gBody);
+}
+
+on key '3'
+{
+  long rc;
+
+  if (gRequestId != 0)
+  {
+    write("async GET: a request is already in flight");
+    return;
+  }
+  rc = restLibGetAsync(gUrlGet, gNoHeaders, gRequestId);
+  verifyReport("async GET dispatch", rc);
+  if (rc == 0)
+  {
+    setTimer(gPollTimer, 100);
+  }
+}
+
+on key '4'
+{
+  long rc;
+  long httpStatus;
+  dword bodyLength;
+
+  rc = restLibGetSync(gUrlGet, gNoHeaders, gSmallBody, httpStatus, bodyLength);
+  verifyPrintResult("sync GET into small buffer", rc, httpStatus, bodyLength, gSmallBody);
+}
+
+on timer gPollTimer
+{
+  long rc;
+  long state;
+  long requestStatus;
+  long httpStatus;
+  dword bodyLength;
+
+  rc = restLibPollResponse(gRequestId, state);
+  if (rc != 0)
+  {
+    verifyReport("async poll", rc);
+    gRequestId = 0;
+    return;
+  }
+  if (state == 1)
+  {
+    setTimer(gPollTimer, 100);
+    return;
+  }
+  rc = restLibReadResponse(gRequestId, gBody, requestStatus, httpStatus, bodyLength);
+  verifyPrintResult("async GET read", rc, httpStatus, bodyLength, gBody);
+  write("  request status %ld", requestStatus);
+  // A successful read already consumes the slot; discarding is only needed after a failed read.
+  if (rc != 0)
+  {
+    verifyReport("async discard", restLibDiscardResponse(gRequestId));
+  }
+  gRequestId = 0;
+}
+
+on stopMeasurement
+{
+  dword stillRunning;
+  long rc;
+
+  cancelTimer(gPollTimer);
+  rc = restLibDiscardAllResponses(stillRunning);
+  verifyReport("discard all responses", rc);
+  write("  still running: %lu", stillRunning);
+  gRequestId = 0;
+}

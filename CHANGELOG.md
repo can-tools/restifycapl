@@ -70,9 +70,33 @@ hand-invented version numbers.
 - `restifyDiscardAllResponses(dword& stillRunning) : long` -- releases every
   response's memory at once and reports how many requests are still running;
   frees memory on the caller's thread.
+- `restifyJsonParse(char json[], dword jsonSize, dword& documentId) : long`
+  -- parses JSON text, flattens it and stores it under a document id; entry
+  key text over 4 MiB gives `KeyTextTooLarge` (-36), and a NUL in the text or
+  a `\u0000` in an object key gives `ParseError` (-10) (see
+  `docs/capl-json-surface.md`).
+- `restifyJsonCountEntries(dword documentId, dword& entryCount) : long` --
+  writes how many flattened entries a document holds to `entryCount`.
+- `restifyJsonReadEntry(dword documentId, dword entryIndex, char key[], dword keySize, char value[], dword valueSize, long& valueType) : long`
+  -- copies one entry's key (a JSON Pointer) and value text and reports its
+  value type, retryable on `BufferTooSmall`.
+- `restifyJsonReadValue(dword documentId, char path[], dword pathSize, char value[], dword valueSize, long& valueType) : long`
+  -- copies the value text at a JSON Pointer path and reports its value type,
+  retryable on `BufferTooSmall`.
+- `restifyJsonDiscardDocument(dword documentId) : long` -- releases a single
+  document.
+- `restifyJsonDiscardAllDocuments(dword& discardedCount) : long` -- releases
+  every document and reports how many were released.
+- Preliminary CAPL framework in `capl/` (include entry point, `restLib`
+  wrapper libraries, verification nodes); see `docs/capl-framework.md`.
 
 ### Changed
 
+- `scripts/setup-dev-env.ps1` stores per-architecture MSVC environment
+  variables (`RESTIFY_MSVC_X64_*`, `RESTIFY_MSVC_X86_*`, user scope) so
+  `make build-x64` / `make build-x86` work from any new shell; bare `make`
+  now prints the target list instead of building. See
+  `docs/development-environment.md`.
 - Product and test builds now actually link libcurl: `curl/curl.h` is
   provisioned into `include/vendor/curl/` by both `scripts/setup-dev-env.ps1`
   and CI, `CURL_STATICLIB` is defined for both compile paths so the static

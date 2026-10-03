@@ -31,6 +31,7 @@
 #include "http/async-text-api.h"
 #include "http/http-client.h"
 #include "http/sync-text-api.h"
+#include "mapping/json-text-api.h"
 
 #pragma comment(lib, "version.lib")
 // Needed for the VerQueryValue* calls below; see the Makefile's SYSLIBS comment.
@@ -40,9 +41,9 @@ namespace {
 // unsigned long is 32 bits on both targets here.
 static_assert(sizeof(unsigned long) == sizeof(std::uint32_t),
               "restifyReadVersion assumes unsigned long is 32 bits");
-// CAPL long is 32 bits on both targets here.
+// The shims move CAPL long values through std::int32_t.
 static_assert(sizeof(long) == sizeof(std::int32_t),
-              "the sync-export shims assume long is 32 bits");
+              "the export shims assume CAPL long maps to a 32-bit long");
 
 // type - 128 marks a CAPL by-reference parameter (docs/capl-sync-surface.md).
 // Spelled via named constants, not inline arithmetic, to avoid a /W4
@@ -369,6 +370,48 @@ extern "C" long CAPLPASCAL restifyDiscardAllResponses(std::uint32_t* stillRunnin
   return static_cast<long>(result);
 }
 
+// Six JSON document shims -- signatures and status codes: docs/capl-json-surface.md.
+extern "C" long CAPLPASCAL restifyJsonParse(char* json, unsigned long jsonSize,
+                                             std::uint32_t* documentId) {
+  Status result = ParseJsonDocument(DefaultJsonDocumentStore(), json, jsonSize, *documentId);
+  return static_cast<long>(result);
+}
+
+extern "C" long CAPLPASCAL restifyJsonCountEntries(unsigned long documentId,
+                                                    std::uint32_t* entryCount) {
+  Status result = CountJsonEntries(DefaultJsonDocumentStore(), documentId, *entryCount);
+  return static_cast<long>(result);
+}
+
+extern "C" long CAPLPASCAL restifyJsonReadEntry(unsigned long documentId,
+                                                 unsigned long entryIndex, char* key,
+                                                 unsigned long keySize, char* value,
+                                                 unsigned long valueSize,
+                                                 std::int32_t* valueType) {
+  Status result = ReadJsonEntry(DefaultJsonDocumentStore(), documentId, entryIndex, key,
+                                 keySize, value, valueSize, *valueType);
+  return static_cast<long>(result);
+}
+
+extern "C" long CAPLPASCAL restifyJsonReadValue(unsigned long documentId, char* path,
+                                                 unsigned long pathSize, char* value,
+                                                 unsigned long valueSize,
+                                                 std::int32_t* valueType) {
+  Status result = ReadJsonValue(DefaultJsonDocumentStore(), documentId, path, pathSize, value,
+                                 valueSize, *valueType);
+  return static_cast<long>(result);
+}
+
+extern "C" long CAPLPASCAL restifyJsonDiscardDocument(unsigned long documentId) {
+  Status result = DiscardJsonDocument(DefaultJsonDocumentStore(), documentId);
+  return static_cast<long>(result);
+}
+
+extern "C" long CAPLPASCAL restifyJsonDiscardAllDocuments(std::uint32_t* discardedCount) {
+  Status result = DiscardAllJsonDocuments(DefaultJsonDocumentStore(), *discardedCount);
+  return static_cast<long>(result);
+}
+
 // ==============================================================================
 // CAPL_DLL_INFO_LIST4 -- the real API contract (capl-export-contract).
 // APPEND ONLY from this point on: never rename, reorder, or remove a row.
@@ -656,6 +699,77 @@ CAPL_DLL_INFO4 CAPL_DLL_INFO_LIST4[] = {
      {kRefDword},
      {0},
      {"stillRunning"}},
+
+    // Six JSON document rows -- see docs/capl-json-surface.md.
+
+    {"restifyJsonParse",
+     (CAPL_FARCALL)restifyJsonParse,
+     "Json",
+     "Parses JSON text into a stored document, returning 0 on success with a "
+     "document id or a negative error code otherwise.",
+     'L',
+     3,
+     {'C', 'D', kRefDword},
+     {1, 0, 0},
+     {"json", "jsonSize", "documentId"}},
+
+    {"restifyJsonCountEntries",
+     (CAPL_FARCALL)restifyJsonCountEntries,
+     "Json",
+     "Writes the number of flattened entries of a parsed document to "
+     "entryCount, returning 0 on success or a negative error code otherwise.",
+     'L',
+     2,
+     {'D', kRefDword},
+     {0, 0},
+     {"documentId", "entryCount"}},
+
+    {"restifyJsonReadEntry",
+     (CAPL_FARCALL)restifyJsonReadEntry,
+     "Json",
+     "Copies the key and value text of one entry of a parsed document into "
+     "the caller's buffers and reports the value type, returning 0 on "
+     "success or a negative error code otherwise.",
+     'L',
+     7,
+     {'D', 'D', 'C', 'D', 'C', 'D', kRefLong},
+     {0, 0, 1, 0, 1, 0, 0},
+     {"documentId", "entryIndex", "key", "keySize", "value", "valueSize",
+      "valueType"}},
+
+    {"restifyJsonReadValue",
+     (CAPL_FARCALL)restifyJsonReadValue,
+     "Json",
+     "Copies the value text found at a JSON Pointer path in a parsed "
+     "document into the caller's buffer and reports the value type, "
+     "returning 0 on success or a negative error code otherwise.",
+     'L',
+     6,
+     {'D', 'C', 'D', 'C', 'D', kRefLong},
+     {0, 1, 0, 1, 0, 0},
+     {"documentId", "path", "pathSize", "value", "valueSize", "valueType"}},
+
+    {"restifyJsonDiscardDocument",
+     (CAPL_FARCALL)restifyJsonDiscardDocument,
+     "Json",
+     "Releases a single parsed document, returning 0 on success or a "
+     "negative error code otherwise.",
+     'L',
+     1,
+     {'D'},
+     {0},
+     {"documentId"}},
+
+    {"restifyJsonDiscardAllDocuments",
+     (CAPL_FARCALL)restifyJsonDiscardAllDocuments,
+     "Json",
+     "Releases every parsed document at once, returning 0 and the number of "
+     "documents released.",
+     'L',
+     1,
+     {kRefDword},
+     {0},
+     {"discardedCount"}},
 
     // Terminating sentinel -- CANoe reads entries until the first one
     // whose name is NULL.

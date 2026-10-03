@@ -29,8 +29,7 @@ If PowerShell refuses to run the script ("running scripts is disabled on
 this system"), either scope the bypass to the current session only:
 
 ```powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-.\scripts\setup-dev-env.ps1
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass; .\scripts\setup-dev-env.ps1
 ```
 
 or bypass it for a single invocation without changing the session's policy:
@@ -395,8 +394,72 @@ forward instead. Both CI (`.github/workflows/ci.yml`) and this script
 now assert this invariant structurally and fail loudly if it ever
 diverges again, rather than relying on this paragraph alone.
 
+## Per-architecture MSVC environment variables
+
+`cl.exe`, `link.exe` and `rc.exe` read `PATH`, `INCLUDE`, `LIB` and `LIBPATH`,
+and those can only describe one architecture at a time. A script cannot
+change shells that are already open, but user environment variables reach
+every shell opened afterwards. So the script does not touch your own `PATH`,
+`INCLUDE`, `LIB` or `LIBPATH`; it stores each architecture's values under
+its own names, and the `Makefile` picks the set matching `ARCH`
+(`build-x64`, `build-x86`, `make test ARCH=...`). That is what lets
+`make build-x64`, `make build-x86` and `make all` work from any new shell
+without opening a Developer prompt.
+
+What is stored (user scope, `HKCU\Environment`, no administrator rights):
+
+| Variable | Content |
+|---|---|
+| `RESTIFY_MSVC_X64_PATH`, `RESTIFY_MSVC_X86_PATH` | only the folders `vcvarsall.bat` adds to `PATH`, not your whole `PATH` |
+| `RESTIFY_MSVC_X64_INCLUDE`, `RESTIFY_MSVC_X86_INCLUDE` | `INCLUDE` as `vcvarsall.bat` produces it |
+| `RESTIFY_MSVC_X64_LIB`, `RESTIFY_MSVC_X86_LIB` | `LIB` as `vcvarsall.bat` produces it |
+| `RESTIFY_MSVC_X64_LIBPATH`, `RESTIFY_MSVC_X86_LIBPATH` | `LIBPATH` as `vcvarsall.bat` produces it |
+
+- The x64 set comes from `vcvarsall.bat x64`, the x86 set from
+  `vcvarsall.bat x86`, which is the 32-bit-hosted toolset (`...\bin\Hostx86\x86\`),
+  the same toolset the Native Tools check in the script uses.
+- Per architecture, the script verifies first that `cl.exe`, `link.exe` and
+  `rc.exe` resolve from the candidate `*_PATH`, and that `cl.exe` is the
+  target's compiler (`...\bin\Hostx64\x64\` or `...\bin\Hostx86\x86\`).
+  Only on success are that architecture's four variables overwritten, so
+  re-running is safe. On FAIL nothing is stored and that architecture's
+  earlier variables are cleared, so a stale or bad set cannot break builds
+  that would work from an activated shell.
+- Run the script in a plain PowerShell window, not in a Developer or Native
+  Tools prompt. `*_PATH` is the `vcvarsall.bat` PATH minus the current
+  process PATH; in a shell that already has an MSVC environment loaded those
+  folders are already in the process PATH, so verification fails (nothing
+  stored, earlier variables cleared).
+- Nothing else is written: no machine-scope variables, shortcuts, Windows
+  Terminal profiles, PowerShell profile or `AutoRun` entry.
+- Open a new terminal window and restart VS Code after the first run;
+  windows opened earlier do not see the variables. If the script runs
+  elevated under a different administrator account, the variables land in
+  that account's profile.
+
+Precedence: when `RESTIFY_MSVC_<ARCH>_PATH` is defined, the `Makefile` puts
+the stored folders in front of the current `PATH` and replaces `INCLUDE`,
+`LIB` and `LIBPATH`, even inside an already activated Developer prompt, so
+`ARCH` alone decides the toolchain. When the variable is not defined (CI, or
+before the first setup run) the `Makefile` changes nothing and the shell's own
+environment is used. It never calls `vswhere` or `vcvarsall.bat` and checks
+nothing.
+
+The stored values contain versioned Visual Studio and Windows SDK folders.
+After a Visual Studio or Build Tools update, re-run the script to refresh
+them; until then builds fail because the old folders are gone.
+
+To remove all eight variables:
+
+```powershell
+foreach ($a in 'X64','X86') { foreach ($n in 'PATH','INCLUDE','LIB','LIBPATH') { [Environment]::SetEnvironmentVariable("RESTIFY_MSVC_${a}_$n", $null, 'User') } }
+```
+
+(found during Stage 12, D23)
+
 ## Human approval gate
 
 The script installs software and touches global machine state (VS Build
-Tools, `make`, vcpkg packages). Per the project plan it must be approved
-before its first run on a given machine.
+Tools, `make`, vcpkg packages, and the eight `RESTIFY_MSVC_*` user
+environment variables). Per the project plan it must be approved before its
+first run on a given machine.

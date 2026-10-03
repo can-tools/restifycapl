@@ -4,7 +4,8 @@ Archival rationale and behavior tables for `src/core/type-conversion.h`.
 
 ## Why `To*` and `Parse*` are kept as two separate families
 
-`To*` takes `const nlohmann::json&` in and returns a typed C++ value:
+`To*` takes `const JsonValue&` in (`nlohmann::ordered_json` via the
+`JsonValue` alias in `src/core/json-value.h`) and returns a typed C++ value:
 strict, a JSON string arriving where a number was requested is
 `TypeMismatch`, never a silent fall-through to `ParseLong`/`ParseDouble`.
 
@@ -38,7 +39,7 @@ any leaf.
 `null -> "null"/Ok` guarantees `ValueToText` always succeeds on a genuine
 leaf, the same guarantee `ToText` gives for strings -- no special-cased
 failure for null. Container -> `TypeMismatch` is deliberate and loud:
-`src/mapping/json-flatten.*` (a later stage) recurses through containers
+`src/mapping/json-flatten.*` (via `DescribeLeaf`) recurses through containers
 itself and only ever calls `ValueToText` on leaves it has already
 discovered, so a container arriving here means a bug in the caller's
 recursion, not a normal runtime case -- it must not be silently serialized
