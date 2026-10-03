@@ -484,9 +484,32 @@ Invoke-Step -Name 'build environment variables' -Body {
             LIBPATH = $vars['LIBPATH']
         }
 
+        # A failing architecture must not leave an earlier (stale or bad) set behind.
+        $clearStored = {
+            foreach ($name in $values.Keys) {
+                [Environment]::SetEnvironmentVariable("${prefix}_$name", $null, 'User')
+            }
+        }
+
         $empty = @($values.Keys | Where-Object { [string]::IsNullOrWhiteSpace($values[$_]) })
         if ($empty.Count -gt 0) {
-            Add-Result -Step $step -Status 'FAIL' -Message "vcvarsall.bat $arch produced no value for: $($empty -join ', '); nothing stored for $arch."
+            & $clearStored
+            Add-Result -Step $step -Status 'FAIL' -Message "vcvarsall.bat $arch produced no value for: $($empty -join ', '); nothing stored for $arch, existing ${prefix}_* variables cleared."
+            continue
+        }
+
+        $missing = @('cl.exe', 'link.exe', 'rc.exe' | Where-Object { -not (Find-ToolInPath -PathList $values.PATH -Tool $_) })
+        if ($missing.Count -gt 0) {
+            & $clearStored
+            Add-Result -Step $step -Status 'FAIL' -Message "$prefix candidate PATH does not resolve: $($missing -join ', '); nothing stored for $arch, existing ${prefix}_* variables cleared."
+            continue
+        }
+
+        $cl = Find-ToolInPath -PathList $values.PATH -Tool 'cl.exe'
+        $expectedDir = "\bin\Host$arch\$arch\"
+        if ($cl.IndexOf($expectedDir, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+            & $clearStored
+            Add-Result -Step $step -Status 'FAIL' -Message "cl.exe resolved from candidate ${prefix}_PATH is $cl, expected a path containing $expectedDir; nothing stored for $arch, existing ${prefix}_* variables cleared."
             continue
         }
 
@@ -494,20 +517,6 @@ Invoke-Step -Name 'build environment variables' -Body {
             [Environment]::SetEnvironmentVariable("${prefix}_$name", $values[$name], 'User')
         }
         $stored++
-
-        $storedPath = [Environment]::GetEnvironmentVariable("${prefix}_PATH", 'User')
-        $missing = @('cl.exe', 'link.exe', 'rc.exe' | Where-Object { -not (Find-ToolInPath -PathList $storedPath -Tool $_) })
-        if ($missing.Count -gt 0) {
-            Add-Result -Step $step -Status 'FAIL' -Message "Stored ${prefix}_PATH does not resolve: $($missing -join ', ')."
-            continue
-        }
-
-        $cl = Find-ToolInPath -PathList $storedPath -Tool 'cl.exe'
-        $expectedDir = "\bin\Host$arch\$arch\"
-        if ($cl.IndexOf($expectedDir, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
-            Add-Result -Step $step -Status 'FAIL' -Message "cl.exe resolved from stored ${prefix}_PATH is $cl, expected a path containing $expectedDir"
-            continue
-        }
 
         Add-Result -Step $step -Status 'OK' -Message "Stored 4 user variables ${prefix}_*; cl, link, rc resolve, cl = $cl"
     }
