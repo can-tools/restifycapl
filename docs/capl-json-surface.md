@@ -36,7 +36,8 @@ The seven rows form a fourth group:
 The C++ translation layer (`src/mapping/json-text-api.h`) mirrors this table
 one-to-one: `ParseJsonDocument` (row 19), `CountJsonEntries` (row 20),
 `ReadJsonEntry` (row 21), `ReadJsonValue` (row 22), `DiscardJsonDocument`
-(row 23), `DiscardAllJsonDocuments` (row 24), `NormalizeJsonText` (row 25, which takes no store). Each of rows 19-24 takes an injected
+(row 23), `DiscardAllJsonDocuments` (row 24), `NormalizeJsonText` (row 25,
+which takes no store). Each of rows 19-24 takes an injected
 `JsonDocumentStore&` first, then the CAPL parameters as pointer+size pairs.
 `exports.cpp`'s shims are expected to be a single forwarding call into these.
 
@@ -315,10 +316,10 @@ limit in a later release is compatible; lowering one is not.
 
 No exception crosses into CANoe. If something unexpected fails inside the DLL
 (for example, memory runs out), the operation returns `InternalError`
-(`-35`) and leaves its out-parameters at 0; the same happens for all seven
-operations. It is distinct from `InvalidArgument` (`-1`), which always means
-the caller passed a bad argument. The limits bound the memory one document
-takes, so `-35` from `restifyJsonParse` means the process is short of memory,
+(`-35`) and leaves its out-parameters at 0 (row 25: `normalized` holds the
+empty text); the same happens for all seven operations. It is distinct from
+`InvalidArgument` (`-1`), which always means the caller passed a bad argument.
+The limits bound the memory one document takes, so `-35` from `restifyJsonParse` means the process is short of memory,
 never just that the input was too large.
 
 ## Realtime-safety summary

@@ -6,5 +6,6 @@
 
 #include "core/status.h"
 
-// Rewrites 'text' strings as "text" strings; text without an apostrophe outside double-quoted strings is copied byte for byte.
+// Rewrites 'text' strings as "text" strings; text without an apostrophe outside
+// double-quoted strings is copied byte for byte.
 Status ConvertApostropheStrings(std::string_view in, std::string& out);

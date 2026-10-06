@@ -26,7 +26,6 @@ Status DiscardJsonDocument(JsonDocumentStore& store, std::uint32_t documentId);
 
 Status DiscardAllJsonDocuments(JsonDocumentStore& store, std::uint32_t& discardedCount);
 
-// Converts apostrophe-quoted strings and checks the result is valid JSON syntax; `normalized` holds text only on Ok
-// (empty after every other failure, unwritten on InvalidArgument), and no store or document limit is involved.
+// `normalized` is empty after every failure except InvalidArgument, which leaves it unwritten.
 Status NormalizeJsonText(const char* jsonText, std::uint32_t jsonSize, char* normalized,
                          std::uint32_t normalizedSize);
