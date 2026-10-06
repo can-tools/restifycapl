@@ -15,8 +15,8 @@ The layout is fixed.
 
 | Path | What it is |
 |---|---|
-| `capl/restify-verify-http.can` | Verification node: DLL version at start; sync GET, sync POST, async GET with timer polling, `-2` on a small buffer; releases responses on stop. |
-| `capl/restify-verify-json.can` | Verification node: DLL version at start; offline parse, entry count, dump, read by path, `-2` retry, 9th document `-30`, double discard `-31`; releases documents and responses on stop. |
+| `capl/restify-verify-http.can` | Verification node: DLL version at start; sync GET, sync POST, async GET with timer polling, `-2` on a small buffer, apostrophe bodies normalized and POSTed (forms A and B, ambiguous `-10`); releases responses on stop. |
+| `capl/restify-verify-json.can` | Verification node: DLL version at start; offline parse, entry count, dump, read by path, `-2` retry, 9th document `-30`, double discard `-31`, apostrophe texts (twin dumps, forms A and B, ambiguous `-10`); releases documents and responses on stop. |
 | `capl/includes/includes.cin` | Single master include. The only file with `#pragma library` and the only file that includes the libraries. |
 | `capl/includes/libs/restify-common.cin` | Row 1 wrapper and `restLibStatusText`. |
 | `capl/includes/libs/restify-sync.cin` | Rows 2-7 wrappers. |
@@ -174,6 +174,9 @@ Keys of `restify-verify-http.can`:
 | `2` | Sync POST of a small JSON body to `https://httpbin.org/post`. |
 | `3` | Async GET, polled by a timer, then read; a response left behind by a failed read is discarded. |
 | `4` | Sync GET into a deliberately small buffer, expecting `-2` with the needed length reported. |
+| `5` | Normalize the form A body, print it, sync POST it to `https://httpbin.org/post`. |
+| `6` | Same for the form B body. |
+| `7` | Normalize the ambiguous `{'note':'it's'}`, expecting `-10` and a hint to use form A or B. |
 
 Keys of `restify-verify-json.can`:
 
@@ -186,6 +189,9 @@ Keys of `restify-verify-json.can`:
 | `5` | Discard all documents, then open nine; the ninth gives `-30`. |
 | `6` | Parse a document and discard its id twice; the second discard gives `-31`. |
 | `7` | Discard all documents. |
+| `8` | Parse `{'name':'restify','value':1}` and its double-quoted twin, dump both, discard both. |
+| `9` | Parse forms A and B, read `/note` (expected `it's ok`), discard both. |
+| `0` | Parse the ambiguous `{'note':'it's'}`, expecting `-10`. |
 
 Both nodes release everything on `on stopMeasurement`. Keys `5` and `6` need
 free document slots; run key `7` after key `5`.

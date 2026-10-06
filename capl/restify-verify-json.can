@@ -11,6 +11,12 @@ variables
   char gNoHeaders[1] = "";
   char gPath[32] = "/list/1";
   char gPathName[32] = "/name";
+  char gTextApostrophe[64] = "{'name':'restify','value':1}";
+  char gTextEscapedTwin[64] = "{\"name\":\"restify\",\"value\":1}";
+  char gTextFormA[96] = "{'name':'restify','note':\"it's ok\"}";
+  char gTextFormB[96] = "{'name':'restify','note':'it\\'s ok'}";
+  char gTextAmbiguous[32] = "{'note':'it's'}";
+  char gPathNote[32] = "/note";
   char gBody[8192];
   char gValue[64];
   char gSmallValue[4];
@@ -44,6 +50,42 @@ void verifyOpenAndDump(char text[])
   verifyReport("count entries", rc);
   write("  document %lu has %lu entries", gDocId, count);
   restLibJsonDump(gDocId);
+}
+
+void verifyParseDumpDiscard(char what[], char bodyText[])
+{
+  long resultCode;
+  dword tempId;
+
+  resultCode = restLibJsonParse(bodyText, tempId);
+  verifyReport(what, resultCode);
+  if (resultCode != 0)
+  {
+    return;
+  }
+  restLibJsonDump(tempId);
+  verifyReport("discard", restLibJsonDiscardDocument(tempId));
+}
+
+void verifyParseReadNote(char what[], char bodyText[])
+{
+  long resultCode;
+  long valueType;
+  dword tempId;
+
+  resultCode = restLibJsonParse(bodyText, tempId);
+  verifyReport(what, resultCode);
+  if (resultCode != 0)
+  {
+    return;
+  }
+  resultCode = restLibJsonReadValue(tempId, gPathNote, gValue, valueType);
+  verifyReport("read value", resultCode);
+  if (resultCode == 0)
+  {
+    write("  %s = %s (type %ld), expected: it's ok", gPathNote, gValue, valueType);
+  }
+  verifyReport("discard", restLibJsonDiscardDocument(tempId));
 }
 
 on start
@@ -153,6 +195,31 @@ on key '7'
   gDocId = 0;
   verifyReport("discard all documents", rc);
   write("  discarded: %lu", discarded);
+}
+
+on key '8'
+{
+  verifyParseDumpDiscard("parse apostrophe text", gTextApostrophe);
+  verifyParseDumpDiscard("parse escaped twin", gTextEscapedTwin);
+}
+
+on key '9'
+{
+  verifyParseReadNote("parse form A", gTextFormA);
+  verifyParseReadNote("parse form B", gTextFormB);
+}
+
+on key '0'
+{
+  long resultCode;
+  dword tempId;
+
+  resultCode = restLibJsonParse(gTextAmbiguous, tempId);
+  verifyReport("parse ambiguous text (expected -10)", resultCode);
+  if (resultCode == 0)
+  {
+    restLibJsonDiscardDocument(tempId);
+  }
 }
 
 on stopMeasurement

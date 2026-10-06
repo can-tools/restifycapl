@@ -11,6 +11,10 @@ variables
   char gNoHeaders[1] = "";
   char gJsonHeaders[64] = "Content-Type: application/json";
   char gPostBody[64] = "{\"name\":\"restify\",\"value\":1}";
+  char gBodyFormA[96] = "{'name':'restify','note':\"it's ok\"}";
+  char gBodyFormB[96] = "{'name':'restify','note':'it\\'s ok'}";
+  char gBodyAmbiguous[32] = "{'note':'it's'}";
+  char gBodyNormalized[256];
   char gBody[8192];
   char gSmallBody[16];
   dword gRequestId = 0;
@@ -32,6 +36,23 @@ void verifyPrintResult(char what[], long rc, long httpStatus, dword bodyLength, 
   {
     write("%s", body);
   }
+}
+
+void verifyNormalizeAndPost(char what[], char bodyText[])
+{
+  long resultCode;
+  long httpStatus;
+  dword bodyLength;
+
+  resultCode = restLibJsonNormalize(bodyText, gBodyNormalized);
+  verifyReport(what, resultCode);
+  if (resultCode != 0)
+  {
+    return;
+  }
+  write("  normalized: %s", gBodyNormalized);
+  resultCode = restLibPostSync(gUrlPost, gJsonHeaders, gBodyNormalized, gBody, httpStatus, bodyLength);
+  verifyPrintResult("sync POST of normalized body", resultCode, httpStatus, bodyLength, gBody);
 }
 
 on start
@@ -95,6 +116,28 @@ on key '4'
 
   rc = restLibGetSync(gUrlGet, gNoHeaders, gSmallBody, httpStatus, bodyLength);
   verifyPrintResult("sync GET into small buffer", rc, httpStatus, bodyLength, gSmallBody);
+}
+
+on key '5'
+{
+  verifyNormalizeAndPost("normalize form A", gBodyFormA);
+}
+
+on key '6'
+{
+  verifyNormalizeAndPost("normalize form B", gBodyFormB);
+}
+
+on key '7'
+{
+  long resultCode;
+
+  resultCode = restLibJsonNormalize(gBodyAmbiguous, gBodyNormalized);
+  verifyReport("normalize ambiguous text", resultCode);
+  if (resultCode == -10)
+  {
+    write("  hint: write the value in double quotes (form A) or escape the apostrophe (form B)");
+  }
 }
 
 on timer gPollTimer
