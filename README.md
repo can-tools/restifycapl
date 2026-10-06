@@ -102,7 +102,7 @@ TODO: download instructions once tagged releases are published on GitHub Release
 1. Choose the DLL that matches your CANoe installation's bitness.
 2. Reference it from your CAPL program's includes section with `#pragma library("<path to the DLL>")`, or register it for all CAPL programs via CANoe's Options dialog. How CANoe resolves the path given to `#pragma library` can differ between CANoe versions; consult the CAPL DLL documentation for your version.
 
-The example below calls `restifyGetSync` from an `on key` handler in a Measurement Setup or test node. It is accepted by the CAPL compiler in CANoe; it has not yet been run against a live server in a measurement.
+The example below calls `restifyGetSync` from an `on key` handler in a Measurement Setup or test node. The node must either reference the DLL as in step 2 or include the framework master file (`.\includes\includes.cin`), which references it for you. It is accepted by the CAPL compiler in CANoe; it has not yet been run against a live server in a measurement.
 
 ```capl
 variables
@@ -189,14 +189,14 @@ on key 'b'
 }
 ```
 
-The `restLib` wrappers come from the [CAPL framework](#capl-framework-preliminary). The snippet follows the wrapper signatures in `capl/`; it has not been run in a CANoe measurement.
+The node must include the framework master file (`.\includes\includes.cin`) so the `restLib` wrappers are available; they come from the [CAPL framework](#capl-framework-preliminary). The snippet follows the wrapper signatures in `capl/`; it has not been run in a CANoe measurement.
 
 **Limitation: an apostrophe inside a value written in apostrophes is ambiguous.** In `'it's'` the string ends at the second apostrophe and the rest is not valid JSON, so the DLL returns status `-10`. There are two correct forms:
 
 - Form A: write that value in double quotes. In CAPL source: `\"it's\"`, as in the example above.
 - Form B: escape the apostrophe as `\'`. The CAPL compiler itself turns `\'` inside a CAPL string into a plain `'`, so the CAPL source must contain `\\'` (for example `'it\\'s'`) for the DLL to receive `\'`.
 
-Neither form has been verified at runtime in CANoe. For form B in particular, whether CAPL turns `\\` into a single backslash in this context is still to be confirmed, so form B is pending.
+Neither form has been verified at runtime in CANoe. For form B in particular, whether CAPL turns `\\` into a single backslash in this context is not yet verified at runtime (see [`docs/capl-framework.md`](docs/capl-framework.md), "Verified in CANoe").
 
 Rules, status codes and the conversion details are in [`docs/json-flatten.md`](docs/json-flatten.md) ("Input notation") and [`docs/capl-json-surface.md`](docs/capl-json-surface.md).
 
