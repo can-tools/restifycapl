@@ -1960,7 +1960,7 @@ TEST(NormalizeJsonText, DoesNotTouchTheDocumentStore) {
 
 TEST(TextApiInternalError, NormalizeReportsInternalErrorWhenAllocationFailsAndNormalizedIsEmpty) {
   const std::string json = "{'a':[1,2,3],'b':{'c':'" + std::string(200, 'x') + "'}}";
-  Buffer out(64);
+  Buffer out(512);
   Status status = Status::Ok;
   int failedAllocations = 0;
   {
