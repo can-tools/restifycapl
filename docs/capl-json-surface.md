@@ -313,9 +313,9 @@ a boolean (`long`, `1` or `0`); row 29 returns the number of elements of an
 array. They apply `ToLong`, `ToDouble` and `ToBool` (`docs/type-conversion.md`)
 strictly: nothing is coerced. A JSON string `"42"` is not a number, and `0`/`1`
 is not a boolean. A script that wants coercion reads the text with
-`restifyJsonReadValue` and converts it itself. Each call parses the path once, outside
-the store lock, then walks the parsed tokens against the stored document under
-the lock; nothing is cached or copied.
+`restifyJsonReadValue` and converts it itself. Each call parses the path once,
+outside the store lock, then walks the parsed tokens against the stored
+document under the lock; nothing is cached or copied.
 
 `float&` is passed as a reference to an 8-byte value (type character
 `'F' - 128`). A number too large for a `double` is rejected at parse time
@@ -333,7 +333,9 @@ look at `valueType` if it matters.
 
 1. The out-parameter is set to `0` on entry.
 2. The path text is checked: `-1` (null pointer or size `0`), `-6` (no NUL).
-3. The path syntax is checked: `-11`.
+3. The path syntax is checked: `-11`. This comes before the id check because
+   the path is parsed once before the store lock is taken, so `-11` is
+   reported before `-31`.
 4. Unknown id: `-31`.
 5. The path is resolved against the document: `-12`, `-13`, `-14`.
 6. The type of the node: `-14`, `-15`, and for row 26 `-16`, `-17`.

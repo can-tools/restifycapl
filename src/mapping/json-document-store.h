@@ -39,6 +39,7 @@ class JsonDocumentStore {
                    std::uint32_t valueSize, JsonEntryType& valueType);
 
   // Runs `read` on the stored document under the lock, without a copy. The path is syntax-checked first (PathSyntaxError beats UnknownDocumentId).
+  // Kept for callers that do not need the tokens.
   Status ReadWith(std::uint32_t documentId, std::string_view path,
                   const std::function<Status(const JsonValue&)>& read);
 

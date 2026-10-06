@@ -18,5 +18,6 @@ Status ResolvePath(const JsonValue& document, std::string_view path,
                    const JsonValue*& out);
 
 // Same walk over tokens from ParsePath; never parses, so it cannot fail on syntax.
+// A braced `{}` argument is ambiguous with the string overload; write `PathTokens{}` for an empty list.
 Status ResolvePath(const JsonValue& document, const PathTokens& tokens,
                    const JsonValue*& out);
