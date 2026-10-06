@@ -60,7 +60,9 @@ A developer machine and a CI runner are independent environments. Each provision
 
 **Stage 11 — COMPLETE, REVIEWED CLEAN, COMPILE-VERIFIED IN CANOE (x64).** Eleven asynchronous REST rows appended (rows 8–18): six `…Async` dispatch rows and five lifecycle rows. REV-6 and REV-23 clean; HUM-15 passed for x64 (x86 not separately verified in CANoe — open gap, recorded). HUM-27 (runtime verification) is open, blocked on the same CANoe licensing problem as HUM-14. See §8's Stage 11 entry.
 
-**Next:** **Stage 12 — JSON flattening**, the third export-table append. It decides `categoryName` for JSON operations and closes the interim `data.items[0].name` path-syntax window (§5). HUM-16 (associative-field syntax verification) gates its `.can` examples. HUM-12 is **done** — it is what made Stages 6 and 7 real.
+**Stage 12 — COMPLETE, REVIEWED CLEAN, COMPILE-VERIFIED IN CANOE (x64).** Seven JSON rows appended — rows 19–24 (flattening) and row 25 `restifyJsonNormalize` — all with `categoryName "Json"`; `Status` block `-30..-36`; RFC 6901 paths; the preliminary CAPL framework in `capl/`; the per-architecture local build environment and `make help`. REV-7 clean; CI green on both legs at `5d938c2` (runs 169/170); the x64 CANoe compile confirmed at `5a32872`. The rest of HUM-29 and HUM-30 are open human checks, deferred until a CANoe licence is available together with HUM-14 and HUM-27 — not merge-gating (D14). See §8's Stage 12 entry.
+
+**Next:** **Stage 13 — typed JSON accessors**, the fourth export-table append, started after the human merges Stage 12. HUM-12 is **done** — it is what made Stages 6 and 7 real.
 
 ---
 
@@ -88,15 +90,16 @@ Documentation practice is deliberately not a numbered stage — see §6a.
 - **`/MT` static CRT** for the DLL and every static dependency. Never mix `/MT` and `/MD` in one link. Verify with `dumpbin /directives` — expect `/DEFAULTLIB:LIBCMT`, never `MSVCRT`. **The check must require the release `LIBCMT` token *and* the absence of the debug `LIBCMTD` token**: a bare substring match on `/DEFAULTLIB:LIBCMT` also matches `LIBCMTD` and would pass a debug-CRT lib. This was a live defect caught by REV-4 and is now correct in `ci.yml`; replicate the two-part form anywhere else this check is written.
 - **Bitness parity.** x86 and x64 must both build and behave identically — same sources, same flags (`/std:c++17`, `/EHsc`, `/MT`), same export table. Only `/MACHINE:` and library path differ; the Makefile enforces this structurally via one parameterized rule, and CI now runs both legs of a matrix over the same targets.
 - **Export contract.** The `CAPL_DLL_INFO_LIST4` / `CAPL_DLL_INFO4` table in `src/module/exports.cpp` is the real API. Append-only; never rename, reorder, or remove. Reserved first entry (`CDLL_VERSION_NAME`/`CDLL_VERSION`) always present. Exported functions `extern "C"`.
-- **The export table, as of Stage 11 — this is what every later stage appends to:**
+- **The export table, as of Stage 12 — this is what every later stage appends to:**
   - row 0: `CDLL_VERSION_NAME` / `(CAPL_FARCALL)CDLL_VERSION` — reserved sentinel, never a real function pointer;
   - row 1: `restifyReadVersion(char buffer[], dword bufferSize) : long` — returns 0 on success, `-1` empty buffer, `-2` truncation. Signature unchanged since Stage 5; **renamed once at Stage 10** under the closed exception below;
   - rows 2–7, appended at Stage 10: `restifyGetSync` and `restifyDeleteSync` (8 parameters), `restifyPostSync`, `restifyPutSync`, `restifyPatchSync` (10), `restifyRequestSync` (15). Every input `char[]` carries an explicit `dword` size; `httpStatusCode` and `responseBodyLength` are reference out-parameters (`type - 128`). The detailed signature table lives in `docs/work/stage-10-capl-sync-exports/plans/plan.md` and `docs/capl-sync-surface.md`;
   - rows 8–18, appended at Stage 11: six `…Async` dispatch rows (`restifyGetAsync`, `restifyDeleteAsync` — 5 parameters; `restifyPostAsync`, `restifyPutAsync`, `restifyPatchAsync` — 7; `restifyRequestAsync` — 12) plus five lifecycle rows (`restifyPollResponse` — 2, `restifyAwaitResponse` — 2, `restifyReadResponse` — 6, `restifyDiscardResponse` — 1, `restifyDiscardAllResponses` — 1). Every dispatch row returns a `requestId` (`dword&`, `kRefDword`) instead of a response body; the body is retrieved later through `restifyReadResponse`. All eleven carry `categoryName "Async"`. The detailed signature table (D4) lives in `docs/work/stage-11-capl-async-exports/plans/plan.md` and `docs/capl-async-surface.md`;
+  - rows 19–25, appended at Stage 12, all `categoryName "Json"`: `restifyJsonParse` (3 parameters; `documentId` returned as `dword&`), `restifyJsonCountEntries` (2), `restifyJsonReadEntry` (7), `restifyJsonReadValue` (6), `restifyJsonDiscardDocument` (1), `restifyJsonDiscardAllDocuments` (1; `discardedCount` as `dword&`), and row 25 `restifyJsonNormalize` (4: `char json[]`, `dword jsonSize`, `char normalized[]`, `dword normalizedSize`). All return `long`; out-parameters are zeroed on entry and written only on 0. All seven are allowed from any context (see the realtime bullet below). The detailed signature table lives in `docs/work/stage-12-json-flatten/plans/plan.md` §4 and `docs/capl-json-surface.md`;
   - terminator row, covered by the `#pragma pack(push, 1)` / `pack(pop)` pair through and including the terminating pointer;
   - the **sole** real Windows DLL export is `caplDllGetTable4`; `exports.def` contains `EXPORTS` and that one name, nothing else.
 - **Row 1 was renamed once, from `restifyGetVersion` to `restifyReadVersion`, during Stage 10. This is a closed, one-time exception and is not a precedent.** It was permissible only because of a conjunction that cannot recur: the export table had been compiled against by a real CANoe, but the function had **never been called in a running measurement**, so no observed runtime behaviour depended on the name. From the moment HUM-13's call-and-observe half passes, the append-only rule is absolute again for every row including this one. **A future stage that wants a different name adds a new row and leaves the old one in place.** Anyone citing this entry as evidence that renames are negotiable has the wrong conclusion: it records that the window was open for one row, for one reason, and was deliberately closed.
-- **`categoryName` is presentation metadata and is NOT part of the export contract; it may be changed on existing rows.** Verified at Stage 10: it appears in exactly one place in Vector's documentation ("Name of the function category"), no CAPL syntax can reference it, and the callback interface exposes no category accessor — so no script can bind to it and no compile outcome depends on it. `hintText` is the same class, which is why the plan already mandates specific text there. **`cdlName` and the signature remain untouchable.** The scheme: **`Common`** for non-dispatch operations (`restifyReadVersion`), **`Sync`** and **`Async`** for the two HTTP modes, bare and unprefixed. Stage 12 decides where JSON operations sit — `Common`, or a fourth `Json` group.
+- **`categoryName` is presentation metadata and is NOT part of the export contract; it may be changed on existing rows.** Verified at Stage 10: it appears in exactly one place in Vector's documentation ("Name of the function category"), no CAPL syntax can reference it, and the callback interface exposes no category accessor — so no script can bind to it and no compile outcome depends on it. `hintText` is the same class, which is why the plan already mandates specific text there. **`cdlName` and the signature remain untouchable.** The scheme: **`Common`** for non-dispatch operations (`restifyReadVersion`), **`Sync`** and **`Async`** for the two HTTP modes, bare and unprefixed. Stage 12 settled JSON operations as a fourth group, **`Json`** (rows 19–25).
 - **Two CAPL call-site facts, settled empirically at Stage 10's HUM-25, that constrain every exported operation's usage.** **String literals cannot be passed as a `char[]` argument** — a declared variable is required (`char url[100] = "http://…";` then `restifyGetSync(url, elcount(url), …)`). This eliminates by language rule the hazard that explicit size parameters were guarding against by discipline, and it is why `docs/capl-sync-surface.md` states the declared-array requirement positively rather than warning against hand-counted literal lengths. **String-literal escapes are supported** — `\n`, `\t`, `\\`, `\r`, `\b`, `\"`, `\'` — so hand-assembling JSON in a CAPL string is mechanically fine, merely noisy. CAPL string encoding follows the source file's; a UTF-16 source or a mixed-encoding include yields UTF-8, which the text boundary handles safely because UTF-8 contains no NUL bytes and no ASCII byte can occur inside a multi-byte sequence.
 - **The table stays `CAPL_DLL_INFO4`, and two facts bound any future reconsideration.** `MAXCAPLFUNCPARS` is **10** for `CAPL_DLL_INFO`/`INFO2`/`INFO3`, so Stage 10's 15-parameter row **permanently forecloses** those three versions; `INFO4` and `INFO5` both allow 64. And `INFO5`'s `usageMask` is **not** the mechanical enforcement of the realtime prohibition it appears to be: its flags are **positive requirements** (`CAPL_CONTEXT_TEST` means *needs* a test node), whereas the rule here is a prohibition permitting two contexts — Measurement Setup **or** a test node — and no flag expresses "anything but a simulation node". `CAPL_CONTEXT_TEST` alone would block legitimate Measurement Setup use, which is worse than prose. Anyone revisiting this starts by verifying whether some flag combination expresses the rule, rather than assuming it does.
 - **Only `build-pipeline-engineer` may author or modify the build mechanism; every other agent invokes `make <target>` and nothing else.** A Stage 10 implementer, asked to verify a compile, instead began writing its own batch file with bespoke compiler and linker invocations. The cause was not carelessness: no agent definition carried any build procedure, the `Makefile` deliberately does not call `vcvarsall.bat` and pointed only at `ci.yml` (a GitHub Action an agent cannot execute), and because the environment does not persist between tool calls, the natural two-step attempt fails with "`cl.exe` not recognized" — which misdiagnoses itself as a broken build and makes a bespoke script look like a fix. **Same shape as §6b's finding: a policy stored where it cannot fire is not a policy.** The procedure, the single-call activation pattern and that symptom now live in `msvc-build-conventions`, with a pointer in each coding agent and an explicit instruction to **stop and escalate rather than work around** an unusable build.
@@ -107,9 +110,9 @@ Documentation practice is deliberately not a numbered stage — see §6a.
 - **Never return a raw text pointer** from a CAPL-exposed operation — always write into a caller-supplied buffer with its size. `restifyReadVersion` is the reference implementation of this shape.
 - **1-byte packing must cover the entire export table** through and including the terminating pointer.
 - **Dependency direction.** `src/core/` imports nothing from `src/http/`, `src/registry/`, `src/mapping/`. Only `src/module/` includes the CAPL SDK headers — currently `exports.cpp` is the only `.cpp` under `src/` at all, and it is the only file including those headers. `make test` compiles `src/core`, `src/http`, `src/registry`, `src/mapping` and deliberately excludes `src/module`.
-- **`Status` codes are absorbed, never renumbered — `src/core/status.h` owns the whole numbering space (Stage 8, CPP-18).** `0`/`-1`/`-2`/`-3` are the codes `restifyReadVersion` already ships and that CAPL scripts already depend on at runtime; the enum adopted them as-is rather than starting fresh. `-4..-9` are reserved for **module and boundary-glue codes**; Stage 10 spent `-4` (`MalformedHeaderBlock`), `-5` (`UnknownHttpMethod`) and `-6` (`UnterminatedInputText`) — produced in `src/http/sync-text-api.cpp`, which is why the range is no longer described as module-local — leaving `-7..-9` reserved. `VersionResourceUnavailable = -3` is declared in `src/core/status.h` but is unreachable from `src/core/` — only `src/module/` can produce it — and is declared there anyway so the numbering space has exactly one owner. **The space as of Stage 11:** `-10..-17` spent by Stage 8; `-18..-23` spent by Stage 9's HTTP layer (`NetworkError`, `Timeout`, `TlsError`, `TransportInitFailed`, `InvalidUrl`, `ResponseTooLarge`); **`-24..-29` spent by Stage 11 (D6)** — `-24` `RequestCancelled` (cancel-hook internal, never surfaced to CAPL), `-25` `NoFreeRequestSlot`, `-26` `RequestNotComplete`, `-27` `UnknownRequestId`, `-28` `WaitTimeout`, `-29` `AsyncStartFailed`. **The `-10..-29` block is now full** — the only remaining free range below `Status`'s absorbed codes is `-7..-9` (module/boundary-glue), and any further status code needs a new range decision (R-J, Stage 11 plan). **`ParseError = -10`'s forward reservation is now resolved to Stage 12** (`json-flatten`), not Stage 9: `sync-operations` deliberately does not parse response bodies, returning raw text for the mapping layer to interpret. Adding a code means appending a new value; re-minting an existing one breaks shipped CAPL scripts in exactly the way an export-table renumber would, and no compiler catches either.
-- **The `To*` / `Parse*` boundary is deliberate and stays that way (Stage 8, CPP-2).** The `To*` family takes `const nlohmann::json&` and is **strict**: a JSON string where a number was requested returns `TypeMismatch`, never a silent fallback. `ParseLong`/`ParseDouble` take `std::string_view` and are a **deliberately named lenient escape hatch for raw text** — "lenient" means accepting raw text at all, not tolerating garbage (a valid numeric prefix with a trailing tail is still `ParseError`). **The `To*` family never calls the `Parse*` family.** A later stage that wants coercion adds it explicitly at its own call site; it must not arrive by making a `To*` function quietly fall through.
-- **`data.items[0].name` path syntax is interim, not the target architecture (Stage 8, CPP-3).** Dot for object keys, brackets for array indices. Struct mapping — deferred per `CLAUDE.md`'s Scope, Stage 16 here — is the real destination for structured access and is free to supersede this syntax without archaeology. The caveat is stated in `json-path.h`'s own header, not only here, so it is read at the point of use. **The window is open only while nothing is exported:** once a `.can` example or a CAPL script uses this syntax it becomes a breaking change to alter, and Stages 12–13 are where that door closes.
+- **`Status` codes are absorbed, never renumbered — `src/core/status.h` owns the whole numbering space (Stage 8, CPP-18).** `0`/`-1`/`-2`/`-3` are the codes `restifyReadVersion` already ships and that CAPL scripts already depend on at runtime; the enum adopted them as-is rather than starting fresh. `-4..-9` are reserved for **module and boundary-glue codes**; Stage 10 spent `-4` (`MalformedHeaderBlock`), `-5` (`UnknownHttpMethod`) and `-6` (`UnterminatedInputText`) — produced in `src/http/sync-text-api.cpp`, which is why the range is no longer described as module-local — leaving `-7..-9` reserved. `VersionResourceUnavailable = -3` is declared in `src/core/status.h` but is unreachable from `src/core/` — only `src/module/` can produce it — and is declared there anyway so the numbering space has exactly one owner. **The space as of Stage 12:** `-10..-17` spent by Stage 8; `-18..-23` spent by Stage 9's HTTP layer (`NetworkError`, `Timeout`, `TlsError`, `TransportInitFailed`, `InvalidUrl`, `ResponseTooLarge`); **`-24..-29` spent by Stage 11 (D6)** — `-24` `RequestCancelled` (cancel-hook internal, never surfaced to CAPL), `-25` `NoFreeRequestSlot`, `-26` `RequestNotComplete`, `-27` `UnknownRequestId`, `-28` `WaitTimeout`, `-29` `AsyncStartFailed`. **The `-10..-29` block is full; Stage 12 (D2) opened `-30..-39` for `src/mapping/`:** `-30` `NoFreeDocumentSlot`, `-31` `UnknownDocumentId`, `-32` `DocumentTooLarge`, `-33` `NestingTooDeep`, `-34` `TooManyEntries`, `-35` `InternalError` (any exception caught at the JSON text layer — none crosses into CANoe), `-36` `KeyTextTooLarge` (row 19 only). Free: `-37..-39` (mapping) and `-7..-9` (module/boundary-glue); anything beyond needs a new range decision. **`ParseError = -10` is settled at Stage 12** — `json-flatten` is its first caller, and `sync-operations` still does not parse response bodies. It covers invalid JSON, empty text, invalid UTF-8, an embedded NUL byte in the input text, a NUL character in an object key, and text that is still invalid after the apostrophe conversion (D17).
+- **The `To*` / `Parse*` boundary is deliberate and stays that way (Stage 8, CPP-2).** The `To*` family takes `const JsonValue&` (since Stage 12 the single alias for `nlohmann::ordered_json`, in `src/core/json-value.h`) and is **strict**: a JSON string where a number was requested returns `TypeMismatch`, never a silent fallback. `ParseLong`/`ParseDouble` take `std::string_view` and are a **deliberately named lenient escape hatch for raw text** — "lenient" means accepting raw text at all, not tolerating garbage (a valid numeric prefix with a trailing tail is still `ParseError`). **The `To*` family never calls the `Parse*` family.** A later stage that wants coercion adds it explicitly at its own call site; it must not arrive by making a `To*` function quietly fall through.
+- **JSON paths are RFC 6901 JSON Pointer — contract since Stage 12 (D3, D5; normative table in `docs/json-path.md`).** The interim Stage 8 dot/bracket syntax (`data.items[0].name`) is removed, not kept in parallel; entered by hand it gives `-11`, a loud error. `""` is the whole document and `/` is the key `""` at the root. `~1` is decoded before `~0`. At an object every token is a key, including `"0"`. At an array only `0` or `[1-9][0-9]*` is an index; `-` or a number beyond `uint32` gives `-13`. The keys `restifyJsonReadEntry` lists use the same format, and each one resolves back to its own value through `restifyJsonReadValue`. Uses its own parser, not `nlohmann::json_pointer`, which throws. Once a release ships, changing this syntax breaks compatibility (Stage 12 R1).
 - **`lib/<arch>/` is product-linked; `lib/gtest/<arch>/` is test-only** and must never enter the DLL link line.
 - **Tests run outside CANoe.** The CAPL export glue is the documented exception (`cpp-testing-conventions`) — it can only be verified inside a real CANoe instance, which is why `src/module` is excluded from the test compile and why HUM-13 is irreplaceable.
 - **No version number is ever typed by hand.** `vcpkg.json`'s `version-string` is manifest boilerplate and is not an exception — it feeds nothing. `restifyReadVersion` reads the DLL's *own* version resource at runtime (`GetModuleHandleExA` / `GetFileVersionInfoA`), so even the version string CAPL sees derives from the Git tag through `version.rc` rather than from a literal.
@@ -120,9 +123,53 @@ Documentation practice is deliberately not a numbered stage — see §6a.
 - **No stage work is committed to `main` directly.** From Stage 7 onward all work happens on a branch and reaches `main` only through a PR — see Stage 7 for topology, naming, merge criteria and automation.
 - **Agents cannot `git tag`, and cannot push to `main`.** HUM-21 is **applied**: the blanket `git push` deny is narrowed to the working-branch prefixes, while `main`, bare `git push`, force-push, tag-push and branch-deletion forms stay denied. The structural control is GitHub branch protection, not `settings.json` — **"the server refuses, and the client discourages."**
 - **TLS verification is per-request-switchable and safe by default (Stage 9, D15/CPP-4).** `RequestOptions::skipTlsVerification` is a `bool` defaulting to `false`; `false` sets `CURLOPT_SSL_VERIFYPEER=1`/`VERIFYHOST=2`, `true` sets both to `0`. Both options are always set explicitly, in both branches — setting one without the other is the classic half-disabled-TLS bug. There is **no global switch, environment variable, build-time define, or derived value** that can influence the field, and `sync-operations` forwards it unmodified with no branch that reads it. **This is a standing API property, not an implementation detail: Stage 10 must not expose it to CAPL by reflex.** Any future path that can disable verification without the immediate caller asking for it is a defect, because the failure is invisible — everything appears to work, including against a hostile peer.
-- **Synchronous HTTP operations are unsafe in CANoe's realtime branch, by Vector's own rule.** The CAPL DLL documentation states that in the Simulation Setup realtime branch *"file accesses and other blocking calls are prohibited"* and dynamic memory management is not recommended; functions called there run on a high-priority thread. A synchronous HTTP call is a blocking call and libcurl allocates freely, so `sync-operations` is Measurement-Setup/test-node only. This caveat must travel with the code: it is in `sync-operations.h` and `docs/http-layer.md` now, and **Stage 10 must carry it into the export-table description text, Stage 12 into the `.can` examples.** It is also why Stage 11's async layer is the only conforming way to call REST from a simulation node — not a convenience. **That claim is precise, not general, and Stage 11 fixed its exact boundary (D4, D11, D13, D14, D15): the six dispatch rows, `restifyPollResponse`, `restifyReadResponse` and `restifyDiscardResponse` are realtime-safe — none of the four blocks or touches the heap on the caller's thread. `restifyAwaitResponse` blocks and carries this same caveat. `restifyDiscardAllResponses` does not block, but it frees memory on the caller's thread (D8, D15) and so is likewise Measurement-Setup/test-node only, called from `on stopMeasurement` or a test node rather than a Simulation Setup timer.**
+- **Synchronous HTTP operations are unsafe in CANoe's realtime branch, by Vector's own rule.** The CAPL DLL documentation states that in the Simulation Setup realtime branch *"file accesses and other blocking calls are prohibited"* and dynamic memory management is not recommended; functions called there run on a high-priority thread. A synchronous HTTP call is a blocking call and libcurl allocates freely, so `sync-operations` is Measurement-Setup/test-node only. This caveat must travel with the code: it is in `sync-operations.h` and `docs/http-layer.md`, and Stage 10 carried it into the export-table description text. It is also why Stage 11's async layer is the only conforming way to call REST from a simulation node — not a convenience. **That claim is precise, not general, and Stage 11 fixed its exact boundary (D4, D11, D13, D14, D15): the six dispatch rows, `restifyPollResponse`, `restifyReadResponse` and `restifyDiscardResponse` are realtime-safe — none of the four blocks or touches the heap on the caller's thread. `restifyAwaitResponse` blocks and carries this same caveat. `restifyDiscardAllResponses` does not block, but it frees memory on the caller's thread (D8, D15) and so is likewise Measurement-Setup/test-node only, called from `on stopMeasurement` or a test node rather than a Simulation Setup timer.** **Rows 19–25 (Stage 12, D10/D11) are a deliberate departure from this rule, not a precedent for rows 2–18:** they allocate but are allowed from any context, including Simulation Setup. The risk is described only in `docs/capl-json-surface.md` and one README sentence. Their `hintText` is a plain behaviour description with no realtime classification, which deliberately differs from rows 1–18.
 - **A `.gitkeep` is removed in the same change that adds the first real tracked file to its directory (Stage 9, D17/BPE-31).** Never swept separately, never left behind "to clean up later," never removed from a directory that is still empty. The rule's substance lives in `msvc-build-conventions`'s Directory conventions section, which already owns directory semantics; `build-pipeline-engineer` carries a one-line pointer.
 - **Stage 11's async worker-lifecycle and heap-discipline invariants are now standing, not stage-local** (D8, D9, D18; detailed record `docs/work/stage-11-capl-async-exports/plans/plan.md`, normative version `docs/capl-async-surface.md`). **Design 3 (no pin):** a worker takes a module reference with `GetModuleHandleExW(...FLAG_FROM_ADDRESS...)` before `CreateThread` and exits only via `FreeLibraryAndExitThread` while still holding that same reference — so **references held is always ≥ live workers**, `DllMain` does nothing thread-related, and the slot table's static destructor only frees memory, never waits, joins or signals. **The two curl invariants that make this race-free:** `CURLOPT_QUICK_EXIT` is never set, and the easy handle is created and destroyed inside `HttpClient::Perform` — verified against the real 8.21.0 source (`Curl_thrdpool_destroy` joins every DNS thread on cleanup unless quick-exit is set), so no curl-created thread ever outlives `Perform`. **Only dispatch and `restifyDiscardAllResponses` allocate or free on the caller's thread** — poll, await, read and single discard never touch the heap. **Nothing heavy runs at DLL load**: no thread, module reference, or allocation before the first dispatch, because the CAPL compiler fully loads the DLL just to read its export table. **The table lock is never held across `Perform`** — every slot transition happens under one mutex, but the transfer itself always runs outside it. Any future concurrent or worker-based layer inherits this invariant set by default; deviating from any one of them re-opens R-A/R-B/R-C from the Stage 11 plan's risk register.
+- **JSON document contract (Stage 12; D3–D7, D12, D19–D21; detail in `docs/json-flatten.md` and `docs/capl-json-surface.md`).** The following are contract from the first release:
+  - **Entry order:** document order, depth-first pre-order. With duplicate keys the last value wins, at the position of the first occurrence.
+  - **Key format:** RFC 6901, and every listed key resolves back to its own value.
+  - **`valueType` values:** 0 absent, 1 string, 2 number, 3 bool, 4 null, 5 emptyObject, 6 emptyArray.
+  - **The D5 edge rules.**
+
+  **Limits:** 8 document slots, 1 MiB input (counted before the apostrophe conversion), depth 64, 10,000 entries, 4 MiB total flattened key text. All are checked during the SAX pass before any DOM is built, and the first limit reached in the text decides. Raising a limit later is compatible; lowering one breaks compatibility.
+
+  **NUL rejection** is also contract from the first release: an embedded NUL byte in the input text, or a NUL character in an object key, gives `-10`. Adding it later would turn documents that used to parse into `-10`. A NUL inside a string value is accepted and stored with its full length; CAPL sees that value only up to the first NUL.
+
+  No exception crosses the boundary: each of the seven text-layer functions zeroes its out-parameters and maps any exception to `-35`.
+- **JSON notation — apostrophe-quoted strings (Stage 12, D24; detail in `docs/json-flatten.md`, "Input notation").** JSON written in CAPL may use `'…'` for strings instead of `\"…\"`. One conversion function (`src/mapping/json-quotes`) serves both rows: row 19 applies it when parsing, and row 25 returns the converted text after a syntax-only check (no store, no depth/entry/key-text limits).
+
+  Conversion rules:
+  - **Outside strings,** only `'` changes: it opens an apostrophe string and is written as `"`.
+  - **Inside a double-quoted string,** everything is copied, and `\x` pairs are not interpreted (so `\'` there gives `-10`).
+  - **Inside an apostrophe string,** `\'` becomes `'`, every other `\x` pair is copied, a raw `"` becomes `\"`, and a raw `'` closes the string.
+  - Text without apostrophes comes out byte-identical.
+
+  **Ambiguity rule:** an apostrophe inside a value written in apostrophes, e.g. `'it's'`, is ambiguous. The string ends at the second apostrophe and the result is `-10`. Correct forms:
+  - **A:** double quotes (CAPL source `\"it's\"`).
+  - **B:** `\'`, which in CAPL source is `\\'`.
+
+  **Form B from CAPL is not yet verified** (HUM-29 item (7), deferred until a CANoe licence is available). The accepted notation and these rules are contract from the first release; accepting more notations later is compatible, narrowing them is not. **Request bodies are always sent byte for byte:** rows 4–7 and 10–13 never convert, and conversion happens only through an explicit row 25 call.
+- **CAPL framework (Stage 12, D22; preliminary; detail in `docs/capl-framework.md`).** The DLL plus `capl/` form the framework.
+
+  **Fixed, user-defined layout:**
+  - `capl/*.can` — verification nodes.
+  - `capl/includes/includes.cin` — the single master include, and the only file containing `#pragma library` and library includes. Architecture is selected by `#if X64` in client-side CAPL, not a `.vmodule`.
+  - `capl/includes/libs/*.cin` — one library per `categoryName` group.
+  - `capl/includes/dll/win-x64|win-x86/` — holds only `.gitkeep`. DLLs are copied there by hand and never committed.
+
+  **Rules:**
+  - All paths are relative with the `.\` prefix; they resolve against the containing file (confirmed in CANoe). Every `.can` includes only `.\includes\includes.cin`.
+  - The first line of every `.can`/`.cin` is `/*@!Encoding:1250*/`.
+  - No CAPL keyword is used as an identifier (`key` is one). No associative fields, no `const` in `variables`, no version numbers, no `#pragma library` version argument.
+  - **Wrapper name = row name with `restify` replaced by `restLib`.** Wrappers are thin: same parameters, sizes via `elcount()`, status returned unchanged.
+  - **Every export-row append adds its 1:1 wrapper in the same change** (also stated in `CLAUDE.md`'s Scope).
+  - Helpers only print or release (`restLibStatusText`, `restLibJsonDump`).
+  - Nothing from the deferred modules (struct mapping, body building). No value-to-CAPL-type conversion before Stage 13's rows.
+  - Not packaged into releases; users take `capl/` from the same commit or tag as the DLL.
+
+  **Preliminary status:** wrapper names and parameters may still change, with each change recorded in CHANGELOG, until the user decides to make the layer append-only (§14). HUM-16 is optional for the framework, which uses no associative fields.
+- **Local build environment (Stage 12, D23; detail in `docs/development-environment.md`).** `scripts/setup-dev-env.ps1` stores each architecture's MSVC environment as user environment variables `RESTIFY_MSVC_X64_{PATH,INCLUDE,LIB,LIBPATH}` and `RESTIFY_MSVC_X86_*` (`HKCU`, no administrator rights; `…_PATH` holds only the `vcvarsall` additions). The `Makefile` applies the set matching `ARCH` when present and otherwise uses the shell's own environment (CI). It checks nothing and never calls `vcvarsall`. Both architectures and `make all` build from any shell opened after the setup run. Re-run the setup after a Visual Studio / Build Tools update. Bare `make` runs `help` and builds nothing — a deliberate departure from GNU's `all` default. Unchanged: agents' verification default (x64 locally, x86 via CI) and the `cmd.exe` activation form in `msvc-build-conventions`.
 
 ---
 
@@ -761,7 +808,7 @@ With the configuration now verified present, the three consequences above are re
 
 ## 8. Phase 3 — Business Logic & CAPL Surface
 
-Stages 10–13 each append to the export table. Every append requires `code-reviewer`, a human gate, and a `CHANGELOG.md` `[Unreleased]` entry in the same change. Every appended operation follows the `restify<VerbNoun>` convention fixed at Stage 5.
+Stages 10–13 each append to the export table. Every append requires `code-reviewer`, a human gate, a `CHANGELOG.md` `[Unreleased]` entry and — since Stage 12 — its 1:1 `restLib` wrapper in `capl/includes/libs/`, all in the same change. Every appended operation follows the `restify<VerbNoun>` convention fixed at Stage 5.
 
 ### Stage 8 — Core pure logic (level 0) — COMPLETE, REVIEWED CLEAN
 
@@ -775,7 +822,7 @@ Stages 10–13 each append to the export table. Every append requires `code-revi
 
 **CPP-16 — DONE (`202c7b0`) — no longer optional.** Stage 5's REV-3 follow-up is resolved in favour of doing it (D4 in the stage plan), and this entry's former "skip without ceremony" framing is withdrawn. `src/core/buffer-copy.{h,cpp}` holds the pure bounds-checked copy; `CopyOwnVersionString` in `src/module/exports.cpp` is rewired onto it and now uses `Status` symbols in place of the bare `0`/`-1`/`-2`/`-3` literals — a symbol introduction, not a renumbering. `exports.cpp` deliberately keeps its own early `-1` guard and early `buffer[0] = '\0'` ahead of the first Win32 call, plus all five `-3` resource-failure branches, unmoved: collapsing those into `CopyToBuffer` would have pushed the null check behind `GetModuleHandleExA` and stopped the `-3` paths clearing the caller's buffer. **Behaviour-preserving, and verified independently twice** — by the implementer, then by REV-19 re-deriving it from the diff rather than trusting that report.
 
-**TEST-2 / TEST-3 / TEST-12 — DONE (`70adc9f`, `b5aca63`, `3b17688`).** `tests/core/type-conversion_test.cpp` (45 cases), `tests/core/json-path_test.cpp` (24 cases), `tests/core/buffer-copy_test.cpp` (6 cases) — the last also deleting the placeholder `tests/core/sanity-test.cpp`, so the suite is now uniformly `_test.cpp`. **TEST-12 is no longer optional either.**
+**TEST-2 / TEST-3 / TEST-12 — DONE (`70adc9f`, `b5aca63`, `3b17688`).** `tests/core/type-conversion_test.cpp` (44 cases — recorded here as 45 until the Stage 12 fold-in recounted the `TEST` blocks), `tests/core/json-path_test.cpp` (24 cases), `tests/core/buffer-copy_test.cpp` (6 cases) — the last also deleting the placeholder `tests/core/sanity-test.cpp`, so the suite is now uniformly `_test.cpp`. **TEST-12 is no longer optional either.**
 
 **REV-19 — CLEAN, ZERO MUST-FIX.** Full-branch review of `git diff main...HEAD`. `CAPL_DLL_INFO_LIST4[]` and `exports.def` are untouched throughout — zero export-table changes. Two Should-fix notes: one applied (`763cd4e`, a comment trim in `exports.cpp`), one deliberately declined as "worth trimming if touched again" (a redundant rationale block in `status.h`'s file header) and explicitly not required.
 
@@ -809,7 +856,7 @@ Stages 10–13 each append to the export table. Every append requires `code-revi
 
 **Human approval gate: NO — and it held.** No export-table row added, renamed or reordered; `exports.def` untouched; no `/MT` change; nothing newly published. `exports.cpp` appears in the diff for comment edits only. BPE-32's `ci.yml` and `auto-pr.yml` edits touch comments and message strings, nothing that changes what is built, tested or shipped.
 
-**Obligations this stage creates.** Stage 10 must carry the realtime-branch caveat into the export-table description text (§5). Stage 11 owns the response-store design **from scratch** — Stage 9 deliberately built none and did not prefigure one, including whether synchronous responses need caching there once Stage 12/13's accessors exist. Stage 12 must carry the realtime-branch caveat into the `.can` examples. The path syntax window (§5) is still open and closes at Stages 12–13.
+**Obligations this stage creates.** Stage 10 must carry the realtime-branch caveat into the export-table description text (§5). Stage 11 owns the response-store design **from scratch** — Stage 9 deliberately built none and did not prefigure one, including whether synchronous responses need caching there once Stage 12/13's accessors exist. The path syntax window (§5) closed at Stage 12 (RFC 6901 JSON Pointer).
 
 **Discharged by Stage 11 (OQ11).** The open "does the response store need to cache synchronous responses too" question above is answered: **no.** Sync responses are not cached anywhere; `sync-operations` still copies straight into the caller's CAPL `char[]` and Stage 11's response store holds only async results, keyed by `requestId`. This obligation is closed, not carried forward again.
 
@@ -831,7 +878,7 @@ Stages 10–13 each append to the export table. Every append requires `code-revi
 
 **What Stage 10 deliberately did not do.** No response headers, no response store or re-read, no timeout exposure beyond the generic row, no async anything, no JSON parsing, no `.can` examples, no `INFO5`. **Nothing struct-shaped, because the ABI cannot express it** — `parTypes` is one character per parameter and no table version has any field describing a compound layout, so this is a platform property no C++-side design can recover. The friendlier request-building layer is Stage 17.
 
-**Obligations this stage creates.** Stage 11 inherits the fixed async naming scheme (§5) and owns response state from scratch. Stage 12 must carry the realtime caveat and the declared-array requirement (§5) into its examples, and decides where JSON operations sit in the `categoryName` scheme. Stage 14's BPE-12 inherits a case-sensitivity trap (§9).
+**Obligations this stage creates.** Stage 11 inherits the fixed async naming scheme (§5) and owns response state from scratch. The declared-array requirement (§5) binds the future `.can` examples and the CAPL framework in `capl/`; Stage 12 settled the `categoryName` question (`Json`). Stage 14's BPE-12 inherits a case-sensitivity trap (§9).
 
 ### Stage 11 — Expose asynchronous REST to CAPL (second contract append) — COMPLETE, REVIEWED CLEAN, COMPILE-VERIFIED IN CANOE (x64)
 
@@ -859,22 +906,77 @@ Stages 10–13 each append to the export table. Every append requires `code-revi
 
 **R-E — accepted risk, recorded explicitly.** The stage merges backed by full-branch review, a real CANoe compile check (x64), and deterministic gated-fake unit tests of the state machine and concurrency on both architectures — but with **no automated evidence** at merge for: (i) design 3's real unload path (`FreeLibraryAndExitThread` and the DLL actually unloading after the 30 s idle timeout); (ii) the cancel hook aborting a live libcurl transfer within about a second; (iii) the shims called through the table's function pointers on x86 specifically (the calling-convention class of risk); (iv) real CANoe/VN/VT load-and-unload behaviour. A local real-DLL smoke harness covering (i)–(iii) without CANoe was proposed and **explicitly declined by the user**, on the grounds that the stage merges before full CANoe verification in any case, as Stage 10 did. All four are on HUM-27's checklist; the harness stays available as a later, independent addition if HUM-27 is delayed long enough, or if one of the four fails in the field.
 
-**What Stage 11 deliberately did not do.** No response headers (still deferred from Stage 10). No `skipTlsVerification` exposure, no change to revocation checking. No libcurl multi interface. No CAPL callbacks and no VIA use in `src/http/`. No pin. No `DllMain` logic. No measurement-start/stop hooks, no node-layer (`VIAModuleApi`) exports. No cancel-but-keep-the-slot row, no "poll any" row. **No caching of synchronous responses — this discharges Stage 9's OQ11** (see Stage 9's entry above). No JSON parsing. No `.can` examples (deferred to Stage 12, CPP-11, behind HUM-16). No `INFO5`. No real-DLL smoke harness (declined; R-E). No change to rows 0–7, `exports.def`, `sync-operations.*` or `sync-text-api.*`.
+**What Stage 11 deliberately did not do.** No response headers (still deferred from Stage 10). No `skipTlsVerification` exposure, no change to revocation checking. No libcurl multi interface. No CAPL callbacks and no VIA use in `src/http/`. No pin. No `DllMain` logic. No measurement-start/stop hooks, no node-layer (`VIAModuleApi`) exports. No cancel-but-keep-the-slot row, no "poll any" row. **No caching of synchronous responses — this discharges Stage 9's OQ11** (see Stage 9's entry above). No JSON parsing. No `.can` examples (CPP-11; deferred again by Stage 12, D13). No `INFO5`. No real-DLL smoke harness (declined; R-E). No change to rows 0–7, `exports.def`, `sync-operations.*` or `sync-text-api.*`.
 
-**Obligations this stage creates.** Stage 12 still decides `categoryName` for JSON operations (`Common` or a new `Json` group, §5) and still closes the interim `data.items[0].name` path-syntax window (§5) — both unchanged by this stage. Stage 12 must also carry the realtime caveat and the declared-array requirement into its `.can` examples, as Stage 9 and Stage 10 already required. **Eighteen exported names are now permanent** (§5's fixed-name list); Stage 14's BPE-12 inherits the `"Sync"`-is-a-substring-of-`"Async"` case-sensitivity trap live for the first time, since both families now coexist in the table (R-K). HUM-14 and HUM-27 both carry forward past this stage's merge, open.
+**Obligations this stage creates.** Stage 12 settled `categoryName` for JSON operations (`Json`) and closed the path-syntax window (RFC 6901, §5). The declared-array requirement binds the future `.can` examples and the CAPL framework. **Eighteen exported names are now permanent** (§5's fixed-name list); Stage 14's BPE-12 inherits the `"Sync"`-is-a-substring-of-`"Async"` case-sensitivity trap live for the first time, since both families now coexist in the table (R-K). HUM-14 and HUM-27 both carry forward past this stage's merge, open.
 
-### Stage 12 — JSON flattening (highest user value — ship before struct mapping)
-**CPP-9** — `src/mapping/json-flatten.*`: dot-notation key/value map, key count, key-by-index, value-by-key.
-**TEST-7** — coverage including deeply nested objects, arrays, empty/malformed documents.
-**HUM-16 — Mandatory before any `.can` example is written:** verify associative-field syntax against the official CANoe help (`Help → CAPL → General → Associative Fields`). The correct form has **no extra keyword before the type** — `char[30] name[char[]];`. An invented keyword was copied across many docs and example files last time.
-**CPP-10** — Append flattening operations; CHANGELOG entry. **CPP-11** — `examples/*.can`, only after HUM-16. **REV-7**. **Human approval gate: YES.**
+### Stage 12 — JSON flattening (third contract append) — COMPLETE, REVIEWED CLEAN, COMPILE-VERIFIED IN CANOE (x64); RUNTIME CHECKS DEFERRED UNTIL A CANOE LICENCE
 
-**Carried in from Stage 9:** the `.can` examples must carry the realtime-branch caveat for any synchronous call they demonstrate (§5). **Carried in from Stage 10:** the examples must model **declared `char[]` variables with `elcount()`, never string literals**, which CAPL does not accept as `char[]` arguments (§5); and Stage 12 decides whether JSON operations take `categoryName` `Common` or a new `Json` group (§5). `ParseError = -10`'s forward reservation resolves **here** — `sync-operations` deliberately does not parse, so `json-flatten` is its first caller.
+**Detailed record: `docs/work/stage-12-json-flatten/plans/plan.md`** — left in place as the detailed record per §7.10 condition 3, as for Stages 8–11. It carries D1–D24, the rows 19–25 signature table and status codes (§4), the CAPL wrapper-name table, the REV-7 checklist and the risk register R1–R31 as **normative specifications**. The user-facing references are `docs/capl-json-surface.md`, `docs/json-flatten.md`, `docs/json-path.md` and `docs/capl-framework.md`. This entry is the summary.
+
+**This entry replaces the pre-stage sketch.** That sketch had dot-notation keys, `examples/*.can` behind HUM-16, and the realtime caveat carried into the examples. None of these shipped in that form: keys are RFC 6901 JSON Pointers, examples are deferred (D13), and rows 19–25 carry no realtime classification (D10, D11; §5).
+
+**What shipped.**
+- **Rows 19–24 (CPP-10):** a parsed JSON document held DLL-side under a `dword documentId`. 0 means "no document"; ids come from a clock-seeded counter, and a discarded id is rejected with `-31` (D1). The document is flattened once at parse time into key/value/`valueType` entries in document order (D6, D7) and read by index or by RFC 6901 path.
+- **Row 25 `restifyJsonNormalize` (CPP-40):** converts apostrophe-quoted JSON to standard JSON and checks its syntax (D24). It does not touch the document store. Its wrapper `restLibJsonNormalize` landed in the same change.
+- All seven rows use `categoryName "Json"` (D9). Rows 0–18 and `exports.def` are unchanged.
+- **Core (CPP-35, CPP-34):** `JsonValue` = `nlohmann::ordered_json` is the single alias (D7). `json-path` is rewritten to RFC 6901 per D5 with its own parser; the interim syntax is removed.
+- **Mapping (CPP-9, CPP-32, CPP-36, CPP-40):**
+  - `json-flatten`: SAX pass with limits before the DOM is built; iterative pre-order flatten; `DescribeLeaf` is the only source of leaf text and type (D18).
+  - `json-document-store`: 8 slots; parse outside the lock (D16).
+  - `json-text-api`: seven text-layer functions with a catch-all mapping to `-35` (D15).
+  - `json-quotes`: the one apostrophe conversion, shared by rows 19 and 25.
+- **`Status` `-30..-36` (CPP-33, CPP-36), limits (D12, D19) and NUL rules (D20, D21)** — see §5. `-36` (4 MiB key text) was added after REV-7 found that a 1 MiB text within the other limits could amplify into gigabytes of key text and end in `-35`.
+- **Preliminary CAPL framework `capl/` (CPP-37, CPP-38, CPP-39, CPP-41; D22)** — see §5. CPP-39 fixed the first CANoe compile: six errors, all from `key` used as an identifier. It also introduced the `.\` include form and the encoding header.
+- **Local build environment and `make help` (BPE-35; D23)** — see §5.
+- **Wording changes:**
+  - `CLAUDE.md` layout/scope lines: text approved in HUM-31.
+  - `CLAUDE.md` Build section and `msvc-build-conventions`: text approved in HUM-32.
+  - `project-docs` setup-before-build sentence: text approved in HUM-33.
+- **README** updated by `docs-writer` (step 14): `Json` operations, one realtime sentence, a pointer to the framework, the build section per D23, and the apostrophe notation with form B marked as not yet verified in CANoe.
+- **Tests (TEST-7, TEST-18 – TEST-22):** offline only, both architectures.
+  - `json-path`: the 24 original `TEST` blocks are mapped, giving 65 after the rewrite.
+  - `type-conversion`: 44 blocks with unchanged expectations, plus 1 order test in `json-value_test.cpp` (45 in total).
+
+**Reviews, verification and gates.**
+- **HUM-28 — SATISFIED.** The Stage 12 plan was accepted and its §4 table signed, including `-35`, `-36` and row 25.
+- **REV-7 — CLEAN, zero Must-fix.** This covers the full-branch review (step 12) and two delta reviews: step 12c (D19–D24 and the framework) and step 12f (CPP-42).
+- **CI green on both legs at `5d938c2`** (runs 169/170).
+- **HUM-29 — compile part PASSED (x64, `5a32872`).** Rows 19–25 are recognised, and `includes.cin`, the four libraries and both nodes compile. This confirms item (2), `.\` paths resolving relative to the containing file, and item (5), no name clashes and no CAPL keyword used as an identifier.
+- **Still OPEN:** HUM-29 items (1), (3), (4), (6) and (7), and **HUM-30** (runtime verification with both nodes). They are deferred until a CANoe licence is available, together with HUM-14 and HUM-27 (Stage 12 R31).
+- **These open checks are not merge-gating, by user decision (D14).** For this stage, §7.8 criterion 3 is met by the x64 compile alone. Per §7.10's guardrail, none of these checks is recorded as passed.
+- **32-bit CANoe is not checked;** the x86 DLL is verified by CI only (R30).
+- **Recorded scope mismatch, step 11g.** The Stage 12 plan assigned the HUM-33 edit of `.claude/skills/project-docs/SKILL.md` to `docs-writer`. `docs-writer` refused it as outside its scope. The same user-approved sentence was applied by `build-pipeline-engineer` instead (commit `10178cd`). The text is exactly what HUM-33 approved; only the executing agent differs from the plan.
+- **HUM-34 — locale-leak hardening proposed, not implemented.** At `25f2f6f`, `make test ARCH=x86` failed 3 of 571 tests locally while CI was green. The fix is in `569fc6a`: the locale is restored by value, and the flatten tests parse with `std::from_chars`. Two hardenings were proposed, and the user chose to observe in later stages instead:
+  - a GoogleTest listener that fails any test leaving `LC_NUMERIC` changed;
+  - CI failing, rather than skipping, the `de-DE` test when the locale is unavailable.
+
+  The findings and the decision are recorded in `docs/ci-pipeline.md` (`b6df13b`). No standing rule for tests that touch global state was adopted.
+- **HUM-16 — optional and non-blocking for this stage.** The framework uses no associative fields and the examples are deferred.
+
+**What Stage 12 deliberately did not do.**
+- No `examples/*.can`: CPP-11 is deferred (D13) and `examples/.gitkeep` stays.
+- No change to rows 0–18 or `exports.def`. The body-taking rows 4–7 and 10–13 still send bytes unchanged (D24 (5)).
+- No typed accessors and no value-to-CAPL-type conversion (Stage 13).
+- No struct mapping or body building, in the DLL or in `capl/`.
+- No `ci.yml` change, no new dependency, no `INFO5`.
+
+**Obligations this stage creates.**
+- **Stage 13** inherits the document store, the path syntax and the wrapper rule (see its entry).
+- **When a CANoe licence is available,** run the rest of HUM-29 (x64; repeat the compile on the then-current commit first), then HUM-30. Then make a separate small follow-up change:
+  - update the "verified" list in `docs/capl-framework.md`;
+  - `docs-writer` replaces the README "form B not yet verified" note with the result;
+  - record the result in this document.
+
+  Defects found go through new planned steps, and the affected checks are repeated.
+- **Merge:** done by the human (`--no-ff`, §7.8). Stage 13 starts afterwards.
 
 ### Stage 13 — Typed JSON accessors
 **CPP-12** — `src/mapping/json-accessors.*`: typed point reads, array helpers, optional cache.
 **TEST-8** — coverage including type mismatches per accessor and cache invalidation between responses.
 **CPP-13** — Append accessor operations; CHANGELOG entry. **REV-8**. **Human approval gate: YES.**
+
+**Obligations inherited from Stage 12.** Stage 13 starts after the human merges Stage 12, and works on the Stage 12 document (`documentId`, the 8-slot store) addressed by RFC 6901 paths (§5). Every new row gets its `restLib` wrapper in `capl/includes/libs/restify-json.cin` in the same change (§5, D22 (8)). Value-to-CAPL-type conversion enters the framework only with those rows. New `Status` codes come from `-37..-39` or need a new range decision. CPP-12's "optional cache" and TEST-8's "cache invalidation between responses" predate the Stage 12 document store; Stage 13's own plan re-decides them.
 
 ---
 
@@ -927,7 +1029,7 @@ Raised during Stage 9 (OQ9). The governing principle, which is broader than any 
 
 ## 12. Task index by agent
 
-### `build-pipeline-engineer` — 34 tasks
+### `build-pipeline-engineer` — 35 tasks
 
 | ID | Stage | Task | Status |
 |---|---|---|---|
@@ -965,8 +1067,9 @@ Raised during Stage 9 (OQ9). The governing principle, which is broader than any 
 | BPE-29 | 8 | `Makefile`: `/I src` added to `INCLUDES` and `TEST_INCLUDES` | **DONE — `f6a214d`** |
 | BPE-33 | 11 | `Makefile`: header-dependency tracking via `cl.exe /sourceDependencies`, closing a stale-`.obj` incremental-build hazard | **DONE — `3f56f9e`** |
 | BPE-34 | 11 | Build-verification policy: local defaults to x64, x86 via CI matrix before human gates; `CLAUDE.md` `make all` correction; scratch-dir rule for ad-hoc probes | **DONE — `922a4b0`** |
+| BPE-35 | 12 | D23: `setup-dev-env.ps1` stores and verifies the eight `RESTIFY_MSVC_*` user variables; `Makefile` per-`ARCH` substitution, `.DEFAULT_GOAL := help`, `help` target; `docs/development-environment.md`; CHANGELOG `Changed` bullet | **DONE** |
 
-### `cpp-implementer` — 31 tasks
+### `cpp-implementer` — 42 tasks
 
 | ID | Stage | Task | Status |
 |---|---|---|---|
@@ -992,9 +1095,20 @@ Raised during Stage 9 (OQ9). The governing principle, which is broader than any 
 | CPP-29 | 11 | Dedupe `ForbidsBody` → shared `MethodForbidsBody` in `http-client.*` | **DONE — `30d3bad`** |
 | CPP-30 | 11 | Close dispatch-serialization race + worker idle-wait spurious exit (`wakeGeneration_`) in `async-operations.*` | **DONE — `0c28584`** |
 | CPP-31 | 11 | Dedupe `MakeOptions` → shared `MakeRequestOptions` in `http-client.*`; stale comment fix | **DONE — `ef3ba18`** |
-| CPP-9 | 12 | `src/mapping/json-flatten.*` | |
-| CPP-10 | 12 | Append flattening operations + CHANGELOG entry | |
-| CPP-11 | 12 | `examples/*.can` — only after HUM-16 | |
+| CPP-32 | 12 | `json-document-store.*` (8 slots, D1, D16) + `json-text-api.*` (D15, D18); `docs/capl-json-surface.md` | **DONE** |
+| CPP-33 | 12 | `Status` `-30..-35`; `docs/status-codes.md` | **DONE** |
+| CPP-34 | 12 | `src/core/json-path.*` rewritten to RFC 6901 (D5); `docs/json-path.md` | **DONE** |
+| CPP-35 | 12 | `src/core/json-value.h` (`JsonValue` = `nlohmann::ordered_json`); core moved to the alias | **DONE** |
+| CPP-36 | 12 | Key-text limit `-36` (D19); NUL rules (D20, D21) | **DONE** |
+| CPP-37 | 12 | CAPL framework: `includes.cin`, four libraries, `dll/` `.gitkeep`s, `docs/capl-framework.md` (D22) | **DONE** |
+| CPP-38 | 12 | Verification nodes `capl/restify-verify-http.can`, `capl/restify-verify-json.can` | **DONE** |
+| CPP-39 | 12 | Fixes from the first CANoe compile: `key` → `keyText`, `.\` include form, encoding header | **DONE** |
+| CPP-40 | 12 | D24: `json-quotes.*`, conversion in row 19, `NormalizeJsonText`, row 25 + `restLibJsonNormalize` | **DONE — REV-7 (delta) clean** |
+| CPP-41 | 12 | D24 checks in both verification nodes | **DONE** |
+| CPP-42 | 12 | REV-7 nits: `NormalizeJsonText` catch-all clears `normalized`; doc rewrap; verified list in `docs/capl-framework.md` | **DONE — REV-7 (delta) clean** |
+| CPP-9 | 12 | `src/mapping/json-flatten.*` — SAX limits, pre-order flatten, `DescribeLeaf`; `docs/json-flatten.md` | **DONE** |
+| CPP-10 | 12 | Append rows 19–24 + six CHANGELOG bullets | **DONE — REV-7 clean** |
+| CPP-11 | 12 | `examples/*.can` | **DEFERRED by Stage 12 (D13)** — revisited with HUM-16 and the `project-docs` examples rules when `examples/` is taken up |
 | CPP-12 | 13 | `src/mapping/json-accessors.*` | |
 | CPP-13 | 13 | Append accessor operations + CHANGELOG entry | |
 | CPP-14 | 16 | Struct registry + mapping (conditional) | |
@@ -1002,12 +1116,12 @@ Raised during Stage 9 (OQ9). The governing principle, which is broader than any 
 | CPP-17 | 6b | Trim `exports.cpp` comments (absorbs BPE-19's half) | **DONE — human-gated; export-table rows byte-identical** |
 | CPP-18 | 8 | `src/core/status.h` — shared `Status` enum; absorbs the shipped `0`/`-1`/`-2`/`-3` codes | **DONE — `0a548be`** |
 
-### `test-engineer` — 17 tasks
+### `test-engineer` — 22 tasks
 
 | ID | Stage | Task | Status |
 |---|---|---|---|
 | TEST-1 | 4 | `tests/` skeleton + one passing test | **DONE — exe built and run (x64 only)** |
-| TEST-2 | 8 | `tests/core/` — type-conversion | **DONE — `70adc9f`, 45 cases** |
+| TEST-2 | 8 | `tests/core/` — type-conversion | **DONE — `70adc9f`, 44 cases (corrected from 45 at the Stage 12 fold-in)** |
 | TEST-3 | 8 | `tests/core/` — json-path | **DONE — `b5aca63`, 24 cases** |
 | TEST-12 | 8 | Bounds/truncation coverage for the extracted buffer sliver; deletes the placeholder `sanity-test.cpp` | **DONE — `3b17688`, 6 cases; no longer optional (D4)** |
 | TEST-4 | 9 | libcurl fake/mock boundary — source-level seam, not link substitution | **DONE** |
@@ -1018,7 +1132,12 @@ Raised during Stage 9 (OQ9). The governing principle, which is broader than any 
 | TEST-15 | 11 | `tests/http/async-text-api_test.cpp` — bounds, dispatch validation parity with sync, `requestId == 0` on failure, D12 write order | **DONE** |
 | TEST-16 | 11 | Regression coverage for CPP-30's dispatch-serialization/spurious-wakeup fix (burst worker startup) | **DONE — `9913cf1`** |
 | TEST-17 | 11 | Trivial comment-discipline fix in `sync-text-api_test.cpp` | **DONE — `0ef56bc`** |
-| TEST-7 | 12 | `tests/mapping/` — json-flatten | |
+| TEST-18 | 12 | `json-text-api_test.cpp`, `json-document-store_test.cpp` — bounds, `-2` retry, 8 slots + 9th, id minting, out-parameters | **DONE** |
+| TEST-19 | 12 | `json-path_test.cpp` rewritten for RFC 6901 — 24 original blocks mapped, 65 after | **DONE** |
+| TEST-20 | 12 | `type-conversion_test.cpp` on `JsonValue` (44 unchanged) + order test in `json-value_test.cpp` (45 total) | **DONE** |
+| TEST-21 | 12 | Key-text limit, embedded NUL, NUL in keys, text-layer `-36` | **DONE** |
+| TEST-22 | 12 | D24 conversion, row 19 apostrophe parsing, row 25 text layer incl. output-buffer rule | **DONE** |
+| TEST-7 | 12 | `tests/mapping/` — json-flatten | **DONE** |
 | TEST-8 | 13 | `tests/mapping/` — json-accessors | |
 | TEST-9 | 15 | Coverage audit across all of `src/` | |
 | TEST-10 | 16 | Struct mapping tests (conditional) | |
@@ -1036,7 +1155,7 @@ Raised during Stage 9 (OQ9). The governing principle, which is broader than any 
 | REV-22 | 10 | Scoped re-review after CPP-25 — `categoryName` strings only; clean tree; `toupper` on signed `char` | **CLEAN — ZERO FINDINGS** |
 | REV-6 | 11 | Contract append — async; full-branch review against the Stage 11 checklist | **CLEAN — 1 Should-fix (stale trap comment) fixed in `b8f6c52`** |
 | REV-23 | 11 | Combined review of post-REV-6 hardening (BPE-33, CPP-29, CPP-30, TEST-16) | **CLEAN — ZERO MUST/SHOULD-FIX** |
-| REV-7 | 12 | Contract append — flattening | |
+| REV-7 | 12 | Contract append — flattening + normalize (rows 19–25), framework, D23 | **CLEAN — ZERO MUST-FIX; full review + deltas (steps 12c, 12f); its key-text amplification finding produced D19–D21 (CPP-36, TEST-21)** |
 | REV-8 | 13 | Contract append — accessors | |
 | REV-9 | 14 | Release workflow; no hardcoded versions; approval gate blocks | |
 | REV-10 | 15 | Final consistency review incl. `project-docs` agreement | |
@@ -1051,7 +1170,7 @@ Raised during Stage 9 (OQ9). The governing principle, which is broader than any 
 | REV-21 | 9 | Comment-discipline audit — `src/`, `tests/`, `Makefile`, both workflows, `setup-dev-env.ps1`; routed findings to three fix tasks | **DONE — findings closed, spot-checked against target docs** |
 | REV-20 | 9 | Stage 9 full branch — HTTP layer, sync operations, `Status` block, comment-discipline pass, `.gitkeep` | **CLEAN — ZERO MUST-FIX; 1 Should-fix fixed; `/MT` check best-effort, CI's `dumpbin` remains authoritative** |
 
-### Human — 27 tasks
+### Human — 34 tasks
 
 | ID | Stage | Task | Status |
 |---|---|---|---|
@@ -1061,19 +1180,26 @@ Raised during Stage 9 (OQ9). The governing principle, which is broader than any 
 | HUM-11 | 3 | Build + load the official Vector sample unchanged in CANoe | **UNCONFIRMED — blocks HUM-13 only** |
 | HUM-12 | 4/5/6 | Commit and push Stage 4 + 5 + 6 work — **this is what first executes CI** | **DONE — executed; this is what made Stages 6 and 7 real** |
 | HUM-13 | 5 | Load and call `restifyReadVersion` from a real `.can` script | **HALF SATISFIED — compile evidenced; the call is blocked by a CANoe licensing problem** |
-| HUM-14 | 10 | Runtime verification of sync operations in a running measurement; also evaluates Stage 17's trigger | **OPEN — blocked by a CANoe licensing problem** |
+| HUM-14 | 10 | Runtime verification of sync operations in a running measurement; also evaluates Stage 17's trigger | **OPEN — blocked by a CANoe licensing problem; deferred until a licence is available, not merge-gating (Stage 12 D14, R31)** |
 | HUM-24 | 10 | Approve the operation names and the exact signature table | **SATISFIED** |
 | HUM-25 | 10 | Compile-verify all seven rows in real CANoe — the stage's acceptance gate | **PASSED** |
 | HUM-26 | 11 | Rule on OQ1–OQ18 and sign off the D4 signature table | **SATISFIED** |
 | HUM-15 | 11 | Compile-only verification of all 11 async operations in real CANoe — the stage's acceptance gate | **PASSED — x64 only, locally-built DLL; x86 not separately verified in CANoe (open gap, recorded, not assumed)** |
-| HUM-27 | 11 | Runtime/measurement verification of async operations (8-item checklist incl. cancel timing, worker idle exit, redeploy check) | **OPEN — blocked by the same CANoe licensing problem as HUM-14; carries forward past merge, no ETA. Never to be recorded as passed until it actually has been.** |
-| HUM-16 | 12 | Verify CAPL associative-field syntax against the official CANoe help | |
+| HUM-27 | 11 | Runtime/measurement verification of async operations (8-item checklist incl. cancel timing, worker idle exit, redeploy check) | **OPEN — blocked by the same CANoe licensing problem as HUM-14; carries forward past merge, no ETA. Never to be recorded as passed until it actually has been. Deferred with the rest of HUM-29 and HUM-30 until a CANoe licence (Stage 12 R31).** |
+| HUM-16 | 12 | Verify CAPL associative-field syntax against the official CANoe help | **OPTIONAL, non-blocking since Stage 12** — framework uses no associative fields, examples deferred (D13); revisited with CPP-11 |
 | HUM-17 | 14 | Create the release tag | |
 | HUM-18 | 14 | Verify the CI artifact in CANoe, then approve the publish | |
 | HUM-20 | 7 | GitHub config: branch protection, required checks, Actions-can-create-PRs, auto-delete branches | **VERIFIED 2026-09-21 — PARTIALLY CONFIGURED at the time.** "Allow Actions to create PRs" ON. Branch protection/ruleset on `main`: ABSENT. Auto-delete head branches: OFF. **Resolved by HUM-23, verified 2026-09-22 — see §7.14.** |
 | HUM-21 | 7 | Approve exact `settings.json` scoped-push wording **and make the edit by hand** | **DONE — applied by hand** |
 | HUM-22 | 6b | Approve the exact comment-discipline rule wording | **APPROVED** |
 | HUM-23 | 7 | Apply the missing GitHub configuration: the §7.8 ruleset on `main` (7 settings), auto-delete head branches | **DONE — verified 2026-09-22 via the GitHub API, see §7.14.** |
+| HUM-28 | 12 | Sign off D1–D24 and the rows 19–25 table | **SATISFIED** |
+| HUM-29 | 12 | CANoe check of the framework and rows 19–25, x64 | **COMPILE PART PASSED at `5a32872` (items (2), (5)); items (1), (3), (4), (6), (7) OPEN — deferred until a CANoe licence (R31), not merge-gating (D14)** |
+| HUM-30 | 12 | Runtime verification with both verification nodes, x64 | **OPEN — deferred until a CANoe licence (R31), not merge-gating (D14)** |
+| HUM-31 | 12 | Approve `CLAUDE.md` layout lines for `capl/` and the wrapper-per-row Scope line | **APPROVED — applied** |
+| HUM-32 | 12 | Approve D23 wording in `CLAUDE.md` Build and `msvc-build-conventions` | **APPROVED — applied** |
+| HUM-33 | 12 | Approve the `project-docs` setup-before-build sentence | **APPROVED — applied by `build-pipeline-engineer` (`10178cd`) after `docs-writer` refused it as outside its scope (step 11g named `docs-writer`)** |
+| HUM-34 | 12 | Decide on locale-leak hardening: `LC_NUMERIC` GoogleTest listener; CI must not skip the `de-DE` test | **DECIDED — not implemented; user observes in later stages; recorded in `docs/ci-pipeline.md` (`b6df13b`)** |
 
 ---
 
@@ -1092,6 +1218,24 @@ The RC2237 scare showed the inverse failure: a hand-reconstructed invocation pro
 **R-K — the BPE-12 case-sensitivity trap (§9) is now live, not merely foreseen.** `"Sync"` is a case-insensitive substring of `"Async"`, in both operation names and `categoryName` values. Stage 10 alone could not exercise this — only `Sync` existed. Stage 11 makes it real: the export table now carries both families side by side, so any future case-insensitive filtering or grouping by dispatch mode (Stage 14's BPE-12, generating the released operation list from the table) will silently report every async operation as synchronous unless the comparison is case-sensitive. This is now a live trap for Stage 14, not a hypothetical one.
 
 **R-E — Stage 11 merged before full runtime verification; the residual gap is an accepted risk, not an oversight.** At merge, Stage 11 is backed by full-branch review (REV-6, REV-23), a real CANoe compile check (HUM-15, x64 only), and deterministic gated-fake unit tests of the async state machine and concurrency on both architectures — but **four behaviours have no automated evidence at merge**: design 3's real unload path (`FreeLibraryAndExitThread` and the DLL actually unloading after its idle timeout); the cancel hook aborting a live libcurl transfer within about a second; the shims called through the table's function pointers on x86 specifically; and real CANoe/VN/VT load-and-unload behaviour. A local real-DLL smoke harness covering the first three without CANoe was proposed and **explicitly declined by the user**, on the grounds that the stage merges before full CANoe verification in any case, as Stage 10 did. All four are on HUM-27's checklist (still **OPEN**, not passed) and the harness stays available later if HUM-27 is delayed long enough, or if one of the four fails in the field. **HUM-14 (Stage 10's own runtime-verification gate) is likewise still OPEN** — neither it nor HUM-27 is to be recorded as passed before it actually has been.
+
+**Stage 12 risks carried forward (numbered as in `docs/work/stage-12-json-flatten/plans/plan.md` §9 — not this document's numbering).**
+- **R5:** a Simulation Setup parse can disturb simulation timing (D10); only the D12 limits bound it.
+- **R15:** swapping `JsonValue` back to `nlohmann::json` silently reorders entries. Guarded by a trap comment at the alias and an order-pinning test.
+- **R16:** parse cost on wide objects; bounded by the 10,000-entry limit and measured.
+- **R19:** on a cache miss, CI downloads `vcpkg.exe` from GitHub Releases with no retry. One HTTP 504 has been seen. Remedies would be separate chores.
+- **R20:** key-text amplification. Mitigated by D19; a genuine `bad_alloc` still maps to `-35`.
+- **R21:** NUL rejection must be in the first release.
+- **R22:** CAPL assumptions still to confirm in HUM-29: `#if X64`, reference parameters and `elcount()` in `.cin` functions, and how CAPL treats `\\`.
+- **R23:** name clashes with users' CAPL; mitigated by the `restLib` prefix.
+- **R24:** a stale or mismatched hand-copied DLL, or a fallback copy in `capl_includes`. Mitigated by the docs and the version print in both nodes.
+- **R25:** bare `make` no longer builds.
+- **R26:** the stored `RESTIFY_MSVC_*` values go stale after a Visual Studio update, and are invisible to windows opened before the setup run.
+- **R27:** `Path`/`PATH` handling and precedence in the `Makefile`.
+- **R28:** CI was green while local x86 failed (locale leak, fixed in `569fc6a`). Hardening HUM-34 is not implemented — watch for recurrence.
+- **R29:** apostrophe conversion. Risks: the byte-identical guarantee, the ambiguous `'it's'`, form B unverified, longer output, and row 25 checking syntax only.
+- **R30:** no 32-bit CANoe has loaded the x86 DLL; x86 is covered by CI only.
+- **R31:** no CANoe licence. Stage 12 merges with only the x64 compile confirmed; defects found later are fixed in follow-up changes.
 
 **Verifying the operation is not verifying the resulting state.** BPE-17's residue is the clean example: the copy step correctly reports "Copied 2 .lib file(s)", every review confirmed the code and the run output, and `lib/x64/` still contains four. A step that is additive rather than synchronising can be perfectly correct about what it did and still leave a directory that violates the invariant. Check destination state, not just the operation's own report.
 
@@ -1152,7 +1296,10 @@ The RC2237 scare showed the inverse failure: a hand-reconstructed invocation pro
 7. **The `dumpbin /exports` confirmation for BPE-8 is still unevidenced** and is cheap — one CI step, or one local run per architecture.
 8. **BPE-28 (new) is done** — same branch as BPE-16/17/18. `ci.yml`'s `actions/checkout`, `actions/cache` and `actions/upload-artifact` were bumped off the deprecated Node 20 runtime (verified via the GitHub API that the new majors declare `node24` and change no input/default this workflow relies on); `ilammy/msvc-dev-cmd` stays on `v1` (no newer major exists, still `node20`) but is now pinned to the exact commit `v1.13.0` resolves to, for supply-chain hardening independent of the Node.js question.
 9. **The authoritative `/MT` check is still CI's, and Stage 9 did not change that.** REV-20's `/MT` verification was a best-effort binary-string scan and says so in its own report; `dumpbin /directives` under a real MSVC environment remains the authoritative pass. This sits alongside loose end 7 (`dumpbin /exports` for BPE-8, still unevidenced) — **both are cheap, both want the same one CI step or one local run per architecture**, and neither should be recorded as satisfied by a review that could not run the tool.
-10. **`msvc-build-conventions` names seven Windows system libs; static libcurl needs eight.** BPE-10 found `iphlpapi.lib` to be a real link dependency and added it to `SYSLIBS`, but the skill's dependency-acquisition section still reads *"crypt32, bcrypt, secur32, ws2_32, normaliz, wldap32, advapi32"*. The `Makefile` is correct and the skill is stale — the exact "documentation that plausibly resembles the truth" shape §13 tracks. **`build-pipeline-engineer` should amend the skill**; it is a one-line fix and was out of scope for a plan fold-in.
+10. **`msvc-build-conventions` now names all eight system libs, including `iphlpapi`** (checked at the Stage 12 fold-in), so the skill half of this loose end is closed. `CLAUDE.md`'s Tech stack line still lists seven; fixing it is a one-line `CLAUDE.md` edit that needs user-approved wording.
+11. **Out of scope for Stage 12, left for a separate decision:** `project-docs` assigns cutting the CHANGELOG release section to "Stage 13", which in this plan is Stage 14 (BPE-14). The `project-docs` examples rules (one example per operation group; examples using the framework through `capl/includes/includes.cin`) are revisited when `examples/` is taken up (CPP-11).
+12. **Open user decision, not tied to a stage:** when the CAPL framework stops being preliminary and becomes append-only like the export table. Until then, renames are allowed and recorded in CHANGELOG.
+13. **Deferred CANoe checks:** the rest of HUM-29, HUM-30, HUM-14 and HUM-27 run once a CANoe licence is available, followed by the Stage 12 follow-up (§8, Stage 12 "Obligations").
 
 ---
 
@@ -1162,8 +1309,8 @@ The RC2237 scare showed the inverse failure: a hand-reconstructed invocation pro
 
 **Track A is complete.** Commit, push, first CI run, fix cycle, green on both architectures — done, and it closed the x86 evidence gap and BPE-8's build half along the way. **Track B (human, CANoe) is now the sole critical path for the Stage 5 gate:** HUM-10 → HUM-11 → HUM-13 → Stage 5 gate closed.
 
-**Stages 8 through 11 are all complete and reviewed clean** (REV-19, REV-20, REV-5/REV-22, REV-6/REV-23 — zero Must-fix each). Stage 9 was logic-only: no export-table append, no human gate, so HUM-13 did not gate it. **Stages 10 and 11 each appended to the export table and each required HUM-13 to have passed before proceeding** — both were compile-verified in real CANoe (HUM-25, HUM-15) once it had. HUM-23 has passed, so "require branches up to date before merging" is the mechanically enforced half of the export-table merge-hazard mitigation (§7.10, §7.14); the convention half — never two open PRs touching `exports.cpp` — has held through both appends.
+**Stages 8 through 12 are all complete and reviewed clean** (REV-19, REV-20, REV-5/REV-22, REV-6/REV-23, REV-7 — zero Must-fix each). Stage 12 appended rows 19–25, compile-verified on x64 (HUM-29's compile part); its runtime checks are deferred with HUM-14 and HUM-27. Stage 9 was logic-only: no export-table append, no human gate, so HUM-13 did not gate it. **Stages 10 and 11 each appended to the export table and each required HUM-13 to have passed before proceeding** — both were compile-verified in real CANoe (HUM-25, HUM-15) once it had. HUM-23 has passed, so "require branches up to date before merging" is the mechanically enforced half of the export-table merge-hazard mitigation (§7.10, §7.14); the convention half — never two open PRs touching `exports.cpp` — has held through both appends.
 
-**BPE-16, BPE-17, BPE-18 and BPE-28 are done** (`chore/bpe-16-17-18-cleanup`, 2026-09-22 — see §14). **HUM-23 is done** (§7.14). **Stage 12 is next.** Its blocker list is HUM-16 (associative-field syntax) for its `.can` examples specifically; the export-table append itself is no longer gated by HUM-13/HUM-14, since Stages 10 and 11 already proved the table loads and compiles in real CANoe. HUM-14 and HUM-27 (runtime verification for Stages 10 and 11) remain open and block only the *runtime* evaluation of those stages' operations, not Stage 12's start.
+**BPE-16, BPE-17, BPE-18 and BPE-28 are done** (`chore/bpe-16-17-18-cleanup`, 2026-09-22 — see §14). **HUM-23 is done** (§7.14). **Stage 13 (typed accessors) is next**, on a `stage/13-*` branch cut from `main` after the human merges Stage 12. It is the fourth export-table append and inherits Stage 12's document, path syntax and wrapper rule (§8, Stage 13). The deferred CANoe checks — the rest of HUM-29, HUM-30, HUM-14 and HUM-27 — block neither the Stage 12 merge nor Stage 13's start (Stage 12 D14, R31). When a licence is available: the rest of HUM-29, then HUM-30, then the Stage 12 follow-up.
 
-**Status:** v15. Stages 1, 2 and 4 complete and execution-verified. Stage 5 code complete and building on both architectures; hard gate open on Stage 3. **Stages 6 and 7 executed and closed out** — CI green on both legs, branching and auto-PR live, three units of work merged through the flow. **Stage 8 complete (REV-19 clean). Stage 9 complete (REV-20 clean): the HTTP layer and synchronous operations exist as pure logic behind an injectable seam, 139/139 tests green on both architectures, zero export-table change.** Comment discipline is a loaded rule that has now survived a second pass which traced its own regression back to a planning instruction rather than to implementer non-compliance (§6b). `plan.md` maintenance is the fold-in model (§7.10). **HUM-20 verified branch protection absent on 2026-09-21; HUM-23 applied and verified it present via the GitHub API on 2026-09-22 (§7.14).** **BPE-16/17/18/28 closed 2026-09-22** (§14). Open: **HUM-13** (blocks the Stage 5 gate and every export-table append). Deferred and unscheduled: containerized integration testing (§11). Next action: **Stage 10**, once HUM-13 passes.
+**Status:** v15. Stages 1, 2 and 4 complete and execution-verified. Stage 5 code complete and building on both architectures; hard gate open on Stage 3. **Stages 6 and 7 executed and closed out** — CI green on both legs, branching and auto-PR live, three units of work merged through the flow. **Stage 8 complete (REV-19 clean). Stage 9 complete (REV-20 clean): the HTTP layer and synchronous operations exist as pure logic behind an injectable seam, 139/139 tests green on both architectures, zero export-table change.** Comment discipline is a loaded rule that has now survived a second pass which traced its own regression back to a planning instruction rather than to implementer non-compliance (§6b). `plan.md` maintenance is the fold-in model (§7.10). **HUM-20 verified branch protection absent on 2026-09-21; HUM-23 applied and verified it present via the GitHub API on 2026-09-22 (§7.14).** **BPE-16/17/18/28 closed 2026-09-22** (§14). **Stages 10, 11 and 12 complete** — export rows 1–25 behind the sentinel row, compile-verified in CANoe on x64. Open, all blocked on a CANoe licence: HUM-13's call half, HUM-14, HUM-27, the rest of HUM-29, and HUM-30. Deferred and unscheduled: containerized integration testing (§11). Next action: **Stage 13**, after the human merges Stage 12.
