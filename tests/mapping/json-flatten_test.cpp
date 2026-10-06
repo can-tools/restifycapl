@@ -813,7 +813,9 @@ TEST(FlattenJson, InvalidJsonIsParseError) {
       "[,1]",
       "[1 2]",
       "{a:1}",
-      "{'a':1}",
+      "{'a':1",
+      "{'a':'it's'}",
+      "{'a\":1}",
       "{\"a\":1 \"b\":2}",
       "tru",
       "nul",
@@ -826,7 +828,7 @@ TEST(FlattenJson, InvalidJsonIsParseError) {
       "-",
       "NaN",
       "Infinity",
-      "'a'",
+      "'a",
       "abc",
       "\"\\x\"",
       "\"\\u12\"",
@@ -1431,6 +1433,10 @@ TEST(FlattenJsonApostrophe, DuplicateKeysKeepTheLastValueAtTheFirstPosition) {
   ASSERT_EQ(FlattenJson(Apostrophized(twin), actual), Status::Ok);
   ExpectSameEntries(actual, expected);
   ExpectEntries(actual, {{"/z", "3", JsonEntryType::Number}, {"/a", "2", JsonEntryType::Number}});
+}
+
+TEST(FlattenJsonApostrophe, ApostropheObjectIsAcceptedNotAParseError) {
+  ExpectFlattens("{'a':1}", {{"/a", "1", JsonEntryType::Number}});
 }
 
 TEST(FlattenJsonApostrophe, MixedNotationsInOneDocument) {

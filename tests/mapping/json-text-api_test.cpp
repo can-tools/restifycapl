@@ -383,12 +383,18 @@ TEST(ParseJsonDocument, FailedInputChecksDoNotConsumeASlot) {
 
 TEST(ParseJsonDocument, InvalidJsonIsParseError) {
   JsonDocumentStore store;
-  const char* const texts[] = {"{",       "[1,",       "{\"a\":}", "{'a':1}",
+  const char* const texts[] = {"{",       "[1,",       "{\"a\":}", "{'a':1",
+                               "{'a':'it's'}", "{'a\":1}",
                                "[1,]",    "tru",       "01",       "NaN",
                                "{} x",    "1 2",       "abc",      "{\"a\":1,}"};
   for (const char* text : texts) {
     ExpectParseFails(store, text, Status::ParseError);
   }
+}
+
+TEST(ParseJsonDocument, ApostropheObjectIsAcceptedNotAParseError) {
+  JsonDocumentStore store;
+  EXPECT_NE(MustParse(store, "{'a':1}"), 0u);
 }
 
 TEST(ParseJsonDocument, EmptyAndWhitespaceOnlyTextIsParseError) {
@@ -1953,7 +1959,7 @@ TEST(NormalizeJsonText, DoesNotTouchTheDocumentStore) {
 }
 
 TEST(TextApiInternalError, NormalizeReportsInternalErrorWhenAllocationFailsAndNormalizedIsEmpty) {
-  const std::string json = "{'a':[1,2,3],'b':{'c':'text'}}";
+  const std::string json = "{'a':[1,2,3],'b':{'c':'" + std::string(200, 'x') + "'}}";
   Buffer out(64);
   Status status = Status::Ok;
   int failedAllocations = 0;
@@ -1967,5 +1973,5 @@ TEST(TextApiInternalError, NormalizeReportsInternalErrorWhenAllocationFailsAndNo
   EXPECT_TRUE(out.HoldsEmptyText());
 
   EXPECT_EQ(NormalizeText(json, out), Status::Ok);
-  EXPECT_EQ(out.Text(), R"({"a":[1,2,3],"b":{"c":"text"}})");
+  EXPECT_EQ(out.Text(), R"({"a":[1,2,3],"b":{"c":")" + std::string(200, 'x') + R"("}})");
 }
