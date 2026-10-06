@@ -89,3 +89,39 @@ them. A GitHub-hosted runner starts from a different baseline, so none of
 that applies — MSVC is already preinstalled and activated via
 `ilammy/msvc-dev-cmd`, and `make`/vcpkg are provisioned directly by
 `ci.yml`'s own steps, CI-native rather than by shelling out to the script.
+
+## CI x86 stayed green while a local x86 run showed a locale leak (found during Stage 12, HUM-34)
+
+The failing `FlattenJson` tests depended on the process-wide C locale
+(`LC_NUMERIC`) being unchanged, but an earlier test in the same process
+altered it. The leak appeared only in the local run order and environment;
+the CI x86 leg ran the same tests green. The test-engineer's first
+hypothesis was a dangling `setlocale` pointer; the planner's analysis
+established that the CI environment did not reproduce the leak.
+
+Fixed in commit `569fc6a`: the locale is restored by value, and
+`std::from_chars` is used for number parsing. `make test` and
+`make test ARCH=x86` passed locally afterwards.
+
+## A "cancelled" run on an intermediate commit is not a failure (found during Stage 12)
+
+`ci.yml` uses `concurrency` with `cancel-in-progress`, so a push that
+follows quickly cancels the earlier run for the same ref. A run shown as
+"cancelled" on an intermediate commit is therefore not a failure; only the
+run for the latest commit counts.
+
+On `stage/12-json-flatten`, runs 161-168 were cancelled this way. Runs 169
+(push) and 170 (pull_request) on `5d938c2` are green on both legs, as are
+159 and 160 on `5a32872`.
+
+## Locale-leak hardening: proposed, not implemented (found during Stage 12, HUM-34)
+
+Observation only; no change was made. The planner proposed two hardenings,
+and neither is implemented, by user decision:
+
+- a GoogleTest listener that checks `LC_NUMERIC` after every test;
+- a CI guarantee that the de-DE locale test is not silently skipped.
+
+The user will observe during later stages and return to them if the problem
+reappears. A `--gtest_shuffle` run and changing the CI machine language were
+considered and not adopted.

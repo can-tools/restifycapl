@@ -22,7 +22,8 @@ description: MSVC build rules for the CAPL REST DLL — runtime library, archite
   produces `build/x86/restifycapl-x86.dll`.
 - `build-x64` compiles with `/MACHINE:X64`, links against `lib/x64/`,
   produces `build/x64/restifycapl-x64.dll`.
-- `all` builds both; `test` and `clean` follow GNU target conventions.
+- `all` builds both; bare `make` runs `help` (the default goal) and builds
+  nothing; `test` and `clean` follow GNU target conventions.
 - Both architecture targets must be thin wrappers over a **single
   parameterized rule**, with the architecture passed as a Make variable.
   Do not write two parallel recipes — flag drift between x86 and x64 is a
@@ -165,6 +166,13 @@ number found anywhere as a bug.
   a sign this incantation failed — confirmed by checking `where cl`
   immediately afterward, which still resolves to the correct
   architecture's `cl.exe`. Do not treat that line as a build failure.
+- Once `scripts/setup-dev-env.ps1` has stored `RESTIFY_MSVC_X64_*` /
+  `RESTIFY_MSVC_X86_*` as user environment variables, the Makefile sets
+  `PATH`/`INCLUDE`/`LIB`/`LIBPATH` from the set matching `ARCH`, so
+  `make <target>` works from any shell opened afterwards. Without them (CI,
+  a machine where the script has not run) the shell's own activated
+  environment is used; the cmd.exe activation form above stays valid. The
+  Makefile itself never calls `vcvarsall.bat` and checks nothing.
 
 ## Local vs CI verification
 
@@ -176,10 +184,12 @@ number found anywhere as a bug.
   failure, or when the dispatch explicitly asks for it (e.g. the user
   doesn't want to push before a human gate). State which architecture(s)
   a given local result actually covers.
-- One shell only ever has one architecture's toolchain active — see
-  "Local builds" above. Running both `make build-x86` and `make build-x64`
-  requires two separately activated shells; `make all` in a single shell
-  fails at the mismatched architecture's link step.
+- Without the setup-stored variables, one shell only ever has one
+  architecture's toolchain active — see "Local builds" above — so running
+  both `make build-x86` and `make build-x64` requires two separately
+  activated shells, and `make all` in a single shell fails at the
+  mismatched architecture's link step. With the variables, both targets
+  and `make all` work from one shell.
 - Ad-hoc compiler/shell probes (a one-off `cl.exe` invocation to check a
   symbol, a syslib list, or similar — not a `make` target) must run from
   the session's scratch/temp directory, with explicit output paths

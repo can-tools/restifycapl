@@ -1,0 +1,79 @@
+/*@!Encoding:1250*/
+long restLibJsonParse(char json[], dword &documentId)
+{
+  return restifyJsonParse(json, elcount(json), documentId);
+}
+
+long restLibJsonCountEntries(dword documentId, dword &entryCount)
+{
+  return restifyJsonCountEntries(documentId, entryCount);
+}
+
+long restLibJsonReadEntry(dword documentId, dword entryIndex, char keyText[], char value[], long &valueType)
+{
+  return restifyJsonReadEntry(documentId, entryIndex, keyText, elcount(keyText), value, elcount(value), valueType);
+}
+
+long restLibJsonReadValue(dword documentId, char path[], char value[], long &valueType)
+{
+  return restifyJsonReadValue(documentId, path, elcount(path), value, elcount(value), valueType);
+}
+
+long restLibJsonDiscardDocument(dword documentId)
+{
+  return restifyJsonDiscardDocument(documentId);
+}
+
+long restLibJsonDiscardAllDocuments(dword &discardedCount)
+{
+  return restifyJsonDiscardAllDocuments(discardedCount);
+}
+
+long restLibJsonNormalize(char json[], char normalized[])
+{
+  return restifyJsonNormalize(json, elcount(json), normalized, elcount(normalized));
+}
+
+void restLibJsonDump(dword documentId)
+{
+  char keyText[512];
+  char value[512];
+  char typeName[16];
+  dword count;
+  dword index;
+  long valueType;
+  long rc;
+
+  rc = restLibJsonCountEntries(documentId, count);
+  if (rc != 0)
+  {
+    write("restLibJsonDump: count failed, status %ld", rc);
+    return;
+  }
+  for (index = 0; index < count; index++)
+  {
+    rc = restLibJsonReadEntry(documentId, index, keyText, value, valueType);
+    if (rc == -2)
+    {
+      write("[%lu] entry does not fit the dump buffers (status -2)", index);
+    }
+    else if (rc != 0)
+    {
+      write("[%lu] read failed, status %ld", index, rc);
+    }
+    else
+    {
+      switch (valueType)
+      {
+        case 1:  strncpy(typeName, "string", elcount(typeName)); break;
+        case 2:  strncpy(typeName, "number", elcount(typeName)); break;
+        case 3:  strncpy(typeName, "bool", elcount(typeName)); break;
+        case 4:  strncpy(typeName, "null", elcount(typeName)); break;
+        case 5:  strncpy(typeName, "emptyObject", elcount(typeName)); break;
+        case 6:  strncpy(typeName, "emptyArray", elcount(typeName)); break;
+        default: strncpy(typeName, "unknown", elcount(typeName)); break;
+      }
+      write("%s = %s (%s)", keyText, value, typeName);
+    }
+  }
+}

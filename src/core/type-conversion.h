@@ -1,6 +1,6 @@
 // type-conversion.h -- JSON <-> C++ leaf-value conversion (src/core, level 0).
 //
-// To* (const nlohmann::json& in) and Parse* (std::string_view in) are two
+// To* (const JsonValue& in) and Parse* (std::string_view in) are two
 // deliberately separate families -- a caller that reaches for ToLong on a
 // JSON string gets a loud TypeMismatch instead of Parse*'s lenient text
 // parsing silently accepting it as a number. Parse* is never called from
@@ -14,30 +14,30 @@
 #include <string>
 #include <string_view>
 
+#include "core/json-value.h"
 #include "core/status.h"
-#include "json.hpp"
 
 // JSON integer/float number in int32_t range -> Ok. Out of range ->
 // NumericOverflow. A number with a fractional part (3.7) -> NotIntegral,
 // never truncated. A whole-valued float (3.0) -> Ok/3. null -> NullValue.
 // Any non-number -> TypeMismatch.
-Status ToLong(const nlohmann::json& value, std::int32_t& out);
+Status ToLong(const JsonValue& value, std::int32_t& out);
 
 // Any JSON number (integer or float) -> Ok. null -> NullValue. Non-number
 // -> TypeMismatch.
-Status ToDouble(const nlohmann::json& value, double& out);
+Status ToDouble(const JsonValue& value, double& out);
 
 // JSON true/false only -> Ok. null -> NullValue. Everything else,
 // including numeric 0/1, -> TypeMismatch (strict; no truthiness).
-Status ToBool(const nlohmann::json& value, bool& out);
+Status ToBool(const JsonValue& value, bool& out);
 
 // JSON string only -> Ok, unquoted contents. null -> NullValue. Number,
 // bool, object, array -> TypeMismatch.
-Status ToText(const nlohmann::json& value, std::string& out);
+Status ToText(const JsonValue& value, std::string& out);
 
 // Lenient leaf stringifier -- see docs/type-conversion.md for the full
 // behavior table.
-Status ValueToText(const nlohmann::json& value, std::string& out);
+Status ValueToText(const JsonValue& value, std::string& out);
 
 // Lenient text -> int32_t. Empty text -> InvalidArgument. Unparseable ->
 // ParseError. Trailing characters after a valid numeric prefix -> ParseError

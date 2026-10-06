@@ -1,0 +1,55 @@
+/*@!Encoding:1250*/
+long restLibGetAsync(char url[], char requestHeaders[], dword &requestId)
+{
+  return restifyGetAsync(url, elcount(url), requestHeaders, elcount(requestHeaders), requestId);
+}
+
+long restLibDeleteAsync(char url[], char requestHeaders[], dword &requestId)
+{
+  return restifyDeleteAsync(url, elcount(url), requestHeaders, elcount(requestHeaders), requestId);
+}
+
+long restLibPostAsync(char url[], char requestHeaders[], char requestBody[], dword &requestId)
+{
+  return restifyPostAsync(url, elcount(url), requestHeaders, elcount(requestHeaders), requestBody, elcount(requestBody), requestId);
+}
+
+long restLibPutAsync(char url[], char requestHeaders[], char requestBody[], dword &requestId)
+{
+  return restifyPutAsync(url, elcount(url), requestHeaders, elcount(requestHeaders), requestBody, elcount(requestBody), requestId);
+}
+
+long restLibPatchAsync(char url[], char requestHeaders[], char requestBody[], dword &requestId)
+{
+  return restifyPatchAsync(url, elcount(url), requestHeaders, elcount(requestHeaders), requestBody, elcount(requestBody), requestId);
+}
+
+long restLibRequestAsync(char method[], char url[], char requestHeaders[], char requestBody[], dword connectTimeoutMs, dword totalTimeoutMs, dword maxResponseBytes, dword &requestId)
+{
+  return restifyRequestAsync(method, elcount(method), url, elcount(url), requestHeaders, elcount(requestHeaders), requestBody, elcount(requestBody), connectTimeoutMs, totalTimeoutMs, maxResponseBytes, requestId);
+}
+
+long restLibPollResponse(dword requestId, long &state)
+{
+  return restifyPollResponse(requestId, state);
+}
+
+long restLibAwaitResponse(dword requestId, dword waitTimeoutMs)
+{
+  return restifyAwaitResponse(requestId, waitTimeoutMs);
+}
+
+long restLibReadResponse(dword requestId, char responseBody[], long &requestStatus, long &httpStatusCode, dword &responseBodyLength)
+{
+  return restifyReadResponse(requestId, responseBody, elcount(responseBody), requestStatus, httpStatusCode, responseBodyLength);
+}
+
+long restLibDiscardResponse(dword requestId)
+{
+  return restifyDiscardResponse(requestId);
+}
+
+long restLibDiscardAllResponses(dword &stillRunning)
+{
+  return restifyDiscardAllResponses(stillRunning);
+}

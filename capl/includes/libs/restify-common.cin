@@ -1,0 +1,47 @@
+/*@!Encoding:1250*/
+long restLibReadVersion(char buffer[])
+{
+  return restifyReadVersion(buffer, elcount(buffer));
+}
+
+void restLibStatusText(long status, char text[])
+{
+  switch (status)
+  {
+    case 0:   strncpy(text, "Ok", elcount(text)); break;
+    case -1:  strncpy(text, "InvalidArgument", elcount(text)); break;
+    case -2:  strncpy(text, "BufferTooSmall", elcount(text)); break;
+    case -3:  strncpy(text, "VersionResourceUnavailable", elcount(text)); break;
+    case -4:  strncpy(text, "MalformedHeaderBlock", elcount(text)); break;
+    case -5:  strncpy(text, "UnknownHttpMethod", elcount(text)); break;
+    case -6:  strncpy(text, "UnterminatedInputText", elcount(text)); break;
+    case -10: strncpy(text, "ParseError", elcount(text)); break;
+    case -11: strncpy(text, "PathSyntaxError", elcount(text)); break;
+    case -12: strncpy(text, "PathNotFound", elcount(text)); break;
+    case -13: strncpy(text, "IndexOutOfRange", elcount(text)); break;
+    case -14: strncpy(text, "TypeMismatch", elcount(text)); break;
+    case -15: strncpy(text, "NullValue", elcount(text)); break;
+    case -16: strncpy(text, "NumericOverflow", elcount(text)); break;
+    case -17: strncpy(text, "NotIntegral", elcount(text)); break;
+    case -18: strncpy(text, "NetworkError", elcount(text)); break;
+    case -19: strncpy(text, "Timeout", elcount(text)); break;
+    case -20: strncpy(text, "TlsError", elcount(text)); break;
+    case -21: strncpy(text, "TransportInitFailed", elcount(text)); break;
+    case -22: strncpy(text, "InvalidUrl", elcount(text)); break;
+    case -23: strncpy(text, "ResponseTooLarge", elcount(text)); break;
+    case -24: strncpy(text, "RequestCancelled", elcount(text)); break;
+    case -25: strncpy(text, "NoFreeRequestSlot", elcount(text)); break;
+    case -26: strncpy(text, "RequestNotComplete", elcount(text)); break;
+    case -27: strncpy(text, "UnknownRequestId", elcount(text)); break;
+    case -28: strncpy(text, "WaitTimeout", elcount(text)); break;
+    case -29: strncpy(text, "AsyncStartFailed", elcount(text)); break;
+    case -30: strncpy(text, "NoFreeDocumentSlot", elcount(text)); break;
+    case -31: strncpy(text, "UnknownDocumentId", elcount(text)); break;
+    case -32: strncpy(text, "DocumentTooLarge", elcount(text)); break;
+    case -33: strncpy(text, "NestingTooDeep", elcount(text)); break;
+    case -34: strncpy(text, "TooManyEntries", elcount(text)); break;
+    case -35: strncpy(text, "InternalError", elcount(text)); break;
+    case -36: strncpy(text, "KeyTextTooLarge", elcount(text)); break;
+    default:  snprintf(text, elcount(text), "Unknown(%ld)", status); break;
+  }
+}

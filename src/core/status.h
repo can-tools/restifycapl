@@ -15,11 +15,11 @@ enum class Status : int32_t {
   UnknownHttpMethod = -5,     // method text did not match any known HTTP verb
   UnterminatedInputText = -6, // no NUL terminator found within the caller-stated size bound
   // -7..-9 reserved, currently empty, for future module-local glue codes
-  ParseError = -10,          // reserved for JSON parsing (json-flatten); sync-operations does not claim this code
+  ParseError = -10,          // invalid JSON, empty text or invalid UTF-8 (FlattenJson); unparseable or trailing-garbage text (ParseLong/ParseDouble)
   PathSyntaxError = -11,     // ParsePath: malformed path text, no document needed
   PathNotFound = -12,        // object key absent
-  IndexOutOfRange = -13,     // array index >= size
-  TypeMismatch = -14,        // segment/container kind mismatch (see json-path.h's rule), or ValueToText on non-leaf node
+  IndexOutOfRange = -13,     // array index >= size, "-", or an index above the uint32_t maximum
+  TypeMismatch = -14,        // segment/container kind mismatch (see docs/json-path.md), or ValueToText on non-leaf node
   NullValue = -15,           // JSON null encountered where a typed value was requested (kept distinct from TypeMismatch -- a null gets a default silently, a wrong-typed value is logged or treated as an error)
   NumericOverflow = -16,     // valid JSON number, out of int32_t range for ToLong
   NotIntegral = -17,         // valid JSON number, has a fractional part, requested as an integer type -- must NOT silently truncate
@@ -36,4 +36,12 @@ enum class Status : int32_t {
   UnknownRequestId = -27,     // id is 0, never issued, Consumed, Abandoned, or Free
   WaitTimeout = -28,          // await's deadline reached
   AsyncStartFailed = -29,     // worker thread creation failed
+  // -30..-36 assigned, -37..-39 free (mapping layer, src/mapping/).
+  NoFreeDocumentSlot = -30,   // parse: all document slots occupied
+  UnknownDocumentId = -31,    // document id unknown or already discarded
+  DocumentTooLarge = -32,     // JSON input larger than 1 MiB
+  NestingTooDeep = -33,       // JSON nesting deeper than 64
+  TooManyEntries = -34,       // more than 10,000 flattened entries
+  InternalError = -35,        // unexpected failure inside the DLL (for example out of memory)
+  KeyTextTooLarge = -36,      // flattened keys would total more than 4 MiB
 };

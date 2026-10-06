@@ -101,9 +101,11 @@ one of them should link to the other instead.
     releases are published", not "at Stage 14".
   - Not-yet-applicable content is a visible plain-language TODO line, not a
     silent omission.
-  - Never instruct `make all` from a single shell — it fails at the other
-    architecture's link step. Show `make build-x64` / `make build-x86`,
-    each from a matching MSVC shell.
+  - Before any build instruction, show running `scripts/setup-dev-env.ps1`
+    once and opening a new window; after that, `make build-x64`,
+    `make build-x86` and `make all` work from any shell. Without that
+    step, never instruct `make all` from a single shell — it fails at the
+    other architecture's link step.
   - Runtime claims match what has actually been verified in CANoe; never
     show invented output.
 
