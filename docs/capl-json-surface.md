@@ -1,7 +1,7 @@
 # CAPL JSON surface
 
-Normative material for the six `CAPL_DLL_INFO4` rows that expose parsed JSON
-documents to CAPL, and for the translation layer in
+Normative material for the seven `CAPL_DLL_INFO4` rows that expose parsed JSON
+documents and JSON text normalization to CAPL, and for the translation layer in
 `src/mapping/json-text-api.*` and the document store in
 `src/mapping/json-document-store.*` behind them. `src/module/exports.cpp`
 points here rather than restating any of it. Key format, entry order, number
@@ -15,11 +15,11 @@ on a read.
 
 ## `categoryName`
 
-The six rows form a fourth group:
+The seven rows form a fourth group:
 
 | Group | Meaning | Rows |
 |---|---|---|
-| `Json` | Parsed JSON documents held by the DLL. | rows 19-24 |
+| `Json` | Parsed JSON documents held by the DLL, and JSON text normalization. | rows 19-25 |
 
 ## Signature table
 
@@ -31,11 +31,12 @@ The six rows form a fourth group:
 | 22 | `long restifyJsonReadValue(dword documentId, char path[], dword pathSize, char value[], dword valueSize, long& valueType)` | 6 |
 | 23 | `long restifyJsonDiscardDocument(dword documentId)` | 1 |
 | 24 | `long restifyJsonDiscardAllDocuments(dword& discardedCount)` | 1 |
+| 25 | `long restifyJsonNormalize(char json[], dword jsonSize, char normalized[], dword normalizedSize)` | 4 |
 
 The C++ translation layer (`src/mapping/json-text-api.h`) mirrors this table
 one-to-one: `ParseJsonDocument` (row 19), `CountJsonEntries` (row 20),
 `ReadJsonEntry` (row 21), `ReadJsonValue` (row 22), `DiscardJsonDocument`
-(row 23), `DiscardAllJsonDocuments` (row 24). Each takes an injected
+(row 23), `DiscardAllJsonDocuments` (row 24), `NormalizeJsonText` (row 25, which takes no store). Each of rows 19-24 takes an injected
 `JsonDocumentStore&` first, then the CAPL parameters as pointer+size pairs.
 `exports.cpp`'s shims are expected to be a single forwarding call into these.
 
@@ -126,12 +127,15 @@ An empty string is `valueType` `1` with empty value text; it is not `null`.
 
 ## `restifyJsonParse` (row 19)
 
-Parses `json`, flattens it and stores it in a free slot.
+Parses `json`, flattens it and stores it in a free slot. Strings may be written
+in apostrophes instead of double quotes (`docs/json-flatten.md`, "Input
+notation").
 
 1. `documentId` is set to `0` on entry.
 2. The text is checked as in "Input text": `-1`, `-6`.
 3. The text is parsed and flattened (`docs/json-flatten.md`). Failures:
-   `-10` (invalid JSON, empty text, invalid UTF-8, NUL in an object key),
+   `-10` (invalid JSON, empty text, invalid UTF-8, NUL in the text or in an
+   object key),
    `-32`, `-33`, `-34`, `-36` (see "Limits").
 4. Only a text that would otherwise succeed is checked against the slot pool:
    all 8 slots occupied gives `-30`. A malformed text therefore reports its own
@@ -247,6 +251,51 @@ were held).
 | `Ok` (`0`) | All documents freed; `discardedCount` written. |
 | `InternalError` (`-35`) | Unexpected failure inside the DLL, see "Unexpected internal failure". |
 
+## `restifyJsonNormalize` (row 25)
+
+Converts apostrophe-quoted strings in `json` to standard JSON and checks that
+the result is valid JSON syntax; it touches no document, no lock and no id.
+The conversion rules, the ambiguity rule and forms A and B are in
+`docs/json-flatten.md`, "Input notation".
+
+Checks run in this order, and the first failure decides the status:
+
+1. `json` null or `jsonSize` `0`: `-1`.
+2. No NUL within `jsonSize`: `-6` (`normalized[0]` is cleared first when `normalized` is non-null and `normalizedSize` is not `0`).
+3. `normalized` null or `normalizedSize` `0`: `-1`, nothing is written.
+4. Input length (up to the NUL) over 1 MiB: `-32`, measured before conversion.
+5. Empty text: `-10`.
+6. The conversion.
+7. The converted text is checked as JSON syntax only: `-10` if invalid. The
+   depth, entry and key-text limits of row 19 are not applied, because
+   nothing is stored; a normalized text may still be rejected by row 19.
+8. The converted text is copied into `normalized`: `-2` if it does not fit,
+   otherwise `0`. The result can be longer than the input (each raw `"` inside
+   an apostrophe string gains a `\`), so a buffer of the input size may not be
+   enough; retry with a larger one.
+
+Output buffer: `normalized` holds the converted text only on `0`. On `-2` and
+`-10` it is set to the empty text, and the same holds for `-6` (when
+`normalized` is non-null and `normalizedSize` is not `0`), `-32` and `-35`; on
+`-1` it is not written, so after every failure except `-1` the buffer holds the
+empty text. Text that is already valid JSON in double quotes comes back
+byte-identical.
+
+| `Status` | Condition |
+|---|---|
+| `Ok` (`0`) | `normalized` holds the standard JSON text. |
+| `InvalidArgument` (`-1`) | `json` null or `jsonSize` `0`, or `normalized` null or `normalizedSize` `0`. |
+| `BufferTooSmall` (`-2`) | The converted text plus its NUL does not fit; `normalized` is empty. |
+| `UnterminatedInputText` (`-6`) | No NUL within `jsonSize`. |
+| `ParseError` (`-10`) | Empty text, or the converted text is not valid JSON (for example `'it's'`, or `\'` inside a double-quoted string). |
+| `DocumentTooLarge` (`-32`) | Input larger than 1 MiB. |
+| `InternalError` (`-35`) | Unexpected failure inside the DLL, see "Unexpected internal failure". |
+
+**Sending a body written with apostrophes.** The body-taking rows (4-7 sync,
+10-13 async) send the body byte for byte and never convert it. Call
+`restifyJsonNormalize` first, then pass `normalized` as the body to any of
+those rows.
+
 ## Limits
 
 | Limit | Value | Status when exceeded |
@@ -266,7 +315,7 @@ limit in a later release is compatible; lowering one is not.
 
 No exception crosses into CANoe. If something unexpected fails inside the DLL
 (for example, memory runs out), the operation returns `InternalError`
-(`-35`) and leaves its out-parameters at 0; the same happens for all six
+(`-35`) and leaves its out-parameters at 0; the same happens for all seven
 operations. It is distinct from `InvalidArgument` (`-1`), which always means
 the caller passed a bad argument. The limits bound the memory one document
 takes, so `-35` from `restifyJsonParse` means the process is short of memory,
@@ -282,11 +331,12 @@ never just that the input was too large.
 | 22 (`restifyJsonReadValue`) | Allowed | Copies the value text (up to 1 MiB) into a temporary string and then into the caller's buffer, all under the store lock. |
 | 23 (`restifyJsonDiscardDocument`) | Allowed | Frees memory, after the lock is released. |
 | 24 (`restifyJsonDiscardAllDocuments`) | Allowed | Frees memory, after the lock is released. |
+| 25 (`restifyJsonNormalize`) | Allowed | Allocates a temporary copy of the text (up to twice its size); no store, no lock. |
 
 ## Risk
 
 Vector advises against dynamic memory allocation on the Simulation Setup
 realtime thread. These operations may be called from there, but doing so may
 disturb simulation timing, most noticeably for `restifyJsonParse` with a large
-document. The DLL cannot detect the context it is called from and returns no
+document (and, to a lesser degree, `restifyJsonNormalize`). The DLL cannot detect the context it is called from and returns no
 error for it.

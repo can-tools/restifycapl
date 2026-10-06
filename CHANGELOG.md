@@ -71,7 +71,8 @@ hand-invented version numbers.
   response's memory at once and reports how many requests are still running;
   frees memory on the caller's thread.
 - `restifyJsonParse(char json[], dword jsonSize, dword& documentId) : long`
-  -- parses JSON text, flattens it and stores it under a document id; entry
+  -- parses JSON text (strings may be written in apostrophes instead of
+  double quotes), flattens it and stores it under a document id; entry
   key text over 4 MiB gives `KeyTextTooLarge` (-36), and a NUL in the text or
   a `\u0000` in an object key gives `ParseError` (-10) (see
   `docs/capl-json-surface.md`).
@@ -87,6 +88,10 @@ hand-invented version numbers.
   document.
 - `restifyJsonDiscardAllDocuments(dword& discardedCount) : long` -- releases
   every document and reports how many were released.
+- `restifyJsonNormalize(char json[], dword jsonSize, char normalized[], dword normalizedSize) : long`
+  -- converts apostrophe-quoted JSON strings to standard JSON and checks the
+  result; returns 0, -1, -2 (retry with a larger buffer), -6, -10, -32 or
+  -35, and `normalized` holds text only on 0.
 - Preliminary CAPL framework in `capl/` (include entry point, `restLib`
   wrapper libraries, verification nodes); see `docs/capl-framework.md`.
 

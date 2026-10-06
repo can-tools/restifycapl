@@ -21,7 +21,7 @@ The layout is fixed.
 | `capl/includes/libs/restify-common.cin` | Row 1 wrapper and `restLibStatusText`. |
 | `capl/includes/libs/restify-sync.cin` | Rows 2-7 wrappers. |
 | `capl/includes/libs/restify-async.cin` | Rows 8-18 wrappers. |
-| `capl/includes/libs/restify-json.cin` | Rows 19-24 wrappers and `restLibJsonDump`. |
+| `capl/includes/libs/restify-json.cin` | Rows 19-25 wrappers and `restLibJsonDump`. |
 | `capl/includes/dll/win-x64/` | Holds `restifycapl-x64.dll`, copied in by hand. Only `.gitkeep` is tracked. |
 | `capl/includes/dll/win-x86/` | Holds `restifycapl-x86.dll`, copied in by hand. Only `.gitkeep` is tracked. |
 
@@ -78,7 +78,7 @@ The wrapper name is the export name with `restify` replaced by `restLib`,
 nothing else changed. Each wrapper takes the DLL row's parameters in the same
 order, omits every size `dword` that directly follows a `char[]` (supplied
 with `elcount()` of that array), keeps reference parameters (`long &`,
-`dword &`) and returns the DLL status unchanged. Signatures of the DLL rows:
+`dword &`) and returns the DLL status unchanged. `restLibJsonNormalize(char json[], char normalized[])` takes two arrays. Signatures of the DLL rows:
 `docs/capl-sync-surface.md`, `docs/capl-async-surface.md`,
 `docs/capl-json-surface.md`.
 
@@ -108,6 +108,7 @@ with `elcount()` of that array), keeps reference parameters (`long &`,
 | 22 | `restifyJsonReadValue` | `restLibJsonReadValue` | `restify-json.cin` |
 | 23 | `restifyJsonDiscardDocument` | `restLibJsonDiscardDocument` | `restify-json.cin` |
 | 24 | `restifyJsonDiscardAllDocuments` | `restLibJsonDiscardAllDocuments` | `restify-json.cin` |
+| 25 | `restifyJsonNormalize` | `restLibJsonNormalize` | `restify-json.cin` |
 | - | helper | `restLibStatusText` | `restify-common.cin` |
 | - | helper | `restLibJsonDump` | `restify-json.cin` |
 
@@ -130,6 +131,28 @@ with `elcount()` of that array), keeps reference parameters (`long &`,
   `includes.cin`.
 - No associative fields, no `const` in `variables`, no version numbers, no
   absolute paths, no other DLL.
+
+## JSON with apostrophes
+
+JSON written in CAPL source is easier to read with apostrophes for strings:
+`{'name':'restify'}` means `{"name":"restify"}`. `restLibJsonParse` accepts
+both notations. A request body is sent byte for byte, so a body written with
+apostrophes goes through `restLibJsonNormalize(json, normalized)` first; pass
+the normalized text to the POST/PUT/PATCH/request wrappers (rows 4-7, 10-13).
+Rules and status codes: `docs/json-flatten.md` ("Input notation") and
+`docs/capl-json-surface.md` (row 25).
+
+**The ambiguity rule.** An apostrophe inside a value written in apostrophes,
+e.g. `'it's'`, is ambiguous and gives `-10`. Write that value in double quotes
+(CAPL source `\"it's\"`), or escape the apostrophe as `\'`, which in CAPL
+source must be written `\\'`, because the CAPL compiler turns `\'` in a string
+into a plain `'`. That CAPL turns `\\` into a single `\` is to be confirmed in
+CANoe.
+
+| Form | CAPL source | Status |
+|---|---|---|
+| A: value in double quotes | `{'name':'restify','note':\"it's ok\"}` | to be checked in CANoe with the rest of the framework |
+| B: escaped apostrophe | `{'name':'restify','note':'it\\'s ok'}` | pending the CANoe check of how CAPL treats `\\` and `\'`; if CAPL passes both backslashes the text gives `-10` and form B is not usable from CAPL |
 
 ## Blocking calls
 
@@ -174,7 +197,7 @@ containing file, and `key` is a CAPL keyword. Nothing else is verified yet; CI
 cannot compile CAPL. This section is updated after the next verification in
 CANoe.
 
-Items to confirm: CANoe recognizes rows 19-24, and `includes.cin`, the four
+Items to confirm: CANoe recognizes rows 19-25, and `includes.cin`, the four
 libraries and both nodes compile. Then:
 
 1. The x64 DLL loads through the `#if X64` branch from
@@ -186,6 +209,7 @@ libraries and both nodes compile. Then:
    array size.
 4. No name clashes between framework functions and other CAPL code.
 5. Both nodes print the DLL version at measurement start.
+6. Form B: the CAPL source `'it\\'s ok'` reaches the DLL as `'it\'s ok'`.
 
 Also unconfirmed: CAPL string-literal initializers with escaped quotes
 (`\"`) as used for the JSON text, large local arrays inside a function

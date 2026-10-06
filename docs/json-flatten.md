@@ -97,6 +97,61 @@ A number beyond 64 bits is held as a double and loses precision, so its text
 may differ from the digits in the input. A number too large even for a
 double is invalid JSON for this purpose (`ParseError`).
 
+## Input notation
+
+JSON written in CAPL may use apostrophes for strings: `{'a':'b'}` and
+`{"a":"b"}` give identical documents (same entries, keys, values and types).
+`FlattenJson` first converts apostrophe strings with `ConvertApostropheStrings`
+(`src/mapping/json-quotes.h`), the same function `restifyJsonNormalize` uses.
+It scans the text once, left to right, in three states.
+
+- **Outside any string:** every byte is copied unchanged, except `'`, which
+  starts an apostrophe string and is written as `"`. `"` starts a
+  double-quoted string.
+- **Inside a double-quoted string:** every byte is copied unchanged until the
+  closing `"`. A `\` and the byte after it are copied as a pair, so the
+  standard JSON escapes keep working, and `\'` stays `\'` (it is not a JSON
+  escape, so the parser then reports `ParseError`). An apostrophe is an
+  ordinary character there: `"it's"` is valid.
+- **Inside an apostrophe string:** `\'` becomes a literal `'`; every other
+  `\x` pair is copied unchanged (so `\\` is a literal backslash, and `\n`,
+  `\"` and `\u0041` keep their JSON meaning); a raw `"` is written as `\"`; a
+  raw `'` closes the string and is written as `"`; all other bytes are copied
+  unchanged.
+- An unterminated string at the end of the text is left as it is, and the
+  parser reports `ParseError`.
+
+Nothing outside strings changes: numbers, whitespace, `true`/`false`/`null`,
+structure, and the order and repetition of keys stay as written. A text
+without an apostrophe outside double-quoted strings comes out byte-identical.
+The conversion never adds a NUL byte.
+
+**The ambiguity rule.** An apostrophe inside a value written in apostrophes,
+e.g. `'it's'`, is ambiguous: the string ends at the second apostrophe and the
+rest is not valid JSON, so the result is `ParseError` (-10). There are two
+correct forms.
+
+| Form | JSON the DLL receives | In CAPL source |
+|---|---|---|
+| A: write that value in double quotes | `{'note':"it's ok"}` | `{'note':\"it's ok\"}` |
+| B: escape the apostrophe as `\'` | `{'note':'it\'s ok'}` | `{'note':'it\\'s ok'}` |
+
+In CAPL source form B needs `\\'` because the CAPL compiler turns `\'` inside
+a string literal into a plain `'`. That CAPL turns `\\` into a single `\` is
+still to be confirmed in CANoe; until then form B is pending. If CAPL passes
+both backslashes, the DLL receives `\\'`, a literal backslash followed by a
+closing apostrophe, and the text gives `ParseError` (loud, never a silent
+change).
+
+**Order in `FlattenJson`.** Input length over 1 MiB (`-32`, measured before
+conversion), then empty text (`-10`), then a NUL byte (`-10`), then the
+conversion (skipped when the text contains no `'`, since the output would be
+identical), then the depth, entry and key-text limits and the NUL-in-key check
+on the converted text (first reached decides), then the document is built.
+The status codes of `restifyJsonParse` are unchanged. The converted text can
+be longer than the input (each raw `"` inside an apostrophe string gains a
+`\`); the 1 MiB limit applies to the input as sent.
+
 ## Input text rules
 
 These follow the JSON library's (nlohmann/json 3.11.3) scanner.

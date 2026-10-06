@@ -29,6 +29,11 @@ long restLibJsonDiscardAllDocuments(dword &discardedCount)
   return restifyJsonDiscardAllDocuments(discardedCount);
 }
 
+long restLibJsonNormalize(char json[], char normalized[])
+{
+  return restifyJsonNormalize(json, elcount(json), normalized, elcount(normalized));
+}
+
 void restLibJsonDump(dword documentId)
 {
   char keyText[512];

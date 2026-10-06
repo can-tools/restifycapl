@@ -4,6 +4,7 @@
 #include <utility>
 
 #include "core/type-conversion.h"
+#include "mapping/json-quotes.h"
 
 namespace {
 
@@ -240,6 +241,15 @@ Status FlattenJson(std::string_view text, FlattenResult& out) {
   }
   if (std::find(text.begin(), text.end(), '\0') != text.end()) {
     return Status::ParseError;
+  }
+
+  std::string converted;
+  if (text.find('\'') != std::string_view::npos) {
+    const Status quoteStatus = ConvertApostropheStrings(text, converted);
+    if (quoteStatus != Status::Ok) {
+      return quoteStatus;
+    }
+    text = converted;
   }
 
   const char* const first = text.data();

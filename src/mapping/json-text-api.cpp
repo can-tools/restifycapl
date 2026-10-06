@@ -1,10 +1,13 @@
 #include "mapping/json-text-api.h"
 
+#include <string>
 #include <string_view>
 #include <utility>
 
+#include "core/buffer-copy.h"
 #include "core/input-text.h"
 #include "mapping/json-flatten.h"
+#include "mapping/json-quotes.h"
 
 Status ParseJsonDocument(JsonDocumentStore& store, const char* jsonText, std::uint32_t jsonSize,
                          std::uint32_t& documentId) {
@@ -94,6 +97,43 @@ Status DiscardAllJsonDocuments(JsonDocumentStore& store, std::uint32_t& discarde
   discardedCount = 0;
   try {
     return store.DiscardAll(discardedCount);
+  } catch (...) {
+    return Status::InternalError;
+  }
+}
+
+Status NormalizeJsonText(const char* jsonText, std::uint32_t jsonSize, char* normalized,
+                         std::uint32_t normalizedSize) {
+  try {
+    std::string_view textView;
+    Status status = BoundedText(jsonText, jsonSize, textView);
+    if (status == Status::UnterminatedInputText && normalized != nullptr && normalizedSize != 0) {
+      normalized[0] = '\0';
+    }
+    if (status != Status::Ok) {
+      return status;
+    }
+    if (normalized == nullptr || normalizedSize == 0) {
+      return Status::InvalidArgument;
+    }
+    normalized[0] = '\0';
+
+    if (textView.size() > kMaxJsonInputBytes) {
+      return Status::DocumentTooLarge;
+    }
+    if (textView.empty()) {
+      return Status::ParseError;
+    }
+
+    std::string converted;
+    status = ConvertApostropheStrings(textView, converted);
+    if (status != Status::Ok) {
+      return status;
+    }
+    if (!JsonValue::accept(converted.begin(), converted.end())) {
+      return Status::ParseError;
+    }
+    return CopyToBuffer(converted, normalized, normalizedSize);
   } catch (...) {
     return Status::InternalError;
   }

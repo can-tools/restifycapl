@@ -370,7 +370,7 @@ extern "C" long CAPLPASCAL restifyDiscardAllResponses(std::uint32_t* stillRunnin
   return static_cast<long>(result);
 }
 
-// Six JSON document shims -- signatures and status codes: docs/capl-json-surface.md.
+// JSON shims -- signatures and status codes: docs/capl-json-surface.md.
 extern "C" long CAPLPASCAL restifyJsonParse(char* json, unsigned long jsonSize,
                                              std::uint32_t* documentId) {
   Status result = ParseJsonDocument(DefaultJsonDocumentStore(), json, jsonSize, *documentId);
@@ -409,6 +409,13 @@ extern "C" long CAPLPASCAL restifyJsonDiscardDocument(unsigned long documentId) 
 
 extern "C" long CAPLPASCAL restifyJsonDiscardAllDocuments(std::uint32_t* discardedCount) {
   Status result = DiscardAllJsonDocuments(DefaultJsonDocumentStore(), *discardedCount);
+  return static_cast<long>(result);
+}
+
+extern "C" long CAPLPASCAL restifyJsonNormalize(char* json, unsigned long jsonSize,
+                                                 char* normalized,
+                                                 unsigned long normalizedSize) {
+  Status result = NormalizeJsonText(json, jsonSize, normalized, normalizedSize);
   return static_cast<long>(result);
 }
 
@@ -700,7 +707,7 @@ CAPL_DLL_INFO4 CAPL_DLL_INFO_LIST4[] = {
      {0},
      {"stillRunning"}},
 
-    // Six JSON document rows -- see docs/capl-json-surface.md.
+    // JSON rows -- see docs/capl-json-surface.md.
 
     {"restifyJsonParse",
      (CAPL_FARCALL)restifyJsonParse,
@@ -770,6 +777,18 @@ CAPL_DLL_INFO4 CAPL_DLL_INFO_LIST4[] = {
      {kRefDword},
      {0},
      {"discardedCount"}},
+
+    {"restifyJsonNormalize",
+     (CAPL_FARCALL)restifyJsonNormalize,
+     "Json",
+     "Converts apostrophe-quoted JSON strings to standard JSON and checks the "
+     "result, returning 0 and the normalized text on success or a negative "
+     "error code otherwise.",
+     'L',
+     4,
+     {'C', 'D', 'C', 'D'},
+     {1, 0, 1, 0},
+     {"json", "jsonSize", "normalized", "normalizedSize"}},
 
     // Terminating sentinel -- CANoe reads entries until the first one
     // whose name is NULL.

@@ -48,7 +48,7 @@ guess where the next free number is.
 
 | `Status` | Meaning |
 |---|---|
-| `ParseError` | `FlattenJson`: invalid JSON, empty text, invalid UTF-8, a NUL byte in the text, or a NUL in an object key (`\u0000`). `ParseLong`/`ParseDouble`: unparseable text or trailing characters after a numeric prefix. |
+| `ParseError` | `FlattenJson` and `NormalizeJsonText`: invalid JSON (also after apostrophe conversion, e.g. `'it's'`), empty text, invalid UTF-8; `FlattenJson` also: a NUL byte in the text, or a NUL in an object key (`\u0000`). `ParseLong`/`ParseDouble`: unparseable text or trailing characters after a numeric prefix. |
 
 `-11..-17` (path and conversion codes) are documented in `docs/json-path.md`
 and `docs/type-conversion.md`.
