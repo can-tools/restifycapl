@@ -317,8 +317,9 @@ limit in a later release is compatible; lowering one is not.
 
 No exception crosses into CANoe. If something unexpected fails inside the DLL
 (for example, memory runs out), the operation returns `InternalError`
-(`-35`) and leaves its out-parameters at 0 (row 25: `normalized` holds the
-empty text); the same happens for all seven operations. It is distinct from
+(`-35`) and leaves its out-parameters at 0 (row 25: when `normalized` is
+non-null and `normalizedSize` is not `0`, `normalized` holds the empty text);
+the same happens for all seven operations. It is distinct from
 `InvalidArgument` (`-1`), which always means the caller passed a bad argument.
 The limits bound the memory one document takes, so `-35` from
 `restifyJsonParse` means the process is short of memory, never just that the

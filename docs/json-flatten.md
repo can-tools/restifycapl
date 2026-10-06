@@ -138,7 +138,8 @@ correct forms.
 
 In CAPL source form B needs `\\'` because the CAPL compiler turns `\'` inside
 a string literal into a plain `'`. That CAPL turns `\\` into a single `\` is
-still to be confirmed in CANoe; until then form B is pending. If CAPL passes
+not yet verified at runtime (see `docs/capl-framework.md`, "Verified in
+CANoe"). If CAPL passes
 both backslashes, the DLL receives `\\'`, a literal backslash followed by a
 closing apostrophe, and the text gives `ParseError` (loud, never a silent
 change).
