@@ -19,6 +19,26 @@ long restLibJsonReadValue(dword documentId, char path[], char value[], long &val
   return restifyJsonReadValue(documentId, path, elcount(path), value, elcount(value), valueType);
 }
 
+long restLibJsonReadLong(dword documentId, char path[], long &value)
+{
+  return restifyJsonReadLong(documentId, path, elcount(path), value);
+}
+
+long restLibJsonReadDouble(dword documentId, char path[], float &value)
+{
+  return restifyJsonReadDouble(documentId, path, elcount(path), value);
+}
+
+long restLibJsonReadBool(dword documentId, char path[], long &value)
+{
+  return restifyJsonReadBool(documentId, path, elcount(path), value);
+}
+
+long restLibJsonCountElements(dword documentId, char path[], dword &elementCount)
+{
+  return restifyJsonCountElements(documentId, path, elcount(path), elementCount);
+}
+
 long restLibJsonDiscardDocument(dword documentId)
 {
   return restifyJsonDiscardDocument(documentId);

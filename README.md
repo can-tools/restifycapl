@@ -10,13 +10,13 @@ Native Windows DLL for Vector CANoe that gives CAPL scripts synchronous and asyn
 > [!NOTE]
 > This project is pre-1.0 and has no tagged release — the only way to get the DLL today is to build it from source (see [Building the DLL](#building-the-dll)).
 >
-> The CAPL compiler recognises all operations (synchronous, asynchronous and JSON, via the [CAPL framework](#capl-framework-preliminary) in `capl/`) in a real CANoe instance. This is confirmed for the x64 build and covers compilation only. Behaviour in a running measurement is not yet verified: no request has been run against a live server from a measurement. No 32-bit CANoe configuration is available, so the x86 DLL is verified by the CI test suite only.
+> The CAPL compiler recognises the synchronous, asynchronous and JSON operations (via the [CAPL framework](#capl-framework-preliminary) in `capl/`) in a real CANoe instance. This is confirmed for the x64 build and covers compilation only. Behaviour in a running measurement is not yet verified: no request has been run against a live server from a measurement. No 32-bit CANoe configuration is available, so the x86 DLL is verified by the CI test suite only.
 
 ## Features
 
 - Synchronous GET, POST, PUT, PATCH and DELETE, plus a general-purpose request function with explicit connect/total timeouts and a response-size cap.
 - Asynchronous dispatch/poll/read/discard, the realtime-safe way to reach REST from a Simulation Setup node.
-- JSON parsing and flattening: parse a response body once, then read its entries by index or by JSON Pointer path.
+- JSON parsing and flattening: parse a response body once, then read its entries by index or by JSON Pointer path, or read a single value as a number, a boolean or an array length.
 - JSON text may be written with apostrophes in CAPL source, which avoids escaping every double quote (see [Writing JSON in CAPL source](#writing-json-in-capl-source)).
 - TLS through Windows' own Schannel — no OpenSSL dependency.
 - A single DLL: the C++ runtime (`/MT`) and libcurl are statically linked into it.
@@ -237,7 +237,7 @@ Rules, status codes and the conversion details are in [`docs/json-flatten.md`](d
 
 Full signature tables and status codes: [`docs/capl-sync-surface.md`](docs/capl-sync-surface.md), [`docs/capl-async-surface.md`](docs/capl-async-surface.md), [`docs/status-codes.md`](docs/status-codes.md).
 
-**Json** (parse a JSON text, then read the flattened entries)
+**Json** (parse a JSON text, then read the flattened entries or single typed values)
 
 | Operation | Purpose |
 |---|---|
@@ -248,6 +248,12 @@ Full signature tables and status codes: [`docs/capl-sync-surface.md`](docs/capl-
 | `restifyJsonDiscardDocument` | Releases a single document. |
 | `restifyJsonDiscardAllDocuments` | Releases every document and reports how many were released. |
 | `restifyJsonNormalize` | Converts apostrophe-quoted JSON strings to standard JSON and checks the result, ready to use as a request body. |
+| `restifyJsonReadLong` | Reads the value at a JSON Pointer path as a `long`; a whole-valued number such as `5.0` is accepted, a fractional or out-of-range number is rejected. |
+| `restifyJsonReadDouble` | Reads the value at a JSON Pointer path as a floating-point number (a CAPL `float`, passed by reference). |
+| `restifyJsonReadBool` | Reads the value at a JSON Pointer path as a boolean, returned as `1` (`true`) or `0` (`false`). |
+| `restifyJsonCountElements` | Returns how many elements the array at a JSON Pointer path holds; arrays only. |
+
+The typed reads are strict: a JSON value is never converted from another type, so the string `"42"` is not read as a number and `0`/`1` is not read as a boolean. Read the text with `restifyJsonReadValue` and convert it yourself if you need that. See [`docs/capl-json-surface.md`](docs/capl-json-surface.md) ("Typed reads").
 
 Signatures, limits and status handling: [`docs/capl-json-surface.md`](docs/capl-json-surface.md). How the flattening works: [`docs/json-flatten.md`](docs/json-flatten.md).
 
@@ -271,7 +277,6 @@ See [`CLAUDE.md`](CLAUDE.md) for the full directory layout and project conventio
 
 Planned, non-conditional work:
 
-- Typed JSON path accessors — read individual values out of a flattened JSON response by path, with an explicit type.
 - Tagged releases — publish built DLLs (x86 and x64) as downloadable GitHub Releases assets, instead of build-from-source being the only way to get the DLL.
 
 ## Changelog

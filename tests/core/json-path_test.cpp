@@ -724,3 +724,128 @@ TEST(ParsePath, Rfc6901SectionFiveExamplesDecodeToTheirKeys) {
     EXPECT_EQ(tokens, c.tokens);
   }
 }
+
+// ---------------------------------------------------------------------------
+// ResolvePath -- the PathTokens overload agrees with the string overload.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+void ExpectOverloadsAgree(const JsonValue& document, const std::string& path) {
+  SCOPED_TRACE(path);
+  PathTokens tokens;
+  ASSERT_EQ(ParsePath(path, tokens), Status::Ok);
+
+  const JsonValue sentinel = "sentinel";
+  const JsonValue* fromString = &sentinel;
+  const JsonValue* fromTokens = &sentinel;
+  const Status stringStatus = ResolvePath(document, path, fromString);
+  const Status tokenStatus = ResolvePath(document, tokens, fromTokens);
+  EXPECT_EQ(tokenStatus, stringStatus);
+  EXPECT_EQ(fromTokens, fromString);
+  if (tokenStatus != Status::Ok) {
+    EXPECT_EQ(fromTokens, &sentinel);
+  }
+}
+
+}  // namespace
+
+TEST(ResolvePathTokens, AgreesWithTheStringOverloadForEveryResolveOutcome) {
+  const JsonValue document = JsonValue::parse(
+      R"({"data":{"items":[{"name":"Ann"},{"name":"Bob"}]},"a/b":1,"m~n":2,"~1":3,)"
+      R"("":4,"n":null,"s":"str","arr":[1,2,3]})");
+  const char* const paths[] = {
+      "",                    // root
+      "/data",               // object member
+      "/arr/1",              // array index
+      "/data/items/1/name",  // nested
+      "/a~1b",               // escaped slash
+      "/m~0n",               // escaped tilde
+      "/~01",                // ~0 then 1
+      "/",                   // empty key
+      "/n",                  // null leaf
+      "/missing",            // PathNotFound
+      "/data/nope",          // nested PathNotFound
+      "/arr/3",              // IndexOutOfRange
+      "/arr/-",              // IndexOutOfRange
+      "/arr/4294967296",     // IndexOutOfRange (overflow)
+      "/arr/x",              // TypeMismatch (non-numeric)
+      "/arr/01",             // TypeMismatch (leading zero)
+      "/arr/",               // TypeMismatch (empty token on array)
+      "/s/x",                // TypeMismatch (token on scalar)
+      "/n/x",                // TypeMismatch (token on null)
+  };
+  for (const char* path : paths) {
+    ExpectOverloadsAgree(document, path);
+  }
+}
+
+TEST(ResolvePathTokens, AgreesOnScalarAndEmptyContainerDocuments) {
+  const char* const paths[] = {"", "/a", "/0", "/-", "/"};
+  for (const char* text : {"42", "null", "[]", "{}"}) {
+    SCOPED_TRACE(text);
+    const JsonValue document = JsonValue::parse(text);
+    for (const char* path : paths) {
+      ExpectOverloadsAgree(document, path);
+    }
+  }
+}
+
+TEST(ResolvePathTokens, EmptyTokensReturnTheWholeDocument) {
+  const JsonValue document = JsonValue::parse(R"({"a":1})");
+  const JsonValue* out = nullptr;
+  EXPECT_EQ(ResolvePath(document, PathTokens{}, out), Status::Ok);
+  EXPECT_EQ(out, &document);
+}
+
+TEST(ResolvePathTokens, AlreadyDecodedTokensAreMatchedLiterally) {
+  const JsonValue document = JsonValue::parse(R"({"a/b":1,"m~n":2,"~1":3,"a~2":4})");
+  const struct {
+    PathTokens tokens;
+    std::int32_t value;
+  } cases[] = {
+      {{"a/b"}, 1},
+      {{"m~n"}, 2},
+      {{"~1"}, 3},
+      {{"a~2"}, 4},  // PathSyntaxError as text; the token overload never parses
+  };
+  for (const auto& c : cases) {
+    SCOPED_TRACE(c.tokens[0]);
+    const JsonValue* out = nullptr;
+    ASSERT_EQ(ResolvePath(document, c.tokens, out), Status::Ok);
+    ASSERT_NE(out, nullptr);
+    EXPECT_EQ(out->get<std::int32_t>(), c.value);
+  }
+
+  const JsonValue* out = nullptr;
+  EXPECT_EQ(ResolvePath(document, PathTokens{"/"}, out), Status::PathNotFound);
+}
+
+TEST(ResolvePathTokens, NeverReturnsPathSyntaxErrorOrInvalidArgument) {
+  const JsonValue document = JsonValue::parse(R"({"a":[1]})");
+  const PathTokens inputs[] = {{"~"}, {"a~"}, {"~2"}, {"a", "~x"}, {""}, {"a", "-"}, {"a", "x"}};
+  for (const PathTokens& tokens : inputs) {
+    const JsonValue* out = nullptr;
+    const Status status = ResolvePath(document, tokens, out);
+    EXPECT_NE(status, Status::PathSyntaxError);
+    EXPECT_NE(status, Status::InvalidArgument);
+  }
+}
+
+TEST(ResolvePathTokens, OutIsLeftUnchangedOnEveryFailure) {
+  const JsonValue document = JsonValue::parse(R"({"a":[1],"n":null})");
+  const JsonValue sentinel = "sentinel";
+  const PathTokens inputs[] = {{"missing"}, {"a", "5"}, {"a", "-"}, {"a", "x"}, {"n", "x"}};
+  for (const PathTokens& tokens : inputs) {
+    const JsonValue* out = &sentinel;
+    EXPECT_NE(ResolvePath(document, tokens, out), Status::Ok);
+    EXPECT_EQ(out, &sentinel);
+  }
+}
+
+TEST(ResolvePathTokens, ResolvedPointerAliasesTheDocument) {
+  const JsonValue document = JsonValue::parse(R"({"data":{"items":[{"name":"Ann"}]}})");
+  const JsonValue* out = nullptr;
+  ASSERT_EQ(ResolvePath(document, PathTokens{"data", "items", "0", "name"}, out), Status::Ok);
+  EXPECT_EQ(out, &document.at("data").at("items").at(0).at("name"));
+}

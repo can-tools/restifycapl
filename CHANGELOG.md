@@ -84,6 +84,20 @@ hand-invented version numbers.
 - `restifyJsonReadValue(dword documentId, char path[], dword pathSize, char value[], dword valueSize, long& valueType) : long`
   -- copies the value text at a JSON Pointer path and reports its value type,
   retryable on `BufferTooSmall`.
+- `restifyJsonReadLong(dword documentId, char path[], dword pathSize, long& value) : long`
+  -- writes the integer at a JSON Pointer path to `value`; returns 0, -1, -6,
+  -11, -12, -13, -14, -15 (null), -16 (outside 32-bit range), -17
+  (fractional), -31 or -35.
+- `restifyJsonReadDouble(dword documentId, char path[], dword pathSize, float& value) : long`
+  -- writes the number at a JSON Pointer path to `value`; returns 0, -1, -6,
+  -11, -12, -13, -14, -15 (null), -31 or -35.
+- `restifyJsonReadBool(dword documentId, char path[], dword pathSize, long& value) : long`
+  -- writes the boolean at a JSON Pointer path to `value` as 1 or 0; returns
+  0, -1, -6, -11, -12, -13, -14, -15 (null), -31 or -35.
+- `restifyJsonCountElements(dword documentId, char path[], dword pathSize, dword& elementCount) : long`
+  -- writes the element count of the array at a JSON Pointer path to
+  `elementCount`; returns 0, -1, -6, -11, -12, -13, -14, -15 (null), -31 or
+  -35.
 - `restifyJsonDiscardDocument(dword documentId) : long` -- releases a single
   document.
 - `restifyJsonDiscardAllDocuments(dword& discardedCount) : long` -- releases

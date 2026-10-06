@@ -16,12 +16,12 @@ The layout is fixed.
 | Path | What it is |
 |---|---|
 | `capl/restify-verify-http.can` | Verification node: DLL version at start; sync GET, sync POST, async GET with timer polling, `-2` on a small buffer, apostrophe bodies normalized and POSTed (forms A and B, ambiguous `-10`); releases responses on stop. |
-| `capl/restify-verify-json.can` | Verification node: DLL version at start; offline parse, entry count, dump, read by path, `-2` retry, 9th document `-30`, double discard `-31`, apostrophe texts (twin dumps, forms A and B, ambiguous `-10`); releases documents and responses on stop. |
+| `capl/restify-verify-json.can` | Verification node: DLL version at start; offline parse, entry count, dump, read by path, `-2` retry, 9th document `-30`, double discard `-31`, apostrophe texts (twin dumps, forms A and B, ambiguous `-10`), typed reads and element count (`-14`..`-17`); releases documents and responses on stop. |
 | `capl/includes/includes.cin` | Single master include. The only file with `#pragma library` and the only file that includes the libraries. |
 | `capl/includes/libs/restify-common.cin` | Row 1 wrapper and `restLibStatusText`. |
 | `capl/includes/libs/restify-sync.cin` | Rows 2-7 wrappers. |
 | `capl/includes/libs/restify-async.cin` | Rows 8-18 wrappers. |
-| `capl/includes/libs/restify-json.cin` | Rows 19-25 wrappers and `restLibJsonDump`. |
+| `capl/includes/libs/restify-json.cin` | Rows 19-29 wrappers and `restLibJsonDump`. |
 | `capl/includes/dll/win-x64/` | Holds `restifycapl-x64.dll`, copied in by hand. Only `.gitkeep` is tracked. |
 | `capl/includes/dll/win-x86/` | Holds `restifycapl-x86.dll`, copied in by hand. Only `.gitkeep` is tracked. |
 
@@ -80,7 +80,8 @@ order, omits every size `dword` that directly follows a `char[]` (supplied
 with `elcount()` of that array), keeps reference parameters (`long &`,
 `dword &`) and returns the DLL status unchanged. `restLibJsonNormalize(char json[], char normalized[])` takes two arrays. Signatures of the DLL rows:
 `docs/capl-sync-surface.md`, `docs/capl-async-surface.md`,
-`docs/capl-json-surface.md`.
+`docs/capl-json-surface.md`. The wrapper of row 27 takes `float &value`: CAPL
+`float` is an 8-byte double.
 
 | Row | DLL function | Wrapper | File in `capl/includes/libs/` |
 |---|---|---|---|
@@ -109,6 +110,10 @@ with `elcount()` of that array), keeps reference parameters (`long &`,
 | 23 | `restifyJsonDiscardDocument` | `restLibJsonDiscardDocument` | `restify-json.cin` |
 | 24 | `restifyJsonDiscardAllDocuments` | `restLibJsonDiscardAllDocuments` | `restify-json.cin` |
 | 25 | `restifyJsonNormalize` | `restLibJsonNormalize` | `restify-json.cin` |
+| 26 | `restifyJsonReadLong` | `restLibJsonReadLong` | `restify-json.cin` |
+| 27 | `restifyJsonReadDouble` | `restLibJsonReadDouble` | `restify-json.cin` |
+| 28 | `restifyJsonReadBool` | `restLibJsonReadBool` | `restify-json.cin` |
+| 29 | `restifyJsonCountElements` | `restLibJsonCountElements` | `restify-json.cin` |
 | - | helper | `restLibStatusText` | `restify-common.cin` |
 | - | helper | `restLibJsonDump` | `restify-json.cin` |
 
@@ -125,7 +130,8 @@ with `elcount()` of that array), keeps reference parameters (`long &`,
   is reported as status `-2` and skipped.
 - Not allowed in the framework: building JSON or request bodies, mapping
   JSON into CAPL structs or keeping a field registry (deferred modules), and
-  converting value text into CAPL types (typed accessors, planned separately).
+  converting value text into CAPL types. Typed values reach CAPL only through
+  the thin wrappers of rows 26-29; helpers still only print or release.
 - Every new export-table row gets its 1:1 wrapper in the same change, in the
   file of its `categoryName` group; a new group gets a new file, included from
   `includes.cin`.
@@ -192,6 +198,12 @@ Keys of `restify-verify-json.can`:
 | `8` | Parse `{'name':'restify','value':1}` and its double-quoted twin, dump both, discard both. |
 | `9` | Parse forms A and B, read `/note` (expected `it's ok`), discard both. |
 | `0` | Parse the ambiguous `{'note':'it's'}`, expecting `-10`. |
+| `a` | Parse an offline document with an integer, a fraction, an `int32` boundary, a bool, a null, a numeric string and an array. |
+| `b` | `restLibJsonReadLong` on that document: values, plus the expected `-16`, `-17`, `-14`, `-15` and `-12`. |
+| `c` | `restLibJsonReadDouble`: integer, fraction, whole-valued number, then `-14` and `-15`. |
+| `d` | `restLibJsonReadBool`: `true`, `false`, then `-14` and `-15`. |
+| `e` | `restLibJsonCountElements`: array size, then `-14` and `-15`. |
+| `f` | Discard the document opened by key `a`. |
 
 Both nodes release everything on `on stopMeasurement`. Keys `5` and `6` need
 free document slots; run key `7` after key `5`.
@@ -220,6 +232,9 @@ CANoe licence:
    escaped quotes (`\"`) as used for the JSON text, large local arrays inside
    a function (`restLibJsonDump`), passing a global by reference to a wrapper,
    and the length at which `write()` cuts a long response body.
+7. A `float &` reference parameter in a `.cin` function
+   (`restLibJsonReadDouble`).
+8. `float` (8 bytes) through `kRefDouble` returns the correct double.
 
 32-bit CANoe is not checked: no 32-bit configuration is available, and the
 x86 DLL is covered by CI only. CI cannot compile CAPL.

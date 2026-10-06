@@ -50,6 +50,7 @@ static_assert(sizeof(long) == sizeof(std::int32_t),
 // narrowing diagnostic in the table's braced parTypes initializers below.
 constexpr char kRefLong = static_cast<char>('L' - 128);
 constexpr char kRefDword = static_cast<char>('D' - 128);
+constexpr char kRefDouble = static_cast<char>('F' - 128);
 
 HttpClient& SyncClient() {
   static HttpClient instance;
@@ -419,6 +420,33 @@ extern "C" long CAPLPASCAL restifyJsonNormalize(char* json, unsigned long jsonSi
   return static_cast<long>(result);
 }
 
+// Typed JSON read shims -- signatures and status codes: docs/capl-json-surface.md.
+extern "C" long CAPLPASCAL restifyJsonReadLong(unsigned long documentId, char* path,
+                                                unsigned long pathSize, std::int32_t* value) {
+  Status result = ReadJsonLong(DefaultJsonDocumentStore(), documentId, path, pathSize, *value);
+  return static_cast<long>(result);
+}
+
+extern "C" long CAPLPASCAL restifyJsonReadDouble(unsigned long documentId, char* path,
+                                                  unsigned long pathSize, double* value) {
+  Status result = ReadJsonDouble(DefaultJsonDocumentStore(), documentId, path, pathSize, *value);
+  return static_cast<long>(result);
+}
+
+extern "C" long CAPLPASCAL restifyJsonReadBool(unsigned long documentId, char* path,
+                                                unsigned long pathSize, std::int32_t* value) {
+  Status result = ReadJsonBool(DefaultJsonDocumentStore(), documentId, path, pathSize, *value);
+  return static_cast<long>(result);
+}
+
+extern "C" long CAPLPASCAL restifyJsonCountElements(unsigned long documentId, char* path,
+                                                     unsigned long pathSize,
+                                                     std::uint32_t* elementCount) {
+  Status result = CountJsonElements(DefaultJsonDocumentStore(), documentId, path, pathSize,
+                                     *elementCount);
+  return static_cast<long>(result);
+}
+
 // ==============================================================================
 // CAPL_DLL_INFO_LIST4 -- the real API contract (capl-export-contract).
 // APPEND ONLY from this point on: never rename, reorder, or remove a row.
@@ -463,8 +491,8 @@ CAPL_DLL_INFO4 CAPL_DLL_INFO_LIST4[] = {
     // Trap: parCount below must equal the number of entries actually
     // present in that row's parTypes/array/parNames -- nothing checks this
     // at compile time or at runtime, and a mismatch corrupts the CAPL
-    // stack (worst on x86) with no diagnostic. Trap: a `kRefLong`/
-    // `kRefDword` (`type - 128`) entry marks a CAPL reference parameter;
+    // stack (worst on x86) with no diagnostic. Trap: a `type - 128` entry
+    // (`kRefLong`/`kRefDword`/`kRefDouble`) marks a CAPL reference parameter;
     // the matching C++ shim parameter must be a pointer, never a plain
     // value, or the write-back targets the wrong memory.
 
@@ -789,6 +817,56 @@ CAPL_DLL_INFO4 CAPL_DLL_INFO_LIST4[] = {
      {'C', 'D', 'C', 'D'},
      {1, 0, 1, 0},
      {"json", "jsonSize", "normalized", "normalizedSize"}},
+
+    // Typed JSON read rows -- see docs/capl-json-surface.md.
+
+    {"restifyJsonReadLong",
+     (CAPL_FARCALL)restifyJsonReadLong,
+     "Json",
+     "Writes the integer value found at a JSON Pointer path in a parsed "
+     "document to value, returning 0 on success or a negative error code "
+     "otherwise.",
+     'L',
+     4,
+     {'D', 'C', 'D', kRefLong},
+     {0, 1, 0, 0},
+     {"documentId", "path", "pathSize", "value"}},
+
+    {"restifyJsonReadDouble",
+     (CAPL_FARCALL)restifyJsonReadDouble,
+     "Json",
+     "Writes the numeric value found at a JSON Pointer path in a parsed "
+     "document to value, returning 0 on success or a negative error code "
+     "otherwise.",
+     'L',
+     4,
+     {'D', 'C', 'D', kRefDouble},
+     {0, 1, 0, 0},
+     {"documentId", "path", "pathSize", "value"}},
+
+    {"restifyJsonReadBool",
+     (CAPL_FARCALL)restifyJsonReadBool,
+     "Json",
+     "Writes the boolean value (1 or 0) found at a JSON Pointer path in a "
+     "parsed document to value, returning 0 on success or a negative error "
+     "code otherwise.",
+     'L',
+     4,
+     {'D', 'C', 'D', kRefLong},
+     {0, 1, 0, 0},
+     {"documentId", "path", "pathSize", "value"}},
+
+    {"restifyJsonCountElements",
+     (CAPL_FARCALL)restifyJsonCountElements,
+     "Json",
+     "Writes the number of elements of the array found at a JSON Pointer "
+     "path in a parsed document to elementCount, returning 0 on success or "
+     "a negative error code otherwise.",
+     'L',
+     4,
+     {'D', 'C', 'D', kRefDword},
+     {0, 1, 0, 0},
+     {"documentId", "path", "pathSize", "elementCount"}},
 
     // Terminating sentinel -- CANoe reads entries until the first one
     // whose name is NULL.

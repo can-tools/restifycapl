@@ -17,6 +17,10 @@ Keeping the two separate means a caller that reaches for `ToLong` on a
 JSON string gets a loud `TypeMismatch` instead of silently accepting `"42"`
 as if it were a number.
 
+`ToLong`, `ToDouble` and `ToBool` are applied strictly, with no coercion, by the
+typed reads `restifyJsonReadLong`, `restifyJsonReadDouble` and
+`restifyJsonReadBool` (`docs/capl-json-surface.md`).
+
 ## Why `ToText` and `ValueToText` both exist
 
 `ToText` is the strict string accessor: JSON string only, every other JSON
