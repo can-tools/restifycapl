@@ -1370,3 +1370,196 @@ TEST(DescribeLeaf, ScalarsGetTheirTextAndType) {
     EXPECT_EQ(TypeNumber(type), TypeNumber(c.type));
   }
 }
+
+// ---------------------------------------------------------------------------
+// Apostrophe-quoted strings: accepted notation, equivalence with double quotes, and limits that
+// apply to the converted text.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+std::string Apostrophized(std::string text) {
+  for (char& c : text) {
+    if (c == '"') {
+      c = '\'';
+    }
+  }
+  return text;
+}
+
+void ExpectSameEntries(const FlattenResult& actual, const FlattenResult& expected) {
+  ASSERT_EQ(actual.entries.size(), expected.entries.size());
+  for (std::size_t i = 0; i < expected.entries.size(); ++i) {
+    SCOPED_TRACE("entry " + std::to_string(i));
+    EXPECT_EQ(actual.entries[i].key, expected.entries[i].key);
+    EXPECT_EQ(actual.entries[i].value, expected.entries[i].value);
+    EXPECT_EQ(TypeNumber(actual.entries[i].type), TypeNumber(expected.entries[i].type));
+  }
+}
+
+}  // namespace
+
+TEST(FlattenJsonApostrophe, ApostropheOnlyObjectEqualsItsDoubleQuotedTwin) {
+  const std::string twin =
+      R"({"name":"restify","n":1,"t":true,"z":null,"e":"","a":["x",{"k":"v"}],"o":{},"r":[]})";
+  const std::string apostrophes = Apostrophized(twin);
+  ASSERT_EQ(apostrophes.find('"'), std::string::npos);
+  ASSERT_NE(apostrophes, twin);
+
+  FlattenResult expected;
+  ASSERT_EQ(FlattenJson(twin, expected), Status::Ok);
+  FlattenResult actual;
+  ASSERT_EQ(FlattenJson(apostrophes, actual), Status::Ok);
+  ExpectSameEntries(actual, expected);
+  EXPECT_TRUE(actual.document == expected.document);
+  ExpectEntries(actual, {{"/name", "restify", JsonEntryType::String},
+                         {"/n", "1", JsonEntryType::Number},
+                         {"/t", "true", JsonEntryType::Bool},
+                         {"/z", "null", JsonEntryType::Null},
+                         {"/e", "", JsonEntryType::String},
+                         {"/a/0", "x", JsonEntryType::String},
+                         {"/a/1/k", "v", JsonEntryType::String},
+                         {"/o", "{}", JsonEntryType::EmptyObject},
+                         {"/r", "[]", JsonEntryType::EmptyArray}});
+}
+
+TEST(FlattenJsonApostrophe, DuplicateKeysKeepTheLastValueAtTheFirstPosition) {
+  const std::string twin = R"({"z":1,"a":2,"z":3})";
+  FlattenResult expected;
+  ASSERT_EQ(FlattenJson(twin, expected), Status::Ok);
+  FlattenResult actual;
+  ASSERT_EQ(FlattenJson(Apostrophized(twin), actual), Status::Ok);
+  ExpectSameEntries(actual, expected);
+  ExpectEntries(actual, {{"/z", "3", JsonEntryType::Number}, {"/a", "2", JsonEntryType::Number}});
+}
+
+TEST(FlattenJsonApostrophe, MixedNotationsInOneDocument) {
+  ExpectFlattens(R"({'a':"b","c":'d'})", {{"/a", "b", JsonEntryType::String},
+                                         {"/c", "d", JsonEntryType::String}});
+}
+
+TEST(FlattenJsonApostrophe, ApostropheStringAsTheWholeDocument) {
+  ExpectFlattens("'text'", {{"", "text", JsonEntryType::String}});
+  ExpectFlattens("''", {{"", "", JsonEntryType::String}});
+}
+
+TEST(FlattenJsonApostrophe, ApostropheKeyIsEscapedLikeAnyOtherKey) {
+  ExpectFlattens("{'a/b':1,'m~n':2}", {{"/a~1b", "1", JsonEntryType::Number},
+                                      {"/m~0n", "2", JsonEntryType::Number}});
+}
+
+TEST(FlattenJsonApostrophe, FormAWritesTheValueInDoubleQuotes) {
+  ExpectFlattens(R"({'name':'restify','note':"it's ok"})",
+                 {{"/name", "restify", JsonEntryType::String},
+                  {"/note", "it's ok", JsonEntryType::String}});
+}
+
+TEST(FlattenJsonApostrophe, FormBEscapesTheApostropheAsBackslashApostrophe) {
+  const std::string received = "{'name':'restify','note':'it\\'s ok'}";
+  ASSERT_NE(received.find("\\'"), std::string::npos);
+  ExpectFlattens(received, {{"/name", "restify", JsonEntryType::String},
+                            {"/note", "it's ok", JsonEntryType::String}});
+}
+
+TEST(FlattenJsonApostrophe, RawDoubleQuoteInsideAnApostropheStringIsPartOfTheValue) {
+  ExpectFlattens(R"({'a':'say "hi"'})", {{"/a", R"(say "hi")", JsonEntryType::String}});
+}
+
+TEST(FlattenJsonApostrophe, JsonEscapesInsideAnApostropheStringKeepTheirJsonMeaning) {
+  ExpectFlattens(R"({'a':'x\ny','b':'p\\q','c':'\"'})",
+                 {{"/a", "x\ny", JsonEntryType::String},
+                  {"/b", "p\\q", JsonEntryType::String},
+                  {"/c", "\"", JsonEntryType::String}});
+  const std::string unicodeEscape = "['\\u0041']";
+  ASSERT_NE(unicodeEscape.find("\\u0041"), std::string::npos);
+  ExpectFlattens(unicodeEscape, {{"/0", "A", JsonEntryType::String}});
+}
+
+TEST(FlattenJsonApostrophe, ApostropheInsideAValueWrittenInApostrophesIsParseError) {
+  ExpectFails("{'note':'it's'}", Status::ParseError);
+}
+
+TEST(FlattenJsonApostrophe, EscapedApostropheInsideADoubleQuotedStringIsParseError) {
+  ExpectFails(R"({"note":"it\'s"})", Status::ParseError);
+}
+
+TEST(FlattenJsonApostrophe, EscapedBackslashBeforeAClosingApostropheIsParseError) {
+  ExpectFails(R"({'a':'a\\'b'})", Status::ParseError);
+}
+
+TEST(FlattenJsonApostrophe, UnterminatedApostropheStringIsParseError) {
+  ExpectFails("{'a':'b", Status::ParseError);
+  ExpectFails("{'a", Status::ParseError);
+}
+
+TEST(FlattenJsonApostrophe, ApostropheOutsideAnyStringPositionIsParseError) {
+  ExpectFails("{'a':1,'b'}", Status::ParseError);
+  ExpectFails("{'a' 1}", Status::ParseError);
+}
+
+TEST(FlattenJsonApostrophe, InputOfExactlyTheMaximumSizeIsAccepted) {
+  const std::string text = PaddedToSize("['a']", kMaxJsonInputBytes);
+  ASSERT_EQ(text.size(), kMaxJsonInputBytes);
+  ExpectFlattens(text, {{"/0", "a", JsonEntryType::String}});
+}
+
+TEST(FlattenJsonApostrophe, InputOneByteOverTheMaximumIsDocumentTooLarge) {
+  ExpectFails(PaddedToSize("['a']", kMaxJsonInputBytes + 1), Status::DocumentTooLarge);
+}
+
+TEST(FlattenJsonApostrophe, MaximumSizeIsCountedBeforeConversionEvenWhenTheConvertedTextIsLonger) {
+  constexpr std::size_t kQuotes = kMaxJsonInputBytes - 4;
+  const std::string text = "['" + std::string(kQuotes, '"') + "']";
+  ASSERT_EQ(text.size(), kMaxJsonInputBytes);
+  FlattenResult result;
+  ASSERT_EQ(FlattenJson(text, result), Status::Ok);
+  ASSERT_EQ(result.entries.size(), 1u);
+  EXPECT_EQ(result.entries[0].key, "/0");
+  EXPECT_EQ(result.entries[0].value, std::string(kQuotes, '"'));
+}
+
+TEST(FlattenJsonApostrophe, NulBeforeConversionIsParseError) {
+  ExpectFails(std::string("{'a':'b'}\0", 10), Status::ParseError);
+  ExpectFails(std::string("['a\0b']", 7), Status::ParseError);
+  ExpectFails(std::string("\0['a']", 6), Status::ParseError);
+}
+
+TEST(FlattenJsonApostrophe, OverlongInputWithANulIsDocumentTooLargeBeforeTheNulCheck) {
+  std::string text = PaddedToSize("['a']", kMaxJsonInputBytes);
+  text.push_back('\0');
+  ExpectFails(text, Status::DocumentTooLarge);
+}
+
+TEST(FlattenJsonApostrophe, DepthLimitAppliesToTheConvertedText) {
+  const auto nested = [](std::size_t depth) {
+    return std::string(depth, '[') + "'x'" + std::string(depth, ']');
+  };
+  FlattenResult result;
+  ASSERT_EQ(FlattenJson(nested(kMaxJsonDepth), result), Status::Ok);
+  ASSERT_EQ(result.entries.size(), 1u);
+  EXPECT_EQ(result.entries[0].key, Repeated("/0", kMaxJsonDepth));
+  EXPECT_EQ(result.entries[0].value, "x");
+  ExpectFails(nested(kMaxJsonDepth + 1), Status::NestingTooDeep);
+}
+
+TEST(FlattenJsonApostrophe, EntryLimitAppliesToTheConvertedText) {
+  FlattenResult result;
+  ASSERT_EQ(FlattenJson(FlatArrayOf("'a'", kMaxFlatEntries), result), Status::Ok);
+  EXPECT_EQ(result.entries.size(), kMaxFlatEntries);
+  ExpectFails(FlatArrayOf("'a'", kMaxFlatEntries + 1), Status::TooManyEntries);
+}
+
+TEST(FlattenJsonApostrophe, KeyTextLimitAppliesToTheConvertedText) {
+  const std::string atLimit =
+      Apostrophized(KeyBudgetDocument(std::string(kBudgetTailKeyLength, 'b')));
+  ASSERT_EQ(atLimit.find('"'), std::string::npos);
+  ExpectKeyBudgetAtTheLimit(atLimit, kBudgetLeafCount + 1);
+  ExpectFails(Apostrophized(KeyBudgetDocument(std::string(kBudgetTailKeyLength + 1, 'b'))),
+              Status::KeyTextTooLarge);
+}
+
+TEST(FlattenJsonApostrophe, TextWithoutAnApostropheIsParsedExactlyAsBefore) {
+  ExpectFlattens(R"({"a":"it's","b":[1,2]})", {{"/a", "it's", JsonEntryType::String},
+                                               {"/b/0", "1", JsonEntryType::Number},
+                                               {"/b/1", "2", JsonEntryType::Number}});
+}

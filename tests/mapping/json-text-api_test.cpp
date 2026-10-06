@@ -1655,3 +1655,317 @@ TEST(JsonTextApiConcurrency, ParallelParseCountReadAndDiscardStayConsistent) {
   EXPECT_EQ(DiscardAllJsonDocuments(store, leftover), Status::Ok);
   EXPECT_EQ(leftover, 0u);
 }
+
+// ---------------------------------------------------------------------------
+// NormalizeJsonText: apostrophe strings to standard JSON, no store involved.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+Status NormalizeText(const std::string& json, Buffer& out) {
+  return NormalizeJsonText(json.c_str(), static_cast<std::uint32_t>(json.size() + 1), out.Data(),
+                           out.Size());
+}
+
+void ExpectNormalizes(const std::string& json, const std::string& expected) {
+  SCOPED_TRACE(json.substr(0, 80));
+  Buffer out(expected.size() + 1);
+  EXPECT_EQ(NormalizeText(json, out), Status::Ok);
+  EXPECT_EQ(out.Text(), expected);
+}
+
+void ExpectNormalizeFails(const std::string& json, Status expected, std::size_t bufferSize = 64) {
+  SCOPED_TRACE(json.substr(0, 80));
+  Buffer out(bufferSize);
+  EXPECT_EQ(NormalizeText(json, out), expected);
+  EXPECT_TRUE(out.HoldsEmptyText());
+}
+
+std::string PaddedWithSpaces(std::string text, std::size_t size) {
+  EXPECT_LE(text.size(), size);
+  text.resize(size, ' ');
+  return text;
+}
+
+}  // namespace
+
+TEST(NormalizeJsonText, ApostropheObjectBecomesStandardJson) {
+  ExpectNormalizes("{'a':'b'}", R"({"a":"b"})");
+  ExpectNormalizes("{'a':{'b':['c',1,true,null]},'d':''}", R"({"a":{"b":["c",1,true,null]},"d":""})");
+  ExpectNormalizes("'text'", R"("text")");
+}
+
+TEST(NormalizeJsonText, FormsAAndBGiveTheSameNormalizedText) {
+  const std::string expected = R"({"name":"restify","note":"it's ok"})";
+  ExpectNormalizes(R"({'name':'restify','note':"it's ok"})", expected);
+  const std::string formB = "{'name':'restify','note':'it\\'s ok'}";
+  ASSERT_NE(formB.find("\\'"), std::string::npos);
+  ExpectNormalizes(formB, expected);
+}
+
+TEST(NormalizeJsonText, NormalizedTextParsesToTheSameValueAsTheOriginal) {
+  JsonDocumentStore store;
+  Buffer out(64);
+  ASSERT_EQ(NormalizeText("{'note':'it\\'s ok'}", out), Status::Ok);
+  const std::uint32_t id = MustParse(store, out.Text());
+  ExpectValue(store, id, "/note", "it's ok", kString);
+}
+
+TEST(NormalizeJsonText, JsonUnicodeEscapeInsideAnApostropheStringIsKeptUnchanged) {
+  const std::string json = "['\\u0041']";
+  ASSERT_NE(json.find("\\u0041"), std::string::npos);
+  ExpectNormalizes(json, "[\"\\u0041\"]");
+}
+
+TEST(NormalizeJsonText, OutputCanBeLongerThanTheInput) {
+  const std::string json = "['\"\"']";
+  const std::string expected = "[\"\\\"\\\"\"]";
+  ASSERT_GT(expected.size(), json.size());
+  Buffer tooSmall(json.size() + 1);
+  EXPECT_EQ(NormalizeText(json, tooSmall), Status::BufferTooSmall);
+  EXPECT_TRUE(tooSmall.HoldsEmptyText());
+  ExpectNormalizes(json, expected);
+}
+
+TEST(NormalizeJsonText, ValidDoubleQuotedInputIsReturnedByteIdentical) {
+  const char* const documents[] = {
+      R"({"a":[1,2.5,-3e2,true,false,null,"s"],"b":{"c":""}})",
+      R"({"note":"it's ok","k's":"'quoted'"})",
+      R"("it's")",
+      " \t{ \"a\" :\r\n [ 1 , 2 ] } ",
+      R"({"line":"a\nb \"q\" \\ \/ \u0041"})",
+      "{\"s\":\"\xC3\xA9\xE6\x97\xA5\"}",
+      "42",
+      "true",
+      "null",
+  };
+  for (const char* document : documents) {
+    ExpectNormalizes(document, document);
+  }
+}
+
+TEST(NormalizeJsonText, NormalizingTheOutputAgainChangesNothing) {
+  Buffer first(64);
+  ASSERT_EQ(NormalizeText("{'a':'it\\'s \"x\"','b':\"it's\"}", first), Status::Ok);
+  Buffer second(64);
+  ASSERT_EQ(NormalizeText(first.Text(), second), Status::Ok);
+  EXPECT_EQ(second.Text(), first.Text());
+}
+
+TEST(NormalizeJsonText, InputSizeLargerThanTheTextUsesOnlyTheBytesBeforeTheNul) {
+  const char json[] = "{'a':1}\0{'b':2}";
+  Buffer out(32);
+  EXPECT_EQ(NormalizeJsonText(json, sizeof(json), out.Data(), out.Size()), Status::Ok);
+  EXPECT_EQ(out.Text(), R"({"a":1})");
+}
+
+TEST(NormalizeJsonText, SizeExactlyCoveringTheNulIsAcceptedAndOneShortIsNot) {
+  const char json[] = "['a']";
+  Buffer out(16);
+  EXPECT_EQ(NormalizeJsonText(json, 5, out.Data(), out.Size()), Status::UnterminatedInputText);
+  EXPECT_TRUE(out.HoldsEmptyText());
+  EXPECT_EQ(NormalizeJsonText(json, 6, out.Data(), out.Size()), Status::Ok);
+  EXPECT_EQ(out.Text(), R"(["a"])");
+}
+
+TEST(NormalizeJsonText, NullJsonIsInvalidArgumentAndNothingIsWritten) {
+  Buffer out(16);
+  EXPECT_EQ(NormalizeJsonText(nullptr, 8, out.Data(), out.Size()), Status::InvalidArgument);
+  EXPECT_TRUE(out.Untouched());
+}
+
+TEST(NormalizeJsonText, ZeroJsonSizeIsInvalidArgumentAndNothingIsWritten) {
+  Buffer out(16);
+  EXPECT_EQ(NormalizeJsonText("{'a':1}", 0, out.Data(), out.Size()), Status::InvalidArgument);
+  EXPECT_TRUE(out.Untouched());
+}
+
+TEST(NormalizeJsonText, NullJsonAndNullNormalizedIsInvalidArgument) {
+  EXPECT_EQ(NormalizeJsonText(nullptr, 0, nullptr, 0), Status::InvalidArgument);
+}
+
+TEST(NormalizeJsonText, TextWithoutANulInsideTheSizeIsUnterminatedInputTextAndNormalizedIsEmpty) {
+  const std::array<char, 5> noNul = {'[', '\'', 'a', '\'', ']'};
+  Buffer out(16);
+  EXPECT_EQ(NormalizeJsonText(noNul.data(), static_cast<std::uint32_t>(noNul.size()), out.Data(),
+                              out.Size()),
+            Status::UnterminatedInputText);
+  EXPECT_TRUE(out.HoldsEmptyText());
+}
+
+TEST(NormalizeJsonText, UnterminatedInputTextIsReportedEvenWithAnUnusableOutputBuffer) {
+  const std::array<char, 3> noNul = {'[', '1', ']'};
+  const std::uint32_t size = static_cast<std::uint32_t>(noNul.size());
+  EXPECT_EQ(NormalizeJsonText(noNul.data(), size, nullptr, 0), Status::UnterminatedInputText);
+  Buffer out(16);
+  EXPECT_EQ(NormalizeJsonText(noNul.data(), size, out.Data(), 0), Status::UnterminatedInputText);
+  EXPECT_TRUE(out.Untouched());
+}
+
+TEST(NormalizeJsonText, NullNormalizedIsInvalidArgument) {
+  const std::string json = "{'a':1}";
+  EXPECT_EQ(NormalizeJsonText(json.c_str(), static_cast<std::uint32_t>(json.size() + 1), nullptr,
+                              16),
+            Status::InvalidArgument);
+}
+
+TEST(NormalizeJsonText, ZeroNormalizedSizeIsInvalidArgumentAndNothingIsWritten) {
+  const std::string json = "{'a':1}";
+  Buffer out(16);
+  EXPECT_EQ(NormalizeJsonText(json.c_str(), static_cast<std::uint32_t>(json.size() + 1), out.Data(),
+                              0),
+            Status::InvalidArgument);
+  EXPECT_TRUE(out.Untouched());
+}
+
+TEST(NormalizeJsonText, UnusableOutputBufferIsReportedBeforeTheTextIsChecked) {
+  const std::string tooLarge(kMaxJsonInputBytes + 1, 'a');
+  const std::uint32_t size = static_cast<std::uint32_t>(tooLarge.size() + 1);
+  EXPECT_EQ(NormalizeJsonText(tooLarge.c_str(), size, nullptr, 0), Status::InvalidArgument);
+  const std::string invalid = "not json";
+  Buffer out(16);
+  EXPECT_EQ(NormalizeJsonText(invalid.c_str(), static_cast<std::uint32_t>(invalid.size() + 1),
+                              out.Data(), 0),
+            Status::InvalidArgument);
+  EXPECT_TRUE(out.Untouched());
+}
+
+TEST(NormalizeJsonText, InputOneByteOverTheMaximumIsDocumentTooLargeAndNormalizedIsEmpty) {
+  ExpectNormalizeFails(PaddedWithSpaces("['a']", kMaxJsonInputBytes + 1), Status::DocumentTooLarge);
+  ExpectNormalizeFails(std::string(kMaxJsonInputBytes + 1, 'x'), Status::DocumentTooLarge);
+}
+
+TEST(NormalizeJsonText, InputOfExactlyTheMaximumSizeIsNormalized) {
+  const std::string json = PaddedWithSpaces("['a']", kMaxJsonInputBytes);
+  const std::string expected = PaddedWithSpaces(R"(["a"])", kMaxJsonInputBytes);
+  Buffer out(kMaxJsonInputBytes + 1);
+  EXPECT_EQ(NormalizeText(json, out), Status::Ok);
+  EXPECT_TRUE(out.Text() == expected);
+}
+
+TEST(NormalizeJsonText, MaximumSizeIsCountedBeforeConversionEvenWhenTheOutputIsLonger) {
+  constexpr std::size_t kQuotes = kMaxJsonInputBytes - 4;
+  const std::string json = "['" + std::string(kQuotes, '"') + "']";
+  ASSERT_EQ(json.size(), kMaxJsonInputBytes);
+  Buffer out(2 * kMaxJsonInputBytes + 8);
+  EXPECT_EQ(NormalizeText(json, out), Status::Ok);
+  EXPECT_EQ(out.Text().size(), 2 * kQuotes + 4);
+}
+
+TEST(NormalizeJsonText, EmptyTextIsParseErrorAndNormalizedIsEmpty) {
+  ExpectNormalizeFails("", Status::ParseError);
+  const char leadingNul[] = "\0['a']";
+  Buffer out(16);
+  EXPECT_EQ(NormalizeJsonText(leadingNul, sizeof(leadingNul), out.Data(), out.Size()),
+            Status::ParseError);
+  EXPECT_TRUE(out.HoldsEmptyText());
+}
+
+TEST(NormalizeJsonText, TextThatIsNotJsonAfterConversionIsParseErrorAndNormalizedIsEmpty) {
+  const char* const invalid[] = {
+      "{'note':'it's'}",
+      R"({"note":"it\'s"})",
+      R"({'a':'a\\'b'})",
+      "{'a':'b",
+      "{'a':",
+      "{'a':1,'b'}",
+      "{'a' 1}",
+      "not json",
+      "   ",
+      "[1,]",
+      "{'a':1} trailing",
+      "{'a':1}{'b':2}",
+      "{a:1}",
+  };
+  for (const char* text : invalid) {
+    ExpectNormalizeFails(text, Status::ParseError);
+  }
+}
+
+TEST(NormalizeJsonText, InvalidUtf8AfterConversionIsParseErrorAndNormalizedIsEmpty) {
+  ExpectNormalizeFails("['\xC3']", Status::ParseError);
+  ExpectNormalizeFails("{\"a\":\"\xFF\"}", Status::ParseError);
+}
+
+TEST(NormalizeJsonText, OutputOneByteTooSmallIsBufferTooSmallAndARetryGivesTheExactText) {
+  const std::string json = "{'a':'b'}";
+  const std::string expected = R"({"a":"b"})";
+  Buffer tooSmall(expected.size());
+  EXPECT_EQ(NormalizeText(json, tooSmall), Status::BufferTooSmall);
+  EXPECT_TRUE(tooSmall.HoldsEmptyText());
+
+  Buffer exact(expected.size() + 1);
+  EXPECT_EQ(NormalizeText(json, exact), Status::Ok);
+  EXPECT_EQ(exact.Text(), expected);
+
+  Buffer larger(64);
+  EXPECT_EQ(NormalizeText(json, larger), Status::Ok);
+  EXPECT_EQ(larger.Text(), expected);
+}
+
+TEST(NormalizeJsonText, OneByteBufferIsBufferTooSmallAndEmpty) {
+  ExpectNormalizeFails("{'a':1}", Status::BufferTooSmall, 1);
+}
+
+TEST(NormalizeJsonText, NormalizedHoldsTheTextOnlyOnSuccessAndOverwritesAPreviousResult) {
+  Buffer out(32);
+  ASSERT_EQ(NormalizeText("['x']", out), Status::Ok);
+  ASSERT_EQ(out.Text(), R"(["x"])");
+  EXPECT_EQ(NormalizeText("['x'", out), Status::ParseError);
+  EXPECT_TRUE(out.HoldsEmptyText());
+}
+
+TEST(NormalizeJsonText, DocumentDeeperThanTheStoreLimitIsNormalized) {
+  const std::size_t depth = kMaxJsonDepth + 1;
+  const std::string json = std::string(depth, '[') + "'x'" + std::string(depth, ']');
+  const std::string expected = std::string(depth, '[') + "\"x\"" + std::string(depth, ']');
+  ExpectNormalizes(json, expected);
+
+  JsonDocumentStore store;
+  ExpectParseFails(store, json, Status::NestingTooDeep);
+}
+
+TEST(NormalizeJsonText, DocumentWithMoreLeavesThanTheStoreLimitIsNormalized) {
+  std::string json = "[";
+  std::string expected = "[";
+  for (std::size_t i = 0; i < kMaxFlatEntries + 1; ++i) {
+    json += i == 0 ? "'a'" : ",'a'";
+    expected += i == 0 ? "\"a\"" : ",\"a\"";
+  }
+  json += "]";
+  expected += "]";
+  ExpectNormalizes(json, expected);
+
+  JsonDocumentStore store;
+  ExpectParseFails(store, json, Status::TooManyEntries);
+}
+
+TEST(NormalizeJsonText, DoesNotTouchTheDocumentStore) {
+  JsonDocumentStore store;
+  const std::vector<std::uint32_t> ids = FillPool(store);
+  ASSERT_EQ(ids.size(), kJsonDocumentSlotCount);
+  Buffer out(32);
+  EXPECT_EQ(NormalizeText("{'a':1}", out), Status::Ok);
+  EXPECT_EQ(out.Text(), R"({"a":1})");
+  for (const std::uint32_t id : ids) {
+    EXPECT_EQ(CountOf(store, id), 1u);
+  }
+}
+
+TEST(TextApiInternalError, NormalizeReportsInternalErrorWhenAllocationFailsAndNormalizedIsEmpty) {
+  const std::string json = "{'a':[1,2,3],'b':{'c':'text'}}";
+  Buffer out(64);
+  Status status = Status::Ok;
+  int failedAllocations = 0;
+  {
+    FailAllocations failAllocations;
+    status = NormalizeText(json, out);
+    failedAllocations = t_failedAllocations;
+  }
+  EXPECT_EQ(status, Status::InternalError);
+  EXPECT_GT(failedAllocations, 0);
+  EXPECT_TRUE(out.HoldsEmptyText());
+
+  EXPECT_EQ(NormalizeText(json, out), Status::Ok);
+  EXPECT_EQ(out.Text(), R"({"a":[1,2,3],"b":{"c":"text"}})");
+}
