@@ -21,6 +21,20 @@ variables
   char gValue[64];
   char gSmallValue[4];
   dword gDocId = 0;
+  char gTypedText[256] = "{\"int\":42,\"frac\":2.5,\"whole\":5.0,\"max\":2147483647,\"over\":2147483648,\"flag\":true,\"off\":false,\"none\":null,\"numText\":\"42\",\"list\":[1,2,3],\"obj\":{\"a\":1}}";
+  dword gTypedDocId = 0;
+  char gTypedInt[16] = "/int";
+  char gTypedFrac[16] = "/frac";
+  char gTypedWhole[16] = "/whole";
+  char gTypedMax[16] = "/max";
+  char gTypedOver[16] = "/over";
+  char gTypedFlag[16] = "/flag";
+  char gTypedOff[16] = "/off";
+  char gTypedNone[16] = "/none";
+  char gTypedNumText[16] = "/numText";
+  char gTypedList[16] = "/list";
+  char gTypedObj[16] = "/obj";
+  char gTypedMissing[16] = "/missing";
 }
 
 void verifyReport(char what[], long rc)
@@ -86,6 +100,46 @@ void verifyParseReadNote(char what[], char bodyText[])
     write("  %s = %s (type %ld), expected: it's ok", gPathNote, gValue, valueType);
   }
   verifyReport("discard", restLibJsonDiscardDocument(tempId));
+}
+
+void verifyTypedLong(char path[], long expectedStatus)
+{
+  long rc;
+  long value;
+
+  rc = restLibJsonReadLong(gTypedDocId, path, value);
+  verifyReport("read long", rc);
+  write("  %s = %ld, expected status %ld", path, value, expectedStatus);
+}
+
+void verifyTypedDouble(char path[], long expectedStatus)
+{
+  long rc;
+  float value;
+
+  rc = restLibJsonReadDouble(gTypedDocId, path, value);
+  verifyReport("read double", rc);
+  write("  %s = %f, expected status %ld", path, value, expectedStatus);
+}
+
+void verifyTypedBool(char path[], long expectedStatus)
+{
+  long rc;
+  long value;
+
+  rc = restLibJsonReadBool(gTypedDocId, path, value);
+  verifyReport("read bool", rc);
+  write("  %s = %ld, expected status %ld", path, value, expectedStatus);
+}
+
+void verifyTypedCount(char path[], long expectedStatus)
+{
+  long rc;
+  dword elementCount;
+
+  rc = restLibJsonCountElements(gTypedDocId, path, elementCount);
+  verifyReport("count elements", rc);
+  write("  %s has %lu elements, expected status %ld", path, elementCount, expectedStatus);
 }
 
 on start
@@ -220,6 +274,64 @@ on key '0'
   {
     restLibJsonDiscardDocument(tempId);
   }
+}
+
+on key 'a'
+{
+  long rc;
+
+  restLibJsonDiscardDocument(gTypedDocId);
+  gTypedDocId = 0;
+  rc = restLibJsonParse(gTypedText, gTypedDocId);
+  verifyReport("parse typed document", rc);
+}
+
+on key 'b'
+{
+  write("read long: 42, 5, 2147483647, then -16, -17, -14, -14, -15, -12");
+  verifyTypedLong(gTypedInt, 0);
+  verifyTypedLong(gTypedWhole, 0);
+  verifyTypedLong(gTypedMax, 0);
+  verifyTypedLong(gTypedOver, -16);
+  verifyTypedLong(gTypedFrac, -17);
+  verifyTypedLong(gTypedNumText, -14);
+  verifyTypedLong(gTypedFlag, -14);
+  verifyTypedLong(gTypedNone, -15);
+  verifyTypedLong(gTypedMissing, -12);
+}
+
+on key 'c'
+{
+  write("read double: 42, 2.5, 5, then -14, -15");
+  verifyTypedDouble(gTypedInt, 0);
+  verifyTypedDouble(gTypedFrac, 0);
+  verifyTypedDouble(gTypedWhole, 0);
+  verifyTypedDouble(gTypedNumText, -14);
+  verifyTypedDouble(gTypedNone, -15);
+}
+
+on key 'd'
+{
+  write("read bool: 1, 0, then -14, -15");
+  verifyTypedBool(gTypedFlag, 0);
+  verifyTypedBool(gTypedOff, 0);
+  verifyTypedBool(gTypedInt, -14);
+  verifyTypedBool(gTypedNone, -15);
+}
+
+on key 'e'
+{
+  write("count elements: 3, then -14, -14, -15");
+  verifyTypedCount(gTypedList, 0);
+  verifyTypedCount(gTypedObj, -14);
+  verifyTypedCount(gTypedInt, -14);
+  verifyTypedCount(gTypedNone, -15);
+}
+
+on key 'f'
+{
+  verifyReport("discard typed document", restLibJsonDiscardDocument(gTypedDocId));
+  gTypedDocId = 0;
 }
 
 on stopMeasurement

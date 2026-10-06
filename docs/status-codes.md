@@ -53,6 +53,12 @@ guess where the next free number is.
 `-11..-17` (path and conversion codes) are documented in `docs/json-path.md`
 and `docs/type-conversion.md`.
 
+`-15` (`NullValue`), `-16` (`NumericOverflow`) and `-17` (`NotIntegral`) are
+visible to CAPL through the typed reads: `-15` from `restifyJsonReadLong`,
+`restifyJsonReadDouble`, `restifyJsonReadBool` and `restifyJsonCountElements`;
+`-16` and `-17` from `restifyJsonReadLong` only. `-14` also means "wrong value
+type" there; see `docs/capl-json-surface.md`.
+
 ## `-18..-23`
 
 | `Status` | Meaning |

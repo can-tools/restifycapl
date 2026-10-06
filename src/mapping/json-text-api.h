@@ -22,6 +22,20 @@ Status ReadJsonValue(JsonDocumentStore& store, std::uint32_t documentId, const c
                      std::uint32_t pathSize, char* value, std::uint32_t valueSize,
                      std::int32_t& valueType);
 
+// Typed reads at a path: the path text is checked before the document id; a wrong value type gives TypeMismatch.
+Status ReadJsonLong(JsonDocumentStore& store, std::uint32_t documentId, const char* pathText,
+                    std::uint32_t pathSize, std::int32_t& value);
+
+Status ReadJsonDouble(JsonDocumentStore& store, std::uint32_t documentId, const char* pathText,
+                      std::uint32_t pathSize, double& value);
+
+// `value` is written as 1 or 0.
+Status ReadJsonBool(JsonDocumentStore& store, std::uint32_t documentId, const char* pathText,
+                    std::uint32_t pathSize, std::int32_t& value);
+
+Status CountJsonElements(JsonDocumentStore& store, std::uint32_t documentId, const char* pathText,
+                         std::uint32_t pathSize, std::uint32_t& elementCount);
+
 Status DiscardJsonDocument(JsonDocumentStore& store, std::uint32_t documentId);
 
 Status DiscardAllJsonDocuments(JsonDocumentStore& store, std::uint32_t& discardedCount);

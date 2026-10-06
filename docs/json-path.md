@@ -70,6 +70,11 @@ met while tokens remain is a `TypeMismatch`; `NullValue` is reserved for a
 terminal node read by a typed accessor (see `type-conversion.h`'s `To*`
 family), not for a traversal failure here.
 
+A second overload takes the `PathTokens` that `ParsePath` produced instead of the
+text. It never parses, so it cannot report a syntax error, and the string form is
+exactly `ParsePath` followed by it. A caller holding a lock parses first and
+walks the tokens under the lock.
+
 On `Ok`, `out` points into the caller's document and is valid only while the
 document is alive. On any other status `out` is left unchanged.
 

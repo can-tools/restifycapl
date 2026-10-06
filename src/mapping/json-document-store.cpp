@@ -154,6 +154,29 @@ Status JsonDocumentStore::ReadValue(std::uint32_t documentId, std::string_view p
   return status;
 }
 
+Status JsonDocumentStore::ReadWith(std::uint32_t documentId, std::string_view path,
+                                   const std::function<Status(const JsonValue&)>& read) {
+  return ReadWithTokens(documentId, path,
+                        [&read](const JsonValue& document, const PathTokens&) { return read(document); });
+}
+
+Status JsonDocumentStore::ReadWithTokens(
+    std::uint32_t documentId, std::string_view path,
+    const std::function<Status(const JsonValue&, const PathTokens&)>& read) {
+  PathTokens tokens;
+  const Status pathStatus = ParsePath(path, tokens);
+  if (pathStatus != Status::Ok) {
+    return pathStatus;
+  }
+
+  std::lock_guard<std::mutex> lock(mutex_);
+  Slot* const slot = FindLiveSlotLocked(documentId);
+  if (slot == nullptr) {
+    return Status::UnknownDocumentId;
+  }
+  return read(slot->result.document, tokens);
+}
+
 Status JsonDocumentStore::Discard(std::uint32_t documentId) {
   // The document is destroyed after the lock is released because freeing a large one under the mutex would stall concurrent readers.
   FlattenResult doomed;

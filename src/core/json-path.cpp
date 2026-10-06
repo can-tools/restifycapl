@@ -65,7 +65,7 @@ Status ParseIndex(const std::string& token, std::uint32_t& index) {
 
 }  // namespace
 
-Status ParsePath(std::string_view path, std::vector<std::string>& out) {
+Status ParsePath(std::string_view path, PathTokens& out) {
   if (path.data() == nullptr) {
     return Status::InvalidArgument;
   }
@@ -100,12 +100,16 @@ Status ParsePath(std::string_view path, std::vector<std::string>& out) {
 
 Status ResolvePath(const JsonValue& document, std::string_view path,
                    const JsonValue*& out) {
-  std::vector<std::string> tokens;
+  PathTokens tokens;
   const Status parseStatus = ParsePath(path, tokens);
   if (parseStatus != Status::Ok) {
     return parseStatus;
   }
+  return ResolvePath(document, tokens, out);
+}
 
+Status ResolvePath(const JsonValue& document, const PathTokens& tokens,
+                   const JsonValue*& out) {
   const JsonValue* current = &document;
   for (const std::string& token : tokens) {
     if (current->is_object()) {

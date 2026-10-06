@@ -1,8 +1,9 @@
 # CAPL JSON surface
 
-Normative material for the seven `CAPL_DLL_INFO4` rows that expose parsed JSON
-documents and JSON text normalization to CAPL, and for the translation layer in
-`src/mapping/json-text-api.*` and the document store in
+Normative material for the eleven `CAPL_DLL_INFO4` rows that expose parsed JSON
+documents, typed reads and JSON text normalization to CAPL, and for the
+translation layer in `src/mapping/json-text-api.*`, the typed reads in
+`src/mapping/json-accessors.*` and the document store in
 `src/mapping/json-document-store.*` behind them. `src/module/exports.cpp`
 points here rather than restating any of it. Key format, entry order, number
 text and the limits are defined in `docs/json-flatten.md`; path syntax is
@@ -15,11 +16,11 @@ on a read.
 
 ## `categoryName`
 
-The seven rows form a fourth group:
+The eleven rows form a fourth group:
 
 | Group | Meaning | Rows |
 |---|---|---|
-| `Json` | Parsed JSON documents held by the DLL, and JSON text normalization. | rows 19-25 |
+| `Json` | Parsed JSON documents held by the DLL, typed reads from them, and JSON text normalization. | rows 19-29 |
 
 ## Signature table
 
@@ -32,13 +33,19 @@ The seven rows form a fourth group:
 | 23 | `long restifyJsonDiscardDocument(dword documentId)` | 1 |
 | 24 | `long restifyJsonDiscardAllDocuments(dword& discardedCount)` | 1 |
 | 25 | `long restifyJsonNormalize(char json[], dword jsonSize, char normalized[], dword normalizedSize)` | 4 |
+| 26 | `long restifyJsonReadLong(dword documentId, char path[], dword pathSize, long& value)` | 4 |
+| 27 | `long restifyJsonReadDouble(dword documentId, char path[], dword pathSize, float& value)` | 4 |
+| 28 | `long restifyJsonReadBool(dword documentId, char path[], dword pathSize, long& value)` | 4 |
+| 29 | `long restifyJsonCountElements(dword documentId, char path[], dword pathSize, dword& elementCount)` | 4 |
 
 The C++ translation layer (`src/mapping/json-text-api.h`) mirrors this table
 one-to-one: `ParseJsonDocument` (row 19), `CountJsonEntries` (row 20),
 `ReadJsonEntry` (row 21), `ReadJsonValue` (row 22), `DiscardJsonDocument`
 (row 23), `DiscardAllJsonDocuments` (row 24), `NormalizeJsonText` (row 25,
-which takes no store). Each of rows 19-24 takes an injected
-`JsonDocumentStore&` first, then the CAPL parameters as pointer+size pairs.
+which takes no store), `ReadJsonLong` (row 26), `ReadJsonDouble` (row 27),
+`ReadJsonBool` (row 28), `CountJsonElements` (row 29). Each of rows 19-24 and
+26-29 takes an injected `JsonDocumentStore&` first, then the CAPL parameters
+as pointer+size pairs.
 `exports.cpp`'s shims are expected to be a single forwarding call into these.
 
 ## Documents and `documentId`
@@ -77,7 +84,8 @@ text and skips it; the BOM counts towards the 1 MiB limit. A partial BOM
 
 ## Out-parameters
 
-`documentId`, `entryCount`, `valueType` and `discardedCount` are set to `0`
+`documentId`, `entryCount`, `valueType`, `discardedCount`, `value` (rows 26-28)
+and `elementCount` are set to `0`
 on entry and are overwritten **only** when the operation returns `0`. On any
 other status they read `0`, so a script can never mistake a leftover value for
 a result. The text buffers (`key`, `value`) follow the rules in the next
@@ -298,6 +306,77 @@ byte-identical.
 `restifyJsonNormalize` first, then pass `normalized` as the body to any of
 those rows.
 
+## Typed reads (rows 26-29)
+
+Rows 26-28 read the node at `path` as a `long`, a `float` (a C++ `double`) or
+a boolean (`long`, `1` or `0`); row 29 returns the number of elements of an
+array. They apply `ToLong`, `ToDouble` and `ToBool` (`docs/type-conversion.md`)
+strictly: nothing is coerced. A JSON string `"42"` is not a number, and `0`/`1`
+is not a boolean. A script that wants coercion reads the text with
+`restifyJsonReadValue` and converts it itself. Each call parses the path once, outside
+the store lock, then walks the parsed tokens against the stored document under
+the lock; nothing is cached or copied.
+
+`float&` is passed as a reference to an 8-byte value (type character
+`'F' - 128`). A number too large for a `double` is rejected at parse time
+(`-10`), so a stored number is always finite and row 27 has no overflow status.
+
+### `-14` has two meanings
+
+`-14` (`TypeMismatch`) means either a **path** mismatch (a non-canonical array
+token, or a scalar met with path tokens left; `docs/json-path.md`) or a
+**value type** mismatch (the node is not of the requested type). A script
+cannot tell them apart from the status alone; call `restifyJsonReadValue` and
+look at `valueType` if it matters.
+
+### Check order (rows 26-29)
+
+1. The out-parameter is set to `0` on entry.
+2. The path text is checked: `-1` (null pointer or size `0`), `-6` (no NUL).
+3. The path syntax is checked: `-11`.
+4. Unknown id: `-31`.
+5. The path is resolved against the document: `-12`, `-13`, `-14`.
+6. The type of the node: `-14`, `-15`, and for row 26 `-16`, `-17`.
+7. Otherwise `0`: the out-parameter is written.
+
+The out-parameter is written only on `0`; row 28 writes `1` or `0`.
+
+### `restifyJsonReadLong` (row 26)
+
+An integer or a whole-valued float (`5.0` gives `5`) in the `int32` range gives
+`0`. `-16` for a number outside the `int32` range (including an integer beyond
+64 bits); `-17` for a number with a fractional part (never truncated).
+
+### `restifyJsonReadDouble` (row 27)
+
+Any JSON number (integer, fraction, exponent) gives `0`.
+
+### `restifyJsonReadBool` (row 28)
+
+Only `true` and `false` give `0`.
+
+### `restifyJsonCountElements` (row 29)
+
+Arrays only. An empty array gives `0` with `elementCount` `0`; `""` addresses
+the whole document. An object or scalar gives `-14`.
+
+| `Status` | Condition |
+|---|---|
+| `Ok` (`0`) | Out-parameter written. |
+| `InvalidArgument` (`-1`) | `path` null or `pathSize` `0`. |
+| `UnterminatedInputText` (`-6`) | No NUL within `pathSize`. |
+| `PathSyntaxError` (`-11`) | Path does not start with `/` (and is not empty), or has a bad `~` escape. |
+| `PathNotFound` (`-12`) | An object has no such key. |
+| `IndexOutOfRange` (`-13`) | An array index is at or above the array size, is `-`, or is above the `uint32` maximum. |
+| `TypeMismatch` (`-14`) | Path mismatch, or the node is not of the requested type (rows 26-28: string, container, and for row 28 any number; row 29: not an array). |
+| `NullValue` (`-15`) | The node is `null`; the out-parameter stays `0`. |
+| `NumericOverflow` (`-16`) | Row 26 only: outside the `int32` range. |
+| `NotIntegral` (`-17`) | Row 26 only: a number with a fractional part. |
+| `UnknownDocumentId` (`-31`) | The id is `0`, was never issued, or was discarded. |
+| `InternalError` (`-35`) | Unexpected failure inside the DLL, see "Unexpected internal failure". |
+
+Only row 26 returns `-16` and `-17`.
+
 ## Limits
 
 | Limit | Value | Status when exceeded |
@@ -319,7 +398,7 @@ No exception crosses into CANoe. If something unexpected fails inside the DLL
 (for example, memory runs out), the operation returns `InternalError`
 (`-35`) and leaves its out-parameters at 0 (row 25: when `normalized` is
 non-null and `normalizedSize` is not `0`, `normalized` holds the empty text);
-the same happens for all seven operations. It is distinct from
+the same happens for all eleven operations. It is distinct from
 `InvalidArgument` (`-1`), which always means the caller passed a bad argument.
 The limits bound the memory one document takes, so `-35` from
 `restifyJsonParse` means the process is short of memory, never just that the
@@ -336,6 +415,7 @@ input was too large.
 | 23 (`restifyJsonDiscardDocument`) | Allowed | Frees memory, after the lock is released. |
 | 24 (`restifyJsonDiscardAllDocuments`) | Allowed | Frees memory, after the lock is released. |
 | 25 (`restifyJsonNormalize`) | Allowed | Allocates a temporary copy of the text (up to twice its size); no store, no lock. |
+| 26-29 (`restifyJsonReadLong`, `restifyJsonReadDouble`, `restifyJsonReadBool`, `restifyJsonCountElements`) | Allowed | Parses the path (allocates) once, on the caller's thread, outside the store lock; the lock only walks the already-parsed tokens and allocates nothing; no copy of the document. |
 
 ## Risk
 

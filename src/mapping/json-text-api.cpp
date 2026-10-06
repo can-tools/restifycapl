@@ -6,6 +6,7 @@
 
 #include "core/buffer-copy.h"
 #include "core/input-text.h"
+#include "mapping/json-accessors.h"
 #include "mapping/json-flatten.h"
 #include "mapping/json-quotes.h"
 
@@ -83,6 +84,54 @@ Status ReadJsonValue(JsonDocumentStore& store, std::uint32_t documentId, const c
   } catch (...) {
     return Status::InternalError;
   }
+}
+
+namespace {
+
+template <typename Out>
+Status ReadTypedAt(JsonDocumentStore& store, std::uint32_t documentId, const char* pathText,
+                   std::uint32_t pathSize, Out& out,
+                   Status (*read)(const JsonValue&, const PathTokens&, Out&)) {
+  out = Out{};
+  try {
+    std::string_view pathView;
+    const Status status = BoundedText(pathText, pathSize, pathView);
+    if (status != Status::Ok) {
+      return status;
+    }
+    return store.ReadWithTokens(documentId, pathView,
+                                [&](const JsonValue& document, const PathTokens& tokens) {
+                                  return read(document, tokens, out);
+                                });
+  } catch (...) {
+    out = Out{};
+    return Status::InternalError;
+  }
+}
+
+}  // namespace
+
+Status ReadJsonLong(JsonDocumentStore& store, std::uint32_t documentId, const char* pathText,
+                    std::uint32_t pathSize, std::int32_t& value) {
+  return ReadTypedAt(store, documentId, pathText, pathSize, value, ReadLongAt);
+}
+
+Status ReadJsonDouble(JsonDocumentStore& store, std::uint32_t documentId, const char* pathText,
+                      std::uint32_t pathSize, double& value) {
+  return ReadTypedAt(store, documentId, pathText, pathSize, value, ReadDoubleAt);
+}
+
+Status ReadJsonBool(JsonDocumentStore& store, std::uint32_t documentId, const char* pathText,
+                    std::uint32_t pathSize, std::int32_t& value) {
+  bool flag = false;
+  const Status status = ReadTypedAt(store, documentId, pathText, pathSize, flag, ReadBoolAt);
+  value = (status == Status::Ok && flag) ? 1 : 0;
+  return status;
+}
+
+Status CountJsonElements(JsonDocumentStore& store, std::uint32_t documentId, const char* pathText,
+                         std::uint32_t pathSize, std::uint32_t& elementCount) {
+  return ReadTypedAt(store, documentId, pathText, pathSize, elementCount, CountElementsAt);
 }
 
 Status DiscardJsonDocument(JsonDocumentStore& store, std::uint32_t documentId) {

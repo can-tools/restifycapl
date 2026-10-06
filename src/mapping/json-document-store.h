@@ -4,9 +4,11 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <mutex>
 #include <string_view>
 
+#include "core/json-path.h"
 #include "core/status.h"
 #include "mapping/json-flatten.h"
 
@@ -35,6 +37,14 @@ class JsonDocumentStore {
   // Path errors pass through from ResolvePath; a non-empty container -> TypeMismatch.
   Status ReadValue(std::uint32_t documentId, std::string_view path, char* value,
                    std::uint32_t valueSize, JsonEntryType& valueType);
+
+  // Runs `read` on the stored document under the lock, without a copy. The path is syntax-checked first (PathSyntaxError beats UnknownDocumentId).
+  Status ReadWith(std::uint32_t documentId, std::string_view path,
+                  const std::function<Status(const JsonValue&)>& read);
+
+  // As ReadWith, but the path is parsed once, outside the lock, and `read` also receives the tokens.
+  Status ReadWithTokens(std::uint32_t documentId, std::string_view path,
+                        const std::function<Status(const JsonValue&, const PathTokens&)>& read);
 
   Status Discard(std::uint32_t documentId);
 

@@ -1561,6 +1561,317 @@ TEST(TextApiInternalError, ReadValueReportsInternalErrorWhenAllocationFailsAndSt
 }
 
 // ---------------------------------------------------------------------------
+// Typed reads: ReadJsonLong, ReadJsonDouble, ReadJsonBool, CountJsonElements.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+constexpr std::int32_t kLongSentinel = 777;
+constexpr double kDoubleSentinel = 7.5;
+constexpr std::int32_t kBoolSentinel = 55;
+constexpr std::uint32_t kElementsSentinel = 999;
+
+std::uint32_t SizeWithNul(const std::string& text) {
+  return static_cast<std::uint32_t>(text.size() + 1);
+}
+
+Status LongAt(JsonDocumentStore& store, std::uint32_t id, const std::string& path,
+              std::int32_t& out) {
+  out = kLongSentinel;
+  return ReadJsonLong(store, id, path.c_str(), SizeWithNul(path), out);
+}
+
+Status DoubleAt(JsonDocumentStore& store, std::uint32_t id, const std::string& path, double& out) {
+  out = kDoubleSentinel;
+  return ReadJsonDouble(store, id, path.c_str(), SizeWithNul(path), out);
+}
+
+Status BoolAt(JsonDocumentStore& store, std::uint32_t id, const std::string& path,
+              std::int32_t& out) {
+  out = kBoolSentinel;
+  return ReadJsonBool(store, id, path.c_str(), SizeWithNul(path), out);
+}
+
+Status ElementsAt(JsonDocumentStore& store, std::uint32_t id, const std::string& path,
+                  std::uint32_t& out) {
+  out = kElementsSentinel;
+  return CountJsonElements(store, id, path.c_str(), SizeWithNul(path), out);
+}
+
+void ExpectAllFail(JsonDocumentStore& store, std::uint32_t id, const std::string& path,
+                   Status expected) {
+  SCOPED_TRACE("path '" + path + "'");
+  std::int32_t longOut = kLongSentinel;
+  EXPECT_EQ(LongAt(store, id, path, longOut), expected);
+  EXPECT_EQ(longOut, 0);
+  double doubleOut = 1.0;
+  EXPECT_EQ(DoubleAt(store, id, path, doubleOut), expected);
+  EXPECT_EQ(doubleOut, 0.0);
+  std::int32_t boolOut = 1;
+  EXPECT_EQ(BoolAt(store, id, path, boolOut), expected);
+  EXPECT_EQ(boolOut, 0);
+  std::uint32_t countOut = 1;
+  EXPECT_EQ(ElementsAt(store, id, path, countOut), expected);
+  EXPECT_EQ(countOut, 0u);
+}
+
+}  // namespace
+
+TEST(TypedReads, ValidValuesAreReadThroughTheTextLayer) {
+  JsonDocumentStore store;
+  const std::uint32_t id =
+      MustParse(store, R"({"i":-12,"w":5.0,"d":2.5,"t":true,"f":false,"a":[1,[2,3],4]})");
+  std::int32_t longOut = 0;
+  EXPECT_EQ(LongAt(store, id, "/i", longOut), Status::Ok);
+  EXPECT_EQ(longOut, -12);
+  EXPECT_EQ(LongAt(store, id, "/w", longOut), Status::Ok);
+  EXPECT_EQ(longOut, 5);
+  EXPECT_EQ(LongAt(store, id, "/a/2", longOut), Status::Ok);
+  EXPECT_EQ(longOut, 4);
+
+  double doubleOut = 0;
+  EXPECT_EQ(DoubleAt(store, id, "/d", doubleOut), Status::Ok);
+  EXPECT_DOUBLE_EQ(doubleOut, 2.5);
+  EXPECT_EQ(DoubleAt(store, id, "/i", doubleOut), Status::Ok);
+  EXPECT_DOUBLE_EQ(doubleOut, -12.0);
+
+  std::int32_t boolOut = kBoolSentinel;
+  EXPECT_EQ(BoolAt(store, id, "/t", boolOut), Status::Ok);
+  EXPECT_EQ(boolOut, 1);
+  EXPECT_EQ(BoolAt(store, id, "/f", boolOut), Status::Ok);
+  EXPECT_EQ(boolOut, 0);
+
+  std::uint32_t countOut = 0;
+  EXPECT_EQ(ElementsAt(store, id, "/a", countOut), Status::Ok);
+  EXPECT_EQ(countOut, 3u);
+  EXPECT_EQ(ElementsAt(store, id, "/a/1", countOut), Status::Ok);
+  EXPECT_EQ(countOut, 2u);
+}
+
+TEST(TypedReads, RootArrayIsCountedWithTheEmptyPathAndEmptyArrayIsZero) {
+  JsonDocumentStore store;
+  const std::uint32_t id = MustParse(store, "[1,2,3,4,5]");
+  std::uint32_t countOut = 0;
+  EXPECT_EQ(ElementsAt(store, id, "", countOut), Status::Ok);
+  EXPECT_EQ(countOut, 5u);
+
+  const std::uint32_t emptyId = MustParse(store, R"({"e":[]})");
+  EXPECT_EQ(ElementsAt(store, emptyId, "/e", countOut), Status::Ok);
+  EXPECT_EQ(countOut, 0u);
+}
+
+TEST(TypedReads, WrongValueTypesAreTypeMismatchNullIsNullValueAndOutParametersAreZeroed) {
+  JsonDocumentStore store;
+  const std::uint32_t id =
+      MustParse(store, R"({"s":"42","n":null,"o":{"a":1},"z":0,"a":[1],"b":true})");
+  std::int32_t longOut = 0;
+  EXPECT_EQ(LongAt(store, id, "/s", longOut), Status::TypeMismatch);
+  EXPECT_EQ(longOut, 0);
+  EXPECT_EQ(LongAt(store, id, "/b", longOut), Status::TypeMismatch);
+  EXPECT_EQ(longOut, 0);
+  EXPECT_EQ(LongAt(store, id, "/o", longOut), Status::TypeMismatch);
+  EXPECT_EQ(LongAt(store, id, "/n", longOut), Status::NullValue);
+  EXPECT_EQ(longOut, 0);
+
+  double doubleOut = 0;
+  EXPECT_EQ(DoubleAt(store, id, "/s", doubleOut), Status::TypeMismatch);
+  EXPECT_EQ(doubleOut, 0.0);
+  EXPECT_EQ(DoubleAt(store, id, "/n", doubleOut), Status::NullValue);
+  EXPECT_EQ(doubleOut, 0.0);
+
+  std::int32_t boolOut = 0;
+  EXPECT_EQ(BoolAt(store, id, "/z", boolOut), Status::TypeMismatch);
+  EXPECT_EQ(boolOut, 0);
+  EXPECT_EQ(BoolAt(store, id, "/n", boolOut), Status::NullValue);
+  EXPECT_EQ(boolOut, 0);
+
+  std::uint32_t countOut = 0;
+  EXPECT_EQ(ElementsAt(store, id, "/o", countOut), Status::TypeMismatch);
+  EXPECT_EQ(countOut, 0u);
+  EXPECT_EQ(ElementsAt(store, id, "/s", countOut), Status::TypeMismatch);
+  EXPECT_EQ(ElementsAt(store, id, "/n", countOut), Status::NullValue);
+  EXPECT_EQ(countOut, 0u);
+}
+
+TEST(TypedReads, FractionAndOverflowAreNotIntegralAndNumericOverflowAndZeroTheOutParameter) {
+  JsonDocumentStore store;
+  const std::uint32_t id =
+      MustParse(store, R"({"f":3.7,"big":2147483648,"huge":1e30,"min":-2147483648})");
+  std::int32_t out = 0;
+  EXPECT_EQ(LongAt(store, id, "/f", out), Status::NotIntegral);
+  EXPECT_EQ(out, 0);
+  EXPECT_EQ(LongAt(store, id, "/big", out), Status::NumericOverflow);
+  EXPECT_EQ(out, 0);
+  EXPECT_EQ(LongAt(store, id, "/huge", out), Status::NumericOverflow);
+  EXPECT_EQ(out, 0);
+  EXPECT_EQ(LongAt(store, id, "/min", out), Status::Ok);
+  EXPECT_EQ(out, INT32_MIN);
+}
+
+TEST(TypedReads, OverflowingDoubleLiteralIsRejectedAtParseWithParseError) {
+  JsonDocumentStore store;
+  ExpectParseFails(store, R"({"v":1e400})", Status::ParseError);
+}
+
+TEST(TypedReads, PathErrorsAreReportedForAllFourReads) {
+  JsonDocumentStore store;
+  const std::uint32_t id = MustParse(store, R"({"a":[1,2],"s":"x"})");
+  ExpectAllFail(store, id, "a", Status::PathSyntaxError);
+  ExpectAllFail(store, id, "/missing", Status::PathNotFound);
+  ExpectAllFail(store, id, "/a/5", Status::IndexOutOfRange);
+  ExpectAllFail(store, id, "/s/deeper", Status::TypeMismatch);
+}
+
+TEST(TypedReads, NullPathOrZeroSizeIsInvalidArgumentAndZeroesTheOutParameter) {
+  JsonDocumentStore store;
+  const std::uint32_t id = MustParse(store, R"({"v":1})");
+
+  std::int32_t longOut = kLongSentinel;
+  EXPECT_EQ(ReadJsonLong(store, id, nullptr, 4, longOut), Status::InvalidArgument);
+  EXPECT_EQ(longOut, 0);
+  longOut = kLongSentinel;
+  EXPECT_EQ(ReadJsonLong(store, id, "/v", 0, longOut), Status::InvalidArgument);
+  EXPECT_EQ(longOut, 0);
+
+  double doubleOut = kDoubleSentinel;
+  EXPECT_EQ(ReadJsonDouble(store, id, nullptr, 4, doubleOut), Status::InvalidArgument);
+  EXPECT_EQ(doubleOut, 0.0);
+  doubleOut = kDoubleSentinel;
+  EXPECT_EQ(ReadJsonDouble(store, id, "/v", 0, doubleOut), Status::InvalidArgument);
+  EXPECT_EQ(doubleOut, 0.0);
+
+  std::int32_t boolOut = kBoolSentinel;
+  EXPECT_EQ(ReadJsonBool(store, id, nullptr, 4, boolOut), Status::InvalidArgument);
+  EXPECT_EQ(boolOut, 0);
+  boolOut = kBoolSentinel;
+  EXPECT_EQ(ReadJsonBool(store, id, "/v", 0, boolOut), Status::InvalidArgument);
+  EXPECT_EQ(boolOut, 0);
+
+  std::uint32_t countOut = kElementsSentinel;
+  EXPECT_EQ(CountJsonElements(store, id, nullptr, 4, countOut), Status::InvalidArgument);
+  EXPECT_EQ(countOut, 0u);
+  countOut = kElementsSentinel;
+  EXPECT_EQ(CountJsonElements(store, id, "/v", 0, countOut), Status::InvalidArgument);
+  EXPECT_EQ(countOut, 0u);
+}
+
+TEST(TypedReads, PathWithoutNulWithinTheSizeIsUnterminatedInputTextAndZeroesTheOutParameter) {
+  JsonDocumentStore store;
+  const std::uint32_t id = MustParse(store, R"({"v":1})");
+  const char unterminated[] = {'/', 'v'};
+
+  std::int32_t longOut = kLongSentinel;
+  EXPECT_EQ(ReadJsonLong(store, id, unterminated, 2, longOut), Status::UnterminatedInputText);
+  EXPECT_EQ(longOut, 0);
+  double doubleOut = kDoubleSentinel;
+  EXPECT_EQ(ReadJsonDouble(store, id, unterminated, 2, doubleOut), Status::UnterminatedInputText);
+  EXPECT_EQ(doubleOut, 0.0);
+  std::int32_t boolOut = kBoolSentinel;
+  EXPECT_EQ(ReadJsonBool(store, id, unterminated, 2, boolOut), Status::UnterminatedInputText);
+  EXPECT_EQ(boolOut, 0);
+  std::uint32_t countOut = kElementsSentinel;
+  EXPECT_EQ(CountJsonElements(store, id, unterminated, 2, countOut), Status::UnterminatedInputText);
+  EXPECT_EQ(countOut, 0u);
+}
+
+TEST(TypedReads, ZeroUnknownAndDiscardedIdsAreUnknownDocumentId) {
+  JsonDocumentStore store;
+  const std::uint32_t id = MustParse(store, R"({"v":1})");
+  ExpectAllFail(store, 0, "/v", Status::UnknownDocumentId);
+  ExpectAllFail(store, id + 12345, "/v", Status::UnknownDocumentId);
+  ASSERT_EQ(DiscardJsonDocument(store, id), Status::Ok);
+  ExpectAllFail(store, id, "/v", Status::UnknownDocumentId);
+}
+
+TEST(TypedReads, PathIsCheckedBeforeTheDocumentId) {
+  JsonDocumentStore store;
+  const std::uint32_t id = MustParse(store, R"({"v":1})");
+  ExpectAllFail(store, 0, "v", Status::PathSyntaxError);
+  ExpectAllFail(store, id + 12345, "v", Status::PathSyntaxError);
+  ASSERT_EQ(DiscardJsonDocument(store, id), Status::Ok);
+  ExpectAllFail(store, id, "v", Status::PathSyntaxError);
+
+  std::int32_t out = kLongSentinel;
+  EXPECT_EQ(ReadJsonLong(store, 0, nullptr, 0, out), Status::InvalidArgument);
+  const char unterminated[] = {'/', 'v'};
+  EXPECT_EQ(ReadJsonLong(store, 0, unterminated, 2, out), Status::UnterminatedInputText);
+}
+
+TEST(TypedReads, TwoDocumentsAreReadIndependentlyAndDiscardingOneLeavesTheOther) {
+  JsonDocumentStore store;
+  const std::uint32_t first = MustParse(store, R"({"v":1,"l":[1]})");
+  const std::uint32_t second = MustParse(store, R"({"v":2,"l":[1,2,3]})");
+  std::int32_t a = 0;
+  std::int32_t b = 0;
+  EXPECT_EQ(LongAt(store, first, "/v", a), Status::Ok);
+  EXPECT_EQ(LongAt(store, second, "/v", b), Status::Ok);
+  EXPECT_EQ(a, 1);
+  EXPECT_EQ(b, 2);
+
+  std::uint32_t countA = 0;
+  std::uint32_t countB = 0;
+  EXPECT_EQ(ElementsAt(store, first, "/l", countA), Status::Ok);
+  EXPECT_EQ(ElementsAt(store, second, "/l", countB), Status::Ok);
+  EXPECT_EQ(countA, 1u);
+  EXPECT_EQ(countB, 3u);
+
+  ASSERT_EQ(DiscardJsonDocument(store, first), Status::Ok);
+  EXPECT_EQ(LongAt(store, first, "/v", a), Status::UnknownDocumentId);
+  EXPECT_EQ(LongAt(store, second, "/v", b), Status::Ok);
+  EXPECT_EQ(b, 2);
+}
+
+TEST(TypedReads, ReadingDoesNotConsumeTheDocument) {
+  JsonDocumentStore store;
+  const std::uint32_t id = MustParse(store, R"({"v":9})");
+  std::int32_t out = 0;
+  EXPECT_EQ(LongAt(store, id, "/v", out), Status::Ok);
+  EXPECT_EQ(LongAt(store, id, "/v", out), Status::Ok);
+  EXPECT_EQ(out, 9);
+  EXPECT_EQ(CountOf(store, id), 1u);
+}
+
+TEST(TextApiInternalError, TypedReadsReportInternalErrorWhenAllocationFailsZeroTheOutAndStayUsable) {
+  JsonDocumentStore store;
+  const std::uint32_t id = MustParse(store, R"({"k":5,"t":true,"l":[1,2]})");
+  const std::string path = "/k";
+  const std::string boolPath = "/t";
+  const std::string listPath = "/l";
+
+  std::int32_t longOut = kLongSentinel;
+  double doubleOut = kDoubleSentinel;
+  std::int32_t boolOut = kBoolSentinel;
+  std::uint32_t countOut = kElementsSentinel;
+  Status longStatus = Status::Ok;
+  Status doubleStatus = Status::Ok;
+  Status boolStatus = Status::Ok;
+  Status countStatus = Status::Ok;
+  int failedAllocations = 0;
+  {
+    FailAllocations failAllocations;
+    longStatus = ReadJsonLong(store, id, path.c_str(), SizeWithNul(path), longOut);
+    doubleStatus = ReadJsonDouble(store, id, path.c_str(), SizeWithNul(path), doubleOut);
+    boolStatus = ReadJsonBool(store, id, boolPath.c_str(), SizeWithNul(boolPath), boolOut);
+    countStatus = CountJsonElements(store, id, listPath.c_str(), SizeWithNul(listPath), countOut);
+    failedAllocations = t_failedAllocations;
+  }
+  EXPECT_GT(failedAllocations, 0);
+  EXPECT_EQ(longStatus, Status::InternalError);
+  EXPECT_EQ(longOut, 0);
+  EXPECT_EQ(doubleStatus, Status::InternalError);
+  EXPECT_EQ(doubleOut, 0.0);
+  EXPECT_EQ(boolStatus, Status::InternalError);
+  EXPECT_EQ(boolOut, 0);
+  EXPECT_EQ(countStatus, Status::InternalError);
+  EXPECT_EQ(countOut, 0u);
+
+  EXPECT_EQ(LongAt(store, id, path, longOut), Status::Ok);
+  EXPECT_EQ(longOut, 5);
+  EXPECT_EQ(ElementsAt(store, id, listPath, countOut), Status::Ok);
+  EXPECT_EQ(countOut, 2u);
+}
+
+// ---------------------------------------------------------------------------
 // Concurrency: one store shared by several threads.
 // ---------------------------------------------------------------------------
 

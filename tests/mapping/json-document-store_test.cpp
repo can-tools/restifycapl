@@ -493,3 +493,238 @@ TEST(JsonDocumentIds, ClockSeededStoreIssuesNonzeroDistinctIds) {
     EXPECT_TRUE(seen.insert(id).second);
   }
 }
+
+// ---------------------------------------------------------------------------
+// ReadWith: runs a callback on the stored document under the lock.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+Status LongAtPath(JsonDocumentStore& store, std::uint32_t id, std::string_view path,
+                  std::int32_t& out, int* calls = nullptr) {
+  return store.ReadWith(id, path, [&](const JsonValue& document) {
+    if (calls != nullptr) {
+      ++*calls;
+    }
+    out = document.at("n").get<std::int32_t>();
+    return Status::Ok;
+  });
+}
+
+}  // namespace
+
+TEST(JsonDocumentStoreReadWith, CallbackSeesTheStoredDocumentAndItsStatusIsReturned) {
+  JsonDocumentStore store(kFirstId);
+  const std::uint32_t id = InsertOrDie(store, R"({"n":41})");
+  std::int32_t out = 0;
+  int calls = 0;
+  EXPECT_EQ(LongAtPath(store, id, "/n", out, &calls), Status::Ok);
+  EXPECT_EQ(out, 41);
+  EXPECT_EQ(calls, 1);
+
+  EXPECT_EQ(store.ReadWith(id, "", [](const JsonValue&) { return Status::NullValue; }),
+            Status::NullValue);
+}
+
+TEST(JsonDocumentStoreReadWith, ZeroUnknownAndDiscardedIdsAreUnknownDocumentIdAndSkipTheCallback) {
+  JsonDocumentStore store(kFirstId);
+  const std::uint32_t id = InsertOrDie(store, R"({"n":1})");
+  std::int32_t out = 0;
+  int calls = 0;
+  EXPECT_EQ(LongAtPath(store, 0, "/n", out, &calls), Status::UnknownDocumentId);
+  EXPECT_EQ(LongAtPath(store, id + 500, "/n", out, &calls), Status::UnknownDocumentId);
+  EXPECT_EQ(store.Discard(id), Status::Ok);
+  EXPECT_EQ(LongAtPath(store, id, "/n", out, &calls), Status::UnknownDocumentId);
+  EXPECT_EQ(calls, 0);
+}
+
+TEST(JsonDocumentStoreReadWith, PathSyntaxErrorBeatsUnknownDocumentIdAndSkipsTheCallback) {
+  JsonDocumentStore store(kFirstId);
+  const std::uint32_t id = InsertOrDie(store, R"({"n":1})");
+  std::int32_t out = 0;
+  int calls = 0;
+  EXPECT_EQ(LongAtPath(store, 0, "n", out, &calls), Status::PathSyntaxError);
+  EXPECT_EQ(LongAtPath(store, id + 500, "n", out, &calls), Status::PathSyntaxError);
+  EXPECT_EQ(LongAtPath(store, id, "n", out, &calls), Status::PathSyntaxError);
+  EXPECT_EQ(calls, 0);
+}
+
+TEST(JsonDocumentStoreReadWith, TwoDocumentsAreReadIndependently) {
+  JsonDocumentStore store(kFirstId);
+  const std::uint32_t first = InsertOrDie(store, R"({"n":1})");
+  const std::uint32_t second = InsertOrDie(store, R"({"n":2})");
+  std::int32_t a = 0;
+  std::int32_t b = 0;
+  EXPECT_EQ(LongAtPath(store, first, "", a), Status::Ok);
+  EXPECT_EQ(LongAtPath(store, second, "", b), Status::Ok);
+  EXPECT_EQ(a, 1);
+  EXPECT_EQ(b, 2);
+
+  EXPECT_EQ(store.Discard(first), Status::Ok);
+  EXPECT_EQ(LongAtPath(store, first, "", a), Status::UnknownDocumentId);
+  EXPECT_EQ(LongAtPath(store, second, "", b), Status::Ok);
+  EXPECT_EQ(b, 2);
+}
+
+TEST(JsonDocumentStoreReadWith, ADocumentMintedAfterADiscardDoesNotAnswerTheOldId) {
+  JsonDocumentStore store(kFirstId);
+  const std::uint32_t oldId = InsertOrDie(store, R"({"n":1})");
+  EXPECT_EQ(store.Discard(oldId), Status::Ok);
+  const std::uint32_t newId = InsertOrDie(store, R"({"n":2})");
+  EXPECT_NE(newId, oldId);
+  std::int32_t out = 0;
+  EXPECT_EQ(LongAtPath(store, oldId, "", out), Status::UnknownDocumentId);
+  EXPECT_EQ(LongAtPath(store, newId, "", out), Status::Ok);
+  EXPECT_EQ(out, 2);
+}
+
+// ---------------------------------------------------------------------------
+// ReadWithTokens: as ReadWith, plus the parsed tokens reach the callback.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+Status TokensAtPath(JsonDocumentStore& store, std::uint32_t id, std::string_view path,
+                    PathTokens& seen, int* calls = nullptr) {
+  return store.ReadWithTokens(id, path, [&](const JsonValue&, const PathTokens& tokens) {
+    if (calls != nullptr) {
+      ++*calls;
+    }
+    seen = tokens;
+    return Status::Ok;
+  });
+}
+
+}  // namespace
+
+TEST(JsonDocumentStoreReadWithTokens, CallbackReceivesTheDocumentAndTheDecodedTokens) {
+  JsonDocumentStore store(kFirstId);
+  const std::uint32_t id = InsertOrDie(store, R"({"a/b":[10,20]})");
+
+  const struct {
+    const char* path;
+    PathTokens expected;
+  } cases[] = {
+      {"", {}},
+      {"/a~1b", {"a/b"}},
+      {"/a~1b/1", {"a/b", "1"}},
+      {"/m~0n/~01", {"m~n", "~1"}},
+      {"/", {""}},
+      {"//x", {"", "x"}},
+  };
+  for (const auto& c : cases) {
+    SCOPED_TRACE(c.path);
+    PathTokens seen = {"stale"};
+    int calls = 0;
+    EXPECT_EQ(TokensAtPath(store, id, c.path, seen, &calls), Status::Ok);
+    EXPECT_EQ(seen, c.expected);
+    EXPECT_EQ(calls, 1);
+  }
+
+  std::int32_t value = 0;
+  EXPECT_EQ(store.ReadWithTokens(id, "/a~1b/1",
+                                 [&](const JsonValue& document, const PathTokens& tokens) {
+                                   const JsonValue* node = nullptr;
+                                   const Status status = ResolvePath(document, tokens, node);
+                                   if (status == Status::Ok) {
+                                     value = node->get<std::int32_t>();
+                                   }
+                                   return status;
+                                 }),
+            Status::Ok);
+  EXPECT_EQ(value, 20);
+}
+
+TEST(JsonDocumentStoreReadWithTokens, CallbackStatusPassesThrough) {
+  JsonDocumentStore store(kFirstId);
+  const std::uint32_t id = InsertOrDie(store, R"({"n":1})");
+  const Status statuses[] = {Status::Ok, Status::NullValue, Status::TypeMismatch,
+                             Status::NumericOverflow, Status::PathNotFound};
+  for (const Status expected : statuses) {
+    SCOPED_TRACE(static_cast<int>(expected));
+    EXPECT_EQ(store.ReadWithTokens(
+                  id, "/n", [expected](const JsonValue&, const PathTokens&) { return expected; }),
+              expected);
+  }
+}
+
+TEST(JsonDocumentStoreReadWithTokens,
+     ZeroUnknownAndDiscardedIdsAreUnknownDocumentIdAndSkipTheCallback) {
+  JsonDocumentStore store(kFirstId);
+  const std::uint32_t id = InsertOrDie(store, R"({"n":1})");
+  PathTokens seen = {"stale"};
+  int calls = 0;
+  EXPECT_EQ(TokensAtPath(store, 0, "/n", seen, &calls), Status::UnknownDocumentId);
+  EXPECT_EQ(TokensAtPath(store, id + 500, "/n", seen, &calls), Status::UnknownDocumentId);
+  EXPECT_EQ(store.Discard(id), Status::Ok);
+  EXPECT_EQ(TokensAtPath(store, id, "/n", seen, &calls), Status::UnknownDocumentId);
+  EXPECT_EQ(TokensAtPath(store, id, "", seen, &calls), Status::UnknownDocumentId);
+  EXPECT_EQ(calls, 0);
+  EXPECT_EQ(seen, PathTokens{"stale"});
+}
+
+TEST(JsonDocumentStoreReadWithTokens, PathSyntaxErrorBeatsUnknownDocumentIdAndSkipsTheCallback) {
+  JsonDocumentStore store(kFirstId);
+  const std::uint32_t id = InsertOrDie(store, R"({"n":1})");
+  const std::uint32_t discarded = InsertOrDie(store, R"({"n":2})");
+  EXPECT_EQ(store.Discard(discarded), Status::Ok);
+
+  PathTokens seen = {"stale"};
+  int calls = 0;
+  const char* const badPaths[] = {"n", "/a~2", "/~"};
+  for (const char* path : badPaths) {
+    SCOPED_TRACE(path);
+    EXPECT_EQ(TokensAtPath(store, 0, path, seen, &calls), Status::PathSyntaxError);
+    EXPECT_EQ(TokensAtPath(store, id + 500, path, seen, &calls), Status::PathSyntaxError);
+    EXPECT_EQ(TokensAtPath(store, discarded, path, seen, &calls), Status::PathSyntaxError);
+    EXPECT_EQ(TokensAtPath(store, id, path, seen, &calls), Status::PathSyntaxError);
+  }
+  EXPECT_EQ(calls, 0);
+  EXPECT_EQ(seen, PathTokens{"stale"});
+}
+
+TEST(JsonDocumentStoreReadWithTokens, TwoDocumentsAreReadIndependently) {
+  JsonDocumentStore store(kFirstId);
+  const std::uint32_t first = InsertOrDie(store, R"({"n":1})");
+  const std::uint32_t second = InsertOrDie(store, R"({"n":2})");
+
+  const auto readN = [&](std::uint32_t id, std::int32_t& out) {
+    return store.ReadWithTokens(id, "/n", [&](const JsonValue& document, const PathTokens& tokens) {
+      const JsonValue* node = nullptr;
+      const Status status = ResolvePath(document, tokens, node);
+      if (status == Status::Ok) {
+        out = node->get<std::int32_t>();
+      }
+      return status;
+    });
+  };
+
+  std::int32_t a = 0;
+  std::int32_t b = 0;
+  EXPECT_EQ(readN(first, a), Status::Ok);
+  EXPECT_EQ(readN(second, b), Status::Ok);
+  EXPECT_EQ(a, 1);
+  EXPECT_EQ(b, 2);
+
+  EXPECT_EQ(store.Discard(first), Status::Ok);
+  EXPECT_EQ(readN(first, a), Status::UnknownDocumentId);
+  EXPECT_EQ(readN(second, b), Status::Ok);
+  EXPECT_EQ(b, 2);
+}
+
+TEST(JsonDocumentStoreReadWithTokens, AgreesWithReadWithOnIdAndPathErrors) {
+  JsonDocumentStore store(kFirstId);
+  const std::uint32_t id = InsertOrDie(store, R"({"n":1})");
+  const std::uint32_t ids[] = {0, id, id + 500};
+  const char* const paths[] = {"", "/n", "n", "/a~2"};
+  for (const std::uint32_t docId : ids) {
+    for (const char* path : paths) {
+      SCOPED_TRACE(std::string(path) + " @ " + std::to_string(docId));
+      const Status viaReadWith =
+          store.ReadWith(docId, path, [](const JsonValue&) { return Status::Ok; });
+      const Status viaTokens = store.ReadWithTokens(
+          docId, path, [](const JsonValue&, const PathTokens&) { return Status::Ok; });
+      EXPECT_EQ(viaTokens, viaReadWith);
+    }
+  }
+}
