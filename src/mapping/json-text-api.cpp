@@ -135,6 +135,9 @@ Status NormalizeJsonText(const char* jsonText, std::uint32_t jsonSize, char* nor
     }
     return CopyToBuffer(converted, normalized, normalizedSize);
   } catch (...) {
+    if (normalized != nullptr && normalizedSize > 0) {
+      normalized[0] = '\0';
+    }
     return Status::InternalError;
   }
 }

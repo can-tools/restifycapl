@@ -146,13 +146,13 @@ Rules and status codes: `docs/json-flatten.md` ("Input notation") and
 e.g. `'it's'`, is ambiguous and gives `-10`. Write that value in double quotes
 (CAPL source `\"it's\"`), or escape the apostrophe as `\'`, which in CAPL
 source must be written `\\'`, because the CAPL compiler turns `\'` in a string
-into a plain `'`. That CAPL turns `\\` into a single `\` is to be confirmed in
-CANoe.
+into a plain `'`. That CAPL turns `\\` into a single `\` is not yet verified
+(see "Verified in CANoe").
 
 | Form | CAPL source | Status |
 |---|---|---|
-| A: value in double quotes | `{'name':'restify','note':\"it's ok\"}` | to be checked in CANoe with the rest of the framework |
-| B: escaped apostrophe | `{'name':'restify','note':'it\\'s ok'}` | pending the CANoe check of how CAPL treats `\\` and `\'`; if CAPL passes both backslashes the text gives `-10` and form B is not usable from CAPL |
+| A: value in double quotes | `{'name':'restify','note':\"it's ok\"}` | not yet verified at runtime |
+| B: escaped apostrophe | `{'name':'restify','note':'it\\'s ok'}` | not yet verified at runtime (how CAPL treats `\\` and `\'`); if CAPL passes both backslashes the text gives `-10` and form B is not usable from CAPL |
 
 ## Blocking calls
 
@@ -198,26 +198,28 @@ free document slots; run key `7` after key `5`.
 
 ## Verified in CANoe
 
-Confirmed in CANoe: `.\` include and pragma paths resolve relative to the
-containing file, and `key` is a CAPL keyword. Nothing else is verified yet; CI
-cannot compile CAPL. This section is updated after the next verification in
-CANoe.
+The CANoe compile on x64 is confirmed at commit 5a32872: CANoe recognizes
+rows 19-25, and `includes.cin`, the four libraries and both nodes compile.
+Confirmed items:
 
-Items to confirm: CANoe recognizes rows 19-25, and `includes.cin`, the four
-libraries and both nodes compile. Then:
+- `.\` include and pragma paths resolve relative to the file containing them.
+- There are no name clashes and no CAPL keyword is used as an identifier;
+  `key` is a CAPL keyword.
 
-1. The x64 DLL loads through the `#if X64` branch from
-   `capl\includes\dll\win-x64\` in a 64-bit configuration (the x86 DLL in a
-   32-bit one, if available).
+Not yet verified, because each needs a running measurement and is pending a
+CANoe licence:
+
+1. The `#if X64` branch loads the x64 DLL from `capl\includes\dll\win-x64\`.
 2. User-defined functions in a `.cin` accept reference parameters
    (`long &`, `dword &`).
 3. `elcount()` on an array parameter inside a function yields the caller's
    array size.
-4. No name clashes between framework functions and other CAPL code.
-5. Both nodes print the DLL version at measurement start.
-6. Form B: the CAPL source `'it\\'s ok'` reaches the DLL as `'it\'s ok'`.
+4. Both nodes print the DLL version at measurement start.
+5. Form B: the CAPL source `'it\\'s ok'` reaches the DLL as `'it\'s ok'`.
+6. All runtime behaviour, including CAPL string-literal initializers with
+   escaped quotes (`\"`) as used for the JSON text, large local arrays inside
+   a function (`restLibJsonDump`), passing a global by reference to a wrapper,
+   and the length at which `write()` cuts a long response body.
 
-Also unconfirmed: CAPL string-literal initializers with escaped quotes
-(`\"`) as used for the JSON text, large local arrays inside a function
-(`restLibJsonDump`), passing a global by reference to a wrapper, and the
-length at which `write()` cuts a long response body.
+32-bit CANoe is not checked: no 32-bit configuration is available, and the
+x86 DLL is covered by CI only. CI cannot compile CAPL.

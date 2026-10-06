@@ -262,7 +262,8 @@ The conversion rules, the ambiguity rule and forms A and B are in
 Checks run in this order, and the first failure decides the status:
 
 1. `json` null or `jsonSize` `0`: `-1`.
-2. No NUL within `jsonSize`: `-6` (`normalized[0]` is cleared first when `normalized` is non-null and `normalizedSize` is not `0`).
+2. No NUL within `jsonSize`: `-6` (`normalized[0]` is cleared first when
+   `normalized` is non-null and `normalizedSize` is not `0`).
 3. `normalized` null or `normalizedSize` `0`: `-1`, nothing is written.
 4. Input length (up to the NUL) over 1 MiB: `-32`, measured before conversion.
 5. Empty text: `-10`.
@@ -319,8 +320,9 @@ No exception crosses into CANoe. If something unexpected fails inside the DLL
 (`-35`) and leaves its out-parameters at 0 (row 25: `normalized` holds the
 empty text); the same happens for all seven operations. It is distinct from
 `InvalidArgument` (`-1`), which always means the caller passed a bad argument.
-The limits bound the memory one document takes, so `-35` from `restifyJsonParse` means the process is short of memory,
-never just that the input was too large.
+The limits bound the memory one document takes, so `-35` from
+`restifyJsonParse` means the process is short of memory, never just that the
+input was too large.
 
 ## Realtime-safety summary
 
@@ -339,5 +341,5 @@ never just that the input was too large.
 Vector advises against dynamic memory allocation on the Simulation Setup
 realtime thread. These operations may be called from there, but doing so may
 disturb simulation timing, most noticeably for `restifyJsonParse` with a large
-document (and, to a lesser degree, `restifyJsonNormalize`). The DLL cannot detect the context it is called from and returns no
-error for it.
+document (and, to a lesser degree, `restifyJsonNormalize`). The DLL cannot
+detect the context it is called from and returns no error for it.
