@@ -10,13 +10,14 @@ Native Windows DLL for Vector CANoe that gives CAPL scripts synchronous and asyn
 > [!NOTE]
 > This project is pre-1.0 and has no tagged release — the only way to get the DLL today is to build it from source (see [Building the DLL](#building-the-dll)).
 >
-> The CAPL compiler recognises the synchronous and asynchronous operations in a real CANoe instance; this has been confirmed for the x64 build. The JSON operations and the [CAPL framework](#capl-framework-preliminary) have not yet been checked in CANoe. No request has yet been run against a live server from a running measurement.
+> The CAPL compiler recognises all operations (synchronous, asynchronous and JSON, via the [CAPL framework](#capl-framework-preliminary) in `capl/`) in a real CANoe instance. This is confirmed for the x64 build and covers compilation only. Behaviour in a running measurement is not yet verified: no request has been run against a live server from a measurement. No 32-bit CANoe configuration is available, so the x86 DLL is verified by the CI test suite only.
 
 ## Features
 
 - Synchronous GET, POST, PUT, PATCH and DELETE, plus a general-purpose request function with explicit connect/total timeouts and a response-size cap.
 - Asynchronous dispatch/poll/read/discard, the realtime-safe way to reach REST from a Simulation Setup node.
 - JSON parsing and flattening: parse a response body once, then read its entries by index or by JSON Pointer path.
+- JSON text may be written with apostrophes in CAPL source, which avoids escaping every double quote (see [Writing JSON in CAPL source](#writing-json-in-capl-source)).
 - TLS through Windows' own Schannel — no OpenSSL dependency.
 - A single DLL: the C++ runtime (`/MT`) and libcurl are statically linked into it.
 - Both x86 and x64 builds.
@@ -30,6 +31,7 @@ Native Windows DLL for Vector CANoe that gives CAPL scripts synchronous and asyn
 - [Requirements](#requirements)
 - [Building the DLL](#building-the-dll)
 - [Usage from CAPL](#usage-from-capl)
+- [Writing JSON in CAPL source](#writing-json-in-capl-source)
 - [Operations](#operations)
 - [CAPL framework (preliminary)](#capl-framework-preliminary)
 - [Development and testing](#development-and-testing)
@@ -139,7 +141,7 @@ TODO: expected output once verified in a running measurement.
 > [!IMPORTANT]
 > **Realtime caveat.** Synchronous calls, `restifyAwaitResponse`, and `restifyDiscardAllResponses` block or free memory on the calling thread. Use them only from Measurement Setup or test nodes — never from a Simulation Setup node. From a Simulation Setup node, dispatch asynchronously (e.g. `restifyGetAsync`), poll with `restifyPollResponse` from an `on timer` handler, then read with `restifyReadResponse`.
 >
-> The JSON operations may be called from any context, including Simulation Setup, but they allocate memory and parse (`restifyJsonParse` most noticeably on a large document), which may disturb simulation timing; see the "Risk" section of [`docs/capl-json-surface.md`](docs/capl-json-surface.md).
+> The JSON operations may be called from any context, including Simulation Setup, but they allocate memory and parse (`restifyJsonParse` most noticeably on a large document; `restifyJsonNormalize` allocates a temporary copy of its text, to a lesser degree), which may disturb simulation timing; see the "Risk" section of [`docs/capl-json-surface.md`](docs/capl-json-surface.md).
 
 <details>
 <summary>Async outline (dispatch, poll, read, discard)</summary>
@@ -154,6 +156,49 @@ See [`docs/capl-async-surface.md`](docs/capl-async-surface.md) for the full sign
 </details>
 
 TODO: link to runnable examples/ once they exist.
+
+## Writing JSON in CAPL source
+
+A JSON text in CAPL source is a CAPL string, so every double quote inside it needs a backslash. To avoid that, strings in JSON may be written with apostrophes: `{'name':'restify'}` and `{"name":"restify"}` are equivalent to the DLL.
+
+- `restifyJsonParse` accepts both notations directly.
+- A request body is sent unchanged. To send a body written with apostrophes, call `restLibJsonNormalize` first, then pass the result as the body to any of the body-taking functions (POST, PUT, PATCH and the general request function, sync or async).
+
+```capl
+variables
+{
+  char gUrl[64] = "https://example.com/items";
+  char gHeaders[64] = "Content-Type: application/json";
+  char gSrc[128] = "{'name':'restify','note':\"it's ok\"}";
+  char gBody[256];
+  char gResponseBody[2048];
+  long gHttpStatusCode;
+  dword gResponseBodyLength;
+}
+
+on key 'b'
+{
+  long rc;
+
+  rc = restLibJsonNormalize(gSrc, gBody);
+  if (rc == 0)
+  {
+    rc = restLibPostSync(gUrl, gHeaders, gBody, gResponseBody, gHttpStatusCode, gResponseBodyLength);
+  }
+  write("status %ld", rc);
+}
+```
+
+The `restLib` wrappers come from the [CAPL framework](#capl-framework-preliminary). The snippet follows the wrapper signatures in `capl/`; it has not been run in a CANoe measurement.
+
+**Limitation: an apostrophe inside a value written in apostrophes is ambiguous.** In `'it's'` the string ends at the second apostrophe and the rest is not valid JSON, so the DLL returns status `-10`. There are two correct forms:
+
+- Form A: write that value in double quotes. In CAPL source: `\"it's\"`, as in the example above.
+- Form B: escape the apostrophe as `\'`. The CAPL compiler itself turns `\'` inside a CAPL string into a plain `'`, so the CAPL source must contain `\\'` (for example `'it\\'s'`) for the DLL to receive `\'`.
+
+Neither form has been verified at runtime in CANoe. For form B in particular, whether CAPL turns `\\` into a single backslash in this context is still to be confirmed, so form B is pending.
+
+Rules, status codes and the conversion details are in [`docs/json-flatten.md`](docs/json-flatten.md) ("Input notation") and [`docs/capl-json-surface.md`](docs/capl-json-surface.md).
 
 ## Operations
 
@@ -202,12 +247,13 @@ Full signature tables and status codes: [`docs/capl-sync-surface.md`](docs/capl-
 | `restifyJsonReadValue` | Copies the value text at a JSON Pointer path and reports its value type. |
 | `restifyJsonDiscardDocument` | Releases a single document. |
 | `restifyJsonDiscardAllDocuments` | Releases every document and reports how many were released. |
+| `restifyJsonNormalize` | Converts apostrophe-quoted JSON strings to standard JSON and checks the result, ready to use as a request body. |
 
 Signatures, limits and status handling: [`docs/capl-json-surface.md`](docs/capl-json-surface.md). How the flattening works: [`docs/json-flatten.md`](docs/json-flatten.md).
 
 ## CAPL framework (preliminary)
 
-The `capl/` folder holds a thin CAPL layer over the operations above (`restLib...` wrappers named like the exports) and two verification nodes. It is preliminary: wrapper names and parameters may still change, and it has not yet been compiled or run in CANoe. Take `capl/` from the same commit or tag as the DLL.
+The `capl/` folder holds a thin CAPL layer over the operations above (`restLib...` wrappers named like the exports) and two verification nodes. It is preliminary: wrapper names and parameters may still change. The framework compiles in CANoe on x64; its behaviour in a running measurement is not yet verified. Take `capl/` from the same commit or tag as the DLL.
 
 - `capl/includes/includes.cin` is the single master include; the nodes include only that file.
 - The wrapper libraries live in `capl/includes/libs/`.
@@ -225,7 +271,6 @@ See [`CLAUDE.md`](CLAUDE.md) for the full directory layout and project conventio
 
 Planned, non-conditional work:
 
-- JSON flattening — turn an HTTP response body into a flat, CAPL-addressable representation.
 - Typed JSON path accessors — read individual values out of a flattened JSON response by path, with an explicit type.
 - Tagged releases — publish built DLLs (x86 and x64) as downloadable GitHub Releases assets, instead of build-from-source being the only way to get the DLL.
 
