@@ -211,7 +211,10 @@ free document slots; run key `7` after key `5`.
 ## Verified in CANoe
 
 The CANoe compile on x64 is confirmed at commit 5a32872: CANoe recognizes
-rows 19-25, and `includes.cin`, the four libraries and both nodes compile.
+rows 19-25, and `includes.cin`, the four libraries and both nodes compile. The x64 build at commit 8bd35f4 was compiled in CANoe
+too (compile only, no measurement started): CANoe recognizes rows 26-29 (the
+JSON accessor exports), and `restify-json.cin` and `restify-verify-json.can`
+compile.
 Confirmed items:
 
 - `.\` include and pragma paths resolve relative to the file containing them.
