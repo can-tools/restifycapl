@@ -179,6 +179,19 @@ The rationale is minimizing both elevation prompts and the number of new
 package managers introduced on a machine that doesn't already have one
 for this purpose.
 
+## PowerShell 7 (`pwsh`)
+
+`scripts/list-export-table.ps1` runs under PowerShell 7, while
+`setup-dev-env.ps1` itself stays compatible with Windows PowerShell 5.1.
+When no `pwsh` of major version 7 or later is found (on `PATH` or in
+`%ProgramFiles%\PowerShell\7`), the script installs it with `winget install
+-e --id Microsoft.PowerShell`, or with `choco install powershell-core -y`
+when the session is elevated. If neither is available or the install does
+not produce a working `pwsh`, it prints a WARN with the manual command and
+carries on; a missing `pwsh` never fails the run. Open a new terminal window
+after an install so `pwsh` is on `PATH`. The installer is not version-pinned,
+unlike the libraries: it is a tool, like `make`.
+
 ## Manifest-mode triplet installs need separate install roots
 
 **The bug, exactly as first observed (HUM-19's first real re-run,
@@ -478,6 +491,6 @@ do not convert files with `sed -i` or any other automated rewrite.
 ## Human approval gate
 
 The script installs software and touches global machine state (VS Build
-Tools, `make`, vcpkg packages, and the eight `RESTIFY_MSVC_*` user
+Tools, `make`, PowerShell 7, vcpkg packages, and the eight `RESTIFY_MSVC_*` user
 environment variables). Per the project plan it must be approved before its
 first run on a given machine.
