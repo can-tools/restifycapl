@@ -616,12 +616,17 @@ function Find-Pwsh7 {
     if ($cmd) { $candidates += $cmd.Source }
     $candidates += (Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe')
 
+    $tried = @()
     foreach ($candidate in $candidates) {
         if (-not (Test-Path -LiteralPath $candidate)) { continue }
+        $full = [System.IO.Path]::GetFullPath($candidate)
+        if ($tried -contains $full) { continue }
+        $tried += $full
         $out = & $candidate -NoProfile -Command '$PSVersionTable.PSVersion.Major' 2>$null
+        # Read right after the call: a pipeline that stops early (e.g. Select-Object -First 1) leaves $LASTEXITCODE unreliable in Windows PowerShell 5.1.
         $code = $LASTEXITCODE
-        $major = @($out)[0]
-        if ($code -eq 0 -and "$major" -match '^\d+$' -and [int]"$major" -ge 7) {
+        $major = "$(@($out)[0])".Trim()
+        if ($code -eq 0 -and $major -match '^\d+$' -and [int]$major -ge 7) {
             return $candidate
         }
     }

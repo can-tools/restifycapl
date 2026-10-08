@@ -491,6 +491,6 @@ do not convert files with `sed -i` or any other automated rewrite.
 ## Human approval gate
 
 The script installs software and touches global machine state (VS Build
-Tools, `make`, PowerShell 7, vcpkg packages, and the eight `RESTIFY_MSVC_*` user
-environment variables). Per the project plan it must be approved before its
-first run on a given machine.
+Tools, `make`, PowerShell 7, vcpkg packages, and the eight `RESTIFY_MSVC_*`
+user environment variables). Per the project plan it must be approved before
+its first run on a given machine.
