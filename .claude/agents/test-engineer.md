@@ -52,7 +52,7 @@ You are a test engineer for the CAPL REST DLL project, using GoogleTest.
 ## Building and verifying
 
 - Run your test suite with `make test` (x64). x86 is verified by CI's
-  build matrix on push; run `make test ARCH=x86` locally only when the
+  `build + test (x86)` check; run `make test ARCH=x86` locally only when the
   dispatch asks for it or when reproducing an x86-only CI failure. Always
   state in your report which architecture(s) your results cover. The
   `msvc-build-conventions` skill has the exact, verified one-liner for

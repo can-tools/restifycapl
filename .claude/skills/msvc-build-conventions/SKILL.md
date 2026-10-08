@@ -178,8 +178,9 @@ version number found anywhere as a bug.
 ## Local vs CI verification
 
 - Local verification defaults to x64 only: `make build-x64`, `make test`
-  (which defaults to `ARCH=x64`). x86 coverage comes from CI's build/test
-  matrix, which must be green on both legs for a given commit before any
+  (which defaults to `ARCH=x64`). x86 coverage comes from CI's per-architecture
+  pipelines, whose gate checks `build + test (x86)` and
+  `build + test (x64)` must both be green for a given commit before any
   human sign-off gate (e.g. HUM-15). Building or testing x86 locally is the
   exception, not the default — do it only to reproduce an x86-only CI
   failure, or when the dispatch explicitly asks for it (e.g. the user

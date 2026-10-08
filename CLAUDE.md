@@ -32,10 +32,10 @@ restLib) in capl/includes/libs/ in the same change.
 
 - `make` (no target) or `make help` — prints the available targets; builds
   nothing.
-- `make all` — builds x86, then x64. Works in CI, where each matrix leg has
-  its own MSVC environment, and locally from any shell once
+- `make all` — builds x86, then x64, from any shell once
   `scripts/setup-dev-env.ps1` has stored the build environment (see below).
-  Without those stored variables, one shell only ever has one architecture's
+  CI does not use it: each architecture's jobs run `make build-<arch>` in
+  their own MSVC environment. Without those stored variables, one shell only ever has one architecture's
   `cl.exe`/`link.exe` on `PATH`, so `make all` in such a shell fails at link
   time (`LNK1112`) at the architecture the shell does not target — run
   `make build-x86` and `make build-x64` in separately activated shells then.
@@ -106,9 +106,14 @@ include the CAPL SDK headers.
   select the correct DLL manually; there is no `.vmodule` auto-selection.
 - **Tests run outside CANoe**: logic that can be unit-tested must be
   reachable without going through the CAPL export glue.
-- **Versioning**: the single source of truth is the Git tag (`vX.Y.Z`) used
-  for a release — never edit a version number by hand in any file. See the
-  `msvc-build-conventions` skill for the full mechanism.
+- **Versioning**: the single source of truth for the product (DLL) version is
+  the Git tag (`vX.Y.Z`) used for a release. Build inputs
+  (`src/module/version.rc`, the Makefile, CI workflows) never contain a
+  hand-written product version; the one hand-written occurrence, the
+  `CHANGELOG.md` release heading, must equal that tag. Third-party pins
+  (action SHAs with their `# vX.Y.Z` label, tool and dependency versions) are
+  not product versions. See the `msvc-build-conventions` skill for the full
+  mechanism.
 
 ## Agents
 

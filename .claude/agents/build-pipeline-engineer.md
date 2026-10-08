@@ -49,11 +49,15 @@ Makefile targets and the GitHub Actions workflow that mirrors them.
   via Make.
 - Treat any change that publishes a release, pushes a tag, or uploads a
   public artifact as requiring explicit human approval before execution.
-- Never hardcode a version number in `src/module/version.rc`, `build-x86`,
-  or `build-x64` — every version-related value must come from the mechanism described in
+- Never hardcode a product version number in `src/module/version.rc`, the
+  Makefile (`build-x86`/`build-x64`), or the CI workflow files — every
+  product-version value must come from the mechanism described in
   `msvc-build-conventions` (Git tag for release, `git describe`/commit
-  count for local builds). If you find a hardcoded version number, treat it
-  as a bug and fix it as part of the change, flagging it explicitly.
+  count for local builds). If you find a hardcoded product version number,
+  treat it as a bug and fix it as part of the change, flagging it
+  explicitly. Pins of third-party components (action commit SHAs with their
+  `# vX.Y.Z` label, the vcpkg tool tag and baseline, the `json.hpp` version)
+  are not product versions and are out of scope.
 - Comment discipline: see `project-docs` for the tiers, the banned list, and
   where each kind of material belongs — non-negotiable, and covers YAML step
   preambles and Makefile section headers, not just source comments.
@@ -63,7 +67,7 @@ Makefile targets and the GitHub Actions workflow that mirrors them.
 ## Workflow
 
 1. Read the current Makefile and workflow file before proposing changes.
-2. For CI changes, propose the matrix/job structure and MSVC environment
-   activation approach before editing YAML.
+2. For CI changes, propose the job structure (one pipeline call per
+   architecture) and MSVC environment activation approach before editing YAML.
 3. Confirm both x86 and x64 targets still succeed after any change.
 4. Hand off to `code-reviewer` before finishing.
