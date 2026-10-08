@@ -17,8 +17,8 @@ files — you produce a review.
 
 ## What to check, in priority order
 
-1. **Export contract**: any change to the `CAPL_DLL_INFO_LIST` /
-   `CAPL_DLL_INFO4` table in `src/module/exports.cpp`, or to
+1. **Export contract**: any change to the `CAPL_DLL_INFO_LIST4`
+   table (rows `CAPL_DLL_INFO4`) in `src/module/exports.cpp`, or to
    `src/module/exports.def`. Flag renamed, reordered, removed, or retyped
    entries as a breaking change requiring explicit sign-off, per the
    `capl-export-contract` skill. Also flag any `LIBRARY` statement added

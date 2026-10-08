@@ -20,7 +20,7 @@ description: GoogleTest conventions for testing CAPL REST DLL logic outside of C
   process. `struct-registry` / `struct-mapping` are deferred and out of
   scope unless explicitly reactivated.
 - Not testable here: the CAPL export glue itself
-  (`CAPL_DLL_INFO_LIST`, the `extern "C"` wrapper functions) — this can only
+  (`CAPL_DLL_INFO_LIST4`, the `extern "C"` wrapper functions) — this can only
   be verified by loading the DLL into a real CANoe instance, which is
   outside the scope of automated unit tests.
 

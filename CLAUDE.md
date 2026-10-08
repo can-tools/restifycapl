@@ -95,10 +95,10 @@ include the CAPL SDK headers.
 ## Non-negotiable constraints
 
 - **Export contract**: the real contract with CANoe is the
-  `CAPL_DLL_INFO_LIST` / `CAPL_DLL_INFO4` table in `src/module/exports.cpp`,
-  not just `src/module/exports.def`. Never rename, reorder, or remove an
-  existing entry — see the `capl-export-contract` skill before touching
-  this file.
+  `CAPL_DLL_INFO_LIST4` array of `CAPL_DLL_INFO4` rows in
+  `src/module/exports.cpp`, not just `src/module/exports.def`. Never rename,
+  reorder, or remove an existing entry — see the `capl-export-contract` skill
+  before touching this file.
 - **Runtime library**: `/MT` is mandatory for the project and every static
   dependency (libcurl, zlib, GoogleTest). Never mix `/MT` and `/MD` in the
   same link — see the `msvc-build-conventions` skill.

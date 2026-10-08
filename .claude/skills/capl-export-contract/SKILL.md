@@ -1,6 +1,6 @@
 ---
 name: capl-export-contract
-description: The export contract between the DLL and CANoe/CAPL — the .def file, the CAPL_DLL_INFO_LIST table, and bitness rules. Load this before touching `src/module/exports.cpp`, `src/module/exports.def`, or anything in `include/vendor/capl-dll-sdk/`.
+description: The export contract between the DLL and CANoe/CAPL — the .def file, the CAPL_DLL_INFO_LIST4 table (rows CAPL_DLL_INFO4), and bitness rules. Load this before touching `src/module/exports.cpp`, `src/module/exports.def`, or anything in `include/vendor/capl-dll-sdk/`.
 ---
 
 # CAPL export contract
@@ -11,8 +11,8 @@ The `.def` file (`src/module/exports.def`) is a transport mechanism — it
 exposes whatever entry point CANoe needs to reach the description table. It
 is **not** the actual API contract.
 
-The actual contract seen by CAPL scripts is the `CAPL_DLL_INFO_LIST` (or
-`CAPL_DLL_INFO4`) table defined in `src/module/exports.cpp`. Each row of this
+The actual contract seen by CAPL scripts is the `CAPL_DLL_INFO_LIST4` array
+(of `CAPL_DLL_INFO4` rows) defined in `src/module/exports.cpp`. Each row of this
 table defines, for one function:
 
 - the name CAPL sees (which does not have to match the C++ function name),
