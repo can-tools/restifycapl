@@ -1,6 +1,6 @@
-# ci.yml -- CI baseline for restifycapl (CAPL REST DLL). Matrix build+test
-# over x86/x64 on windows-latest, running the same make targets used
-# locally. See docs/ci-pipeline.md for CI-only trap/cache rationale.
+# ci.yml -- CI for restifycapl (CAPL REST DLL). One build + test pipeline per
+# architecture (arch-pipeline.yml), each with a gate job. See
+# docs/ci-pipeline.md for CI-only trap/cache rationale.
 
 name: CI
 
@@ -16,61 +16,48 @@ on:
 permissions:
   contents: read
 
-# Cancel superseded runs on the same ref to avoid burning matrix minutes on
-# stale pushes -- a performance nicety, not a correctness requirement.
-concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
-  build-and-test:
-    name: build + test (${{ matrix.arch }})
-    runs-on: windows-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: x86
-            triplet: x86-windows-static
-            msvc_arch: x86
-          - arch: x64
-            triplet: x64-windows-static
-            msvc_arch: x64
+  pipeline-x86:
+    uses: ./.github/workflows/arch-pipeline.yml
+    with:
+      arch: x86
 
+  pipeline-x64:
+    uses: ./.github/workflows/arch-pipeline.yml
+    with:
+      arch: x64
+
+  # if: always() runs the gate even when its pipeline failed or was skipped;
+  # a skipped required check counts as passing, so the gate must fail
+  # explicitly on anything but success. See docs/ci-pipeline.md.
+  gate-x86:
+    name: build + test (x86)
+    needs: pipeline-x86
+    if: always()
+    runs-on: ubuntu-latest
     steps:
-      # Full history (not shallow) so `git describe` inside the Makefile's
-      # versioning block never degrades silently.
-      - name: Checkout (full history)
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          fetch-depth: 0
-
-      - name: Provision build environment
-        uses: ./.github/actions/provision
-        with:
-          arch: ${{ matrix.arch }}
-
-      # Same Make target run locally -- no cl.exe/rc.exe/link.exe invocation
-      # is duplicated in this YAML.
-      - name: make build-${{ matrix.arch }}
-        shell: pwsh
+      - name: Require a successful pipeline
+        shell: bash
+        env:
+          PIPELINE_RESULT: ${{ needs.pipeline-x86.result }}
         run: |
-          $ErrorActionPreference = 'Stop'
-          make build-${{ matrix.arch }}
-          if ($LASTEXITCODE -ne 0) { throw "make build-${{ matrix.arch }} failed (exit $LASTEXITCODE)" }
+          if [ "$PIPELINE_RESULT" != "success" ]; then
+            echo "::error::pipeline-x86 finished with result '$PIPELINE_RESULT', expected 'success'"
+            exit 1
+          fi
 
-      # Both architectures' test suites run in CI, making bitness parity
-      # for `make test` continuously enforced rather than spot-checked.
-      - name: make test (ARCH=${{ matrix.arch }})
-        shell: pwsh
+  gate-x64:
+    name: build + test (x64)
+    needs: pipeline-x64
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require a successful pipeline
+        shell: bash
+        env:
+          PIPELINE_RESULT: ${{ needs.pipeline-x64.result }}
         run: |
-          $ErrorActionPreference = 'Stop'
-          make test ARCH=${{ matrix.arch }}
-          if ($LASTEXITCODE -ne 0) { throw "make test ARCH=${{ matrix.arch }} failed (exit $LASTEXITCODE)" }
-
-      - name: Upload DLL artifact
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
-        with:
-          name: restifycapl-${{ matrix.arch }}
-          path: build/${{ matrix.arch }}/restifycapl-${{ matrix.arch }}.dll
-          if-no-files-found: error
+          if [ "$PIPELINE_RESULT" != "success" ]; then
+            echo "::error::pipeline-x64 finished with result '$PIPELINE_RESULT', expected 'success'"
+            exit 1
+          fi
