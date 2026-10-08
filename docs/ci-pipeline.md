@@ -2,8 +2,7 @@
 
 Archival, CI-only rationale for `.github/workflows/ci.yml`,
 `.github/workflows/arch-pipeline.yml`, the `.github/actions/provision`
-composite action and `auto-pr.yml`. Release rationale lives in
-`docs/release-process.md`. Local provisioning material (shallow clones,
+composite action and `auto-pr.yml`. Local provisioning material (shallow clones,
 per-triplet install roots, the pinned vcpkg tool tag) lives in
 `docs/development-environment.md` and `scripts/setup-dev-env.ps1`'s
 `Repair-ShallowVcpkgClone` doc comment instead — the local and CI paths

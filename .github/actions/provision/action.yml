@@ -38,7 +38,8 @@ runs:
       echo "VCPKG_INSTALL_ROOT=${{ github.workspace }}\vcpkg_installed-${{ inputs.arch }}" >> $env:GITHUB_ENV
 
   # Runner-image env vars aren't exposed to the `env` expression context
-  # until written to GITHUB_ENV explicitly (docs/ci-pipeline.md#caching).
+  # until written to GITHUB_ENV explicitly (docs/ci-pipeline.md, section
+  # 'Caching: tool checkout vs. install-root keys').
   - name: Expose runner image version for cache keying
     shell: pwsh
     run: echo "IMAGE_VERSION=$env:ImageVersion" >> $env:GITHUB_ENV
@@ -53,7 +54,8 @@ runs:
       make --version
 
   # Not keyed on the triplet -- vcpkg.exe isn't triplet-specific, so
-  # both legs share one entry (docs/ci-pipeline.md#caching).
+  # all jobs (build and test, both architectures) share one entry
+  # (docs/ci-pipeline.md, section 'Caching: tool checkout vs. install-root keys').
   - name: Cache vcpkg tool checkout
     id: vcpkg-tool-cache
     uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
@@ -107,7 +109,8 @@ runs:
       Write-Host "vcpkg tool pin ($toolCommit) matches vcpkg.json's builtin-baseline."
 
   # Keyed on vcpkg.json + triplet + image version -- x86/x64 must never
-  # share an entry (docs/ci-pipeline.md#caching).
+  # share an entry (docs/ci-pipeline.md, section 'Caching: tool checkout vs.
+  # install-root keys').
   - name: Cache vcpkg install root (${{ inputs.arch }}-windows-static)
     id: vcpkg-installed-cache
     uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0

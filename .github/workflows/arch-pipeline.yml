@@ -134,7 +134,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      # Full history: the Makefile runs git describe and git rev-list on every call.
+      # Full history, same reason as in the build job.
       - name: Checkout (full history)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
@@ -145,8 +145,7 @@ jobs:
         with:
           arch: ${{ inputs.arch }}
 
-      # Both architectures' test suites run in CI, making bitness parity
-      # for `make test` continuously enforced rather than spot-checked.
+      # The test suite runs on every pipeline call, once per architecture, keeping bitness parity continuously enforced.
       - name: make test (ARCH=${{ inputs.arch }})
         shell: pwsh
         run: |
