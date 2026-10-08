@@ -2,12 +2,12 @@
 
 Archival, CI-only rationale for `.github/workflows/ci.yml`,
 `.github/workflows/arch-pipeline.yml`, the `.github/actions/provision` and
-`.github/actions/export-table` composite actions and `auto-pr.yml`. Local provisioning material (shallow clones,
-per-triplet install roots, the pinned vcpkg tool tag) lives in
-`docs/development-environment.md` and `scripts/setup-dev-env.ps1`'s
-`Repair-ShallowVcpkgClone` doc comment instead — the local and CI paths
-share the pin, never the mechanism or the output, so this document only
-covers what has no local-script equivalent.
+`.github/actions/export-table` composite actions and `auto-pr.yml`. Local
+provisioning material (shallow clones, per-triplet install roots, the pinned
+vcpkg tool tag) lives in `docs/development-environment.md` and
+`scripts/setup-dev-env.ps1`'s `Repair-ShallowVcpkgClone` doc comment instead —
+the local and CI paths share the pin, never the mechanism or the output, so
+this document only covers what has no local-script equivalent.
 
 ## Per-architecture pipelines and gate jobs (decided during Stage 14, BPE-37)
 

@@ -67,6 +67,10 @@ function Format-Escaped([string]$s) {
   return $sb.ToString()
 }
 
+function Format-AnnotationProperty([string]$s) {
+  return $s.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A').Replace(':', '%3A').Replace(',', '%2C')
+}
+
 function New-Token([string]$kind, $value, [int]$line) {
   return [pscustomobject]@{ Kind = $kind; Value = $value; Line = $line }
 }
@@ -376,6 +380,17 @@ function Invoke-ExportTableCheck([string]$text) {
     FunctionCount = 0
     Rows = (New-Object System.Collections.Generic.List[object])
   }
+  try {
+    $null = Invoke-ExportTableCheckCore $text $res
+  }
+  catch {
+    $res.Parsed = $false
+    Add-Fail $res 1 1 $null $null ('table cannot be located or parsed: unexpected error: {0}' -f $_.Exception.Message)
+  }
+  return $res
+}
+
+function Invoke-ExportTableCheckCore([string]$text, $res) {
   $unparsable = 'table cannot be located or parsed: '
 
   try {
@@ -537,11 +552,12 @@ function Invoke-ExportTableCheck([string]$text) {
       Add-Fail $res 7 $ln $ri $name ('parCount must be an integer literal; found: {0}' -f (Get-FieldText $f[5]))
     }
     else {
-      $pc = [int]$f[5][0].Value
+      $pc = [int64]$f[5][0].Value
       if ($pc -lt 0 -or $pc -gt 64) {
         $fail7 = $true
         Add-Fail $res 7 $ln $ri $name ('parCount {0} is outside the range 0 to 64' -f $pc)
       }
+      else { $pc = [int]$pc }
     }
 
     $types = $null
@@ -592,8 +608,8 @@ function Invoke-ExportTableCheck([string]$text) {
       $ty = Resolve-TypeItem $types.Items[$p] $consts
       $dimItem = $dims.Items[$p]
       $dv = $null
-      if ($null -ne $dimItem.Code) { $dv = [int]$dimItem.Code }
-      elseif ($dimItem.Tokens.Count -eq 1 -and ($dimItem.Tokens[0].Kind -ceq 'num' -or $dimItem.Tokens[0].Kind -ceq 'chr')) { $dv = [int]$dimItem.Tokens[0].Value }
+      if ($null -ne $dimItem.Code) { $dv = [int64]$dimItem.Code }
+      elseif ($dimItem.Tokens.Count -eq 1 -and ($dimItem.Tokens[0].Kind -ceq 'num' -or $dimItem.Tokens[0].Kind -ceq 'chr')) { $dv = [int64]$dimItem.Tokens[0].Value }
       else { $sigOk = $false; Add-Fail $res 11 $ln $ri $name ('{0}: the dimension must be an integer constant; found: {1}' -f $label, (Get-FieldText $dimItem.Tokens)) }
       if ($null -ne $dv -and $dv -ne 0 -and $dv -ne 1 -and $dv -ne 2) {
         Add-Fail $res 11 $ln $ri $name ('{0}: dimension {1} is not allowed, only 0, 1 or 2' -f $label, $dv)
@@ -712,7 +728,7 @@ if ($hasDir) {
       exit 2
     }
     $first = $text.Split("`n")[0].TrimEnd("`r")
-    $m = [regex]::Match($first, '^// expect: (pass|fail( [0-9]+)+)$')
+    $m = [regex]::Match($first, '^// expect: (pass|fail( [0-9]{1,9})+)$')
     if (-not $m.Success) {
       Write-Output ('FAIL {0}: first line is not a valid directive: {1}' -f $display, $first)
       $failed++
@@ -766,7 +782,7 @@ foreach ($fl in $res.Failures) {
   Write-Output ('{0}:{1}: [check {2}] {3}: {4}' -f $Path, $fl.Line, $fl.Check, $rowText, $fl.Message)
   if ($onActions) {
     $annot = ('[check {0}] {1}: {2}' -f $fl.Check, $rowText, $fl.Message).Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
-    Write-Output ('::error file={0},line={1}::{2}' -f $Path, $fl.Line, $annot)
+    Write-Output ('::error file={0},line={1}::{2}' -f (Format-AnnotationProperty $Path), $fl.Line, $annot)
   }
 }
 

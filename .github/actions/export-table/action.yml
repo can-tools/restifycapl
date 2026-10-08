@@ -3,7 +3,7 @@ description: Runs the export-table fixtures, checks src/module/exports.cpp and w
 
 outputs:
   markdown-path:
-    description: Path of the generated export table markdown (written only when the table could be parsed).
+    description: Path of the generated export table markdown. Set only when the file exists after the check ran (the table could be parsed); not set otherwise, so consumers read an empty string.
     value: ${{ steps.table.outputs.markdown-path }}
 
 runs:
@@ -28,9 +28,12 @@ runs:
         $dir = Join-Path $env:RUNNER_TEMP 'export-table'
         New-Item -ItemType Directory -Force -Path $dir | Out-Null
         $md = Join-Path $dir 'export-table.md'
-        Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "markdown-path=$md"
         ./scripts/list-export-table.ps1 -Path $env:EXPORTS_CPP -MarkdownPath $md | Tee-Object -FilePath (Join-Path $dir 'output.txt')
-        exit $LASTEXITCODE
+        $code = $LASTEXITCODE
+        if (Test-Path -LiteralPath $md) {
+          Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "markdown-path=$md"
+        }
+        exit $code
 
     - name: Write job summary
       if: always()
