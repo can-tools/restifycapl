@@ -34,14 +34,18 @@ Pushing the tag is the decision to publish.
    (`https://github.com/<owner>/<repo>/blob/<full hash>/...`) and add a link
    definition at the bottom of the file so the heading is clickable:
    `[<hash>]: https://github.com/<owner>/<repo>/commit/<full hash>`.
-3. Run the dry run (below) on that branch and read the result. It checks the
-   heading's hash against the merge-base of the branch and `origin/main`.
+3. Run the dry run (below) on that branch. It checks that the heading names the
+   current `origin/main` tip and that the branch contains that tip; the error
+   says which of the two to fix.
 4. Squash-merge the branch. Do not use a rebase merge: the check in `validate`
    needs the merge commit's first parent to be the `main` commit named in the
    heading, which a squash merge guarantees and a rebase merge does not. If
    `main` moved before the merge, merge `main` into the branch, rewrite the
    hash and the links, and rerun the dry run.
-5. Push an annotated tag on the squash-merge commit:
+4a. Optional: a dry run on `main` after the merge names the squash-merge commit
+    to tag.
+5. Push an annotated tag on the squash-merge commit (the one the dry run on
+   `main` names):
    `git tag -a vX.Y.Z -m "vX.Y.Z"`, then `git push origin vX.Y.Z`. The release
    workflow also accepts a lightweight tag. Nothing in it reads the tag's
    annotation; release notes come from `CHANGELOG.md`. The version exists only
@@ -63,15 +67,25 @@ Read, in the run's summaries: the export table, the `notes.md` preview, the
 attestation step. The notes come from the first CHANGELOG section that has
 content (`[Unreleased]` before the cut, the cut section after it); the
 `validate` summary names the section used. When that section is a hash
-heading, the dry run fails unless its hash equals the first 12 characters of
-the merge-base of the run's commit and `origin/main`; the fix is to merge
-`main` into the cut branch and update the heading.
+heading, the dry run checks it against `origin/main` and ends in one of three
+ways:
+
+- Before the merge it fails unless the heading's hash equals the first 12
+  characters of the `origin/main` tip and the run's commit contains that tip.
+  It reports every failed condition; the fix is to merge `main` into the cut
+  branch and rewrite the heading hash and the links.
+- Once the cut is merged (the first-parent commit after the heading's hash
+  carries the heading) it passes and names that commit, which is the one to
+  tag.
+- When that commit already carries a `v*.*.*` tag it passes with a warning
+  that the section was already released; the notes are previewed again, and
+  the next release needs entries in `[Unreleased]`.
 
 ## Jobs
 
 | Job | Runs on | Purpose |
 |---|---|---|
-| `validate` | Linux | Tag mode: tag format `vX.Y.Z`, each field at most 65535, tagged commit is an ancestor of `origin/main`, no published release for the tag, the tagged commit has a parent, exactly one CHANGELOG hash heading matches that first parent, with non-empty notes. Dry run: the hash check against the merge-base. Both modes: extract the notes body. |
+| `validate` | Linux | Tag mode: tag format `vX.Y.Z`, each field at most 65535, tagged commit is an ancestor of `origin/main`, no published release for the tag, the tagged commit has a parent, exactly one CHANGELOG hash heading matches that first parent, with non-empty notes. Dry run: the heading check against `origin/main` described under Dry run. Both modes: extract the notes body. |
 | `pipeline-x86`, `pipeline-x64` | Windows | `arch-pipeline.yml` with `release-version` set to `X.Y.Z` in tag mode, empty in a dry run. |
 | `export-table` | Linux | The same composite action `ci.yml` uses; uploads the generated markdown. |
 | `assemble` | Linux | `SHA256SUMS`, `notes.md` (at most 125,000 characters), both written to the job summary. No rebuild after this point. |

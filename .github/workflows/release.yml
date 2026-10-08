@@ -90,7 +90,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 -I - <<'PY'
-          import os, re, subprocess, sys
+          import fnmatch, os, re, subprocess, sys
 
           mode = os.environ['MODE']
           sha = os.environ['GITHUB_SHA']
@@ -119,6 +119,46 @@ jobs:
               if result.returncode != 0:
                   fail('git %s failed: %s' % (' '.join(args), result.stderr.strip()))
               return result.stdout.strip()
+
+
+          def git_try(*args):
+              return subprocess.run(['git'] + list(args), capture_output=True, text=True)
+
+
+          def annotate(kind, message):
+              print('::%s::%s' % (kind, message))
+              with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as f:
+                  f.write(message + '\n\n')
+
+
+          # A cut is either merged already (the first-parent child of its base carries the
+          # heading) or pending (its base must be the origin/main tip the branch contains).
+          def check_cut(h, heading):
+              found = git_try('rev-parse', '--verify', '--quiet', h + '^{commit}')
+              base = found.stdout.strip()
+              if found.returncode != 0 or git_try('merge-base', '--is-ancestor', base, sha).returncode != 0:
+                  fail('the heading %s names %s, which is not a commit in this run\'s history; take the hash from git rev-parse --short=12 origin/main' % (heading, h))
+              tip = git('rev-parse', 'origin/main')
+              chain = git('rev-list', '--first-parent', 'origin/main').split()
+              if base in chain and chain.index(base) > 0:
+                  child = chain[chain.index(base) - 1]
+                  shown = git_try('show', child + ':CHANGELOG.md')
+                  if shown.returncode == 0 and heading in [l.rstrip('\r') for l in shown.stdout.split('\n')]:
+                      tags = [t for t in git('tag', '--points-at', child).split() if fnmatch.fnmatchcase(t, 'v*.*.*')]
+                      if tags:
+                          annotate('warning', 'The newest CHANGELOG section %s was already released as %s; this dry run previews its notes again. Add entries to [Unreleased] for the next release.' % (heading, tags[0]))
+                      else:
+                          annotate('notice', 'The cut %s is merged on main as %s; push the tag on %s.' % (heading, child[:12], child[:12]))
+                      return
+              errors = []
+              if h != tip[:12]:
+                  errors.append('the heading %s names %s, but the origin/main tip is %s; main has moved: merge main into the cut branch, then rewrite the heading hash and the links to %s' % (heading, h, tip[:12], tip[:12]))
+              if git_try('merge-base', '--is-ancestor', tip, sha).returncode != 0:
+                  errors.append('the cut branch does not contain the origin/main tip %s; merge main into the branch so the dry run builds what the squash merge will produce' % tip[:12])
+              if errors:
+                  for error in errors:
+                      print('::error::' + error)
+                  sys.exit(1)
 
 
           def body_after(start):
@@ -172,8 +212,8 @@ jobs:
               if body is None:
                   fail('no CHANGELOG.md section has release notes once "### Development" is removed')
               m = HASHHEAD.match(chosen)
-              if m and git('merge-base', sha, 'origin/main')[:12] != m.group(1):
-                  fail('the heading %s is not the merge-base with origin/main; merge main into the cut branch and update the heading' % chosen)
+              if m:
+                  check_cut(m.group(1), chosen)
 
           with open(out, 'w', encoding='utf-8', newline='\n') as f:
               f.write('\n'.join(body) + '\n')
