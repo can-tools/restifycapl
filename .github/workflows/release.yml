@@ -64,6 +64,13 @@ jobs:
             exit 1
           fi
 
+          # The CHANGELOG section is found through the first parent, as "^" does for a merge commit.
+          read -r -a ids <<< "$(git rev-list --parents -n 1 "$GITHUB_SHA")"
+          if [ "${#ids[@]}" -lt 2 ]; then
+            echo "::error::the tagged commit has no parent; tag the squash-merge commit of the CHANGELOG cut"
+            exit 1
+          fi
+
           # A draft is not returned by the tags endpoint, only a published release is.
           if err=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" 2>&1 >/dev/null); then
             echo "::error::a published release for $TAG already exists; never move a published tag"
@@ -80,19 +87,19 @@ jobs:
         shell: bash
         env:
           MODE: ${{ steps.mode.outputs.mode }}
-          VERSION: ${{ steps.tag.outputs.version }}
         run: |
           set -euo pipefail
           python3 -I - <<'PY'
-          import os, re, sys
+          import os, re, subprocess, sys
 
           mode = os.environ['MODE']
-          version = os.environ['VERSION']
+          sha = os.environ['GITHUB_SHA']
           out = os.path.join(os.environ['RUNNER_TEMP'], 'notes-body.md')
 
           # Linux checkouts are CRLF too (.gitattributes), so every line-end
           # pattern allows an optional \r.
           HEAD = re.compile(r'^## \[')
+          HASHHEAD = re.compile(r'^## \[([0-9a-f]{12})\] - \d{4}-\d{2}-\d{2}\r?$')
           LINKDEF = re.compile(r'^\[[^\]]+\]:[ \t]*\S')
           H3 = re.compile(r'^### ')
           DEV = re.compile(r'^### Development\r?$')
@@ -105,6 +112,13 @@ jobs:
           def fail(message):
               print('::error::' + message)
               sys.exit(1)
+
+
+          def git(*args):
+              result = subprocess.run(['git'] + list(args), capture_output=True, text=True)
+              if result.returncode != 0:
+                  fail('git %s failed: %s' % (' '.join(args), result.stderr.strip()))
+              return result.stdout.strip()
 
 
           def body_after(start):
@@ -134,10 +148,15 @@ jobs:
 
 
           if mode == 'tag':
-              heading = re.compile(r'^## \[v' + re.escape(version) + r'\] - \d{4}-\d{2}-\d{2}\r?$')
-              starts = [i for i, line in enumerate(lines) if heading.match(line)]
+              # The squash-merge commit's first parent is the main commit the cut was based on.
+              parent = git('rev-parse', sha + '^')
+              starts = []
+              for i, line in enumerate(lines):
+                  m = HASHHEAD.match(line)
+                  if m and parent.startswith(m.group(1)):
+                      starts.append(i)
               if len(starts) != 1:
-                  fail('CHANGELOG.md must have exactly one "## [v%s] - YYYY-MM-DD" heading, found %d' % (version, len(starts)))
+                  fail('the tag must be on the squash-merge commit of the CHANGELOG cut; expected exactly one "## [%s] - YYYY-MM-DD" heading, found %d' % (parent[:12], len(starts)))
               chosen = lines[starts[0]].rstrip('\r')
               body = body_after(starts[0])
               if body is None:
@@ -152,6 +171,9 @@ jobs:
                           break
               if body is None:
                   fail('no CHANGELOG.md section has release notes once "### Development" is removed')
+              m = HASHHEAD.match(chosen)
+              if m and git('merge-base', sha, 'origin/main')[:12] != m.group(1):
+                  fail('the heading %s is not the merge-base with origin/main; merge main into the cut branch and update the heading' % chosen)
 
           with open(out, 'w', encoding='utf-8', newline='\n') as f:
               f.write('\n'.join(body) + '\n')

@@ -10,8 +10,8 @@ the `msvc-build-conventions` skill.
 - `restifycapl-x86.dll` and `restifycapl-x64.dll`. The names carry no version
   because `capl/includes/includes.cin` loads them by name.
 - `SHA256SUMS` for the two DLLs.
-- Release notes: the tag's `CHANGELOG.md` section without its
-  `### Development` part, then a generated `### Using this release` block and
+- Release notes: the `CHANGELOG.md` section of the cut (found through the
+  tagged commit's first parent) without its `### Development` part, then a generated `### Using this release` block and
   a generated `### Export table` inside `<details>`.
 
 `capl/` is not packaged. Take it from the source archive of the same tag; a
@@ -23,14 +23,30 @@ Pushing the tag is the decision to publish.
 ## Cutting a release
 
 1. Wait until `main`'s CI is green. This is a convention, not enforced.
-2. Cut the CHANGELOG on a `chore/` branch: `## [Unreleased]` becomes
-   `## [vX.Y.Z] - YYYY-MM-DD` with a new empty `## [Unreleased]` above it.
-   The heading must equal the tag you are about to push.
-3. Run the dry run (below) on that branch, read the result, and merge.
-4. Push an annotated tag on the merge commit: `git tag -a vX.Y.Z -m "vX.Y.Z"`,
-   then `git push origin vX.Y.Z`. The release workflow also accepts a
-   lightweight tag. Nothing in it reads the tag's annotation; release notes
-   come from `CHANGELOG.md`.
+2. Cut the CHANGELOG on a `chore/` branch that is up to date with `main`
+   (`git fetch`, then merge or branch from the current `origin/main`).
+   `## [Unreleased]` becomes `## [<hash>] - YYYY-MM-DD` with a new empty
+   `## [Unreleased]` above it. `<hash>` is the `main` commit the branch is
+   based on, taken from git and never typed from memory:
+   `git rev-parse --short=12 origin/main` for the heading and
+   `git rev-parse origin/main` for the full 40-character hash. Pin every link
+   inside the section to the full hash
+   (`https://github.com/<owner>/<repo>/blob/<full hash>/...`) and add a link
+   definition at the bottom of the file so the heading is clickable:
+   `[<hash>]: https://github.com/<owner>/<repo>/commit/<full hash>`.
+3. Run the dry run (below) on that branch and read the result. It checks the
+   heading's hash against the merge-base of the branch and `origin/main`.
+4. Squash-merge the branch. Do not use a rebase merge: the check in `validate`
+   needs the merge commit's first parent to be the `main` commit named in the
+   heading, which a squash merge guarantees and a rebase merge does not. If
+   `main` moved before the merge, merge `main` into the branch, rewrite the
+   hash and the links, and rerun the dry run.
+5. Push an annotated tag on the squash-merge commit:
+   `git tag -a vX.Y.Z -m "vX.Y.Z"`, then `git push origin vX.Y.Z`. The release
+   workflow also accepts a lightweight tag. Nothing in it reads the tag's
+   annotation; release notes come from `CHANGELOG.md`. The version exists only
+   in the tag; the repo's CHANGELOG release sections are identified by commit
+   hash, and a reader maps a hash to a version through the GitHub release.
 
 Everything after the tag push is automatic.
 
@@ -46,13 +62,16 @@ Read, in the run's summaries: the export table, the `notes.md` preview, the
 `SHA256SUMS`, the `dumpbin /exports` output of both architectures, and the
 attestation step. The notes come from the first CHANGELOG section that has
 content (`[Unreleased]` before the cut, the cut section after it); the
-`validate` summary names the section used.
+`validate` summary names the section used. When that section is a hash
+heading, the dry run fails unless its hash equals the first 12 characters of
+the merge-base of the run's commit and `origin/main`; the fix is to merge
+`main` into the cut branch and update the heading.
 
 ## Jobs
 
 | Job | Runs on | Purpose |
 |---|---|---|
-| `validate` | Linux | Tag mode: tag format `vX.Y.Z`, each field at most 65535, tagged commit is an ancestor of `origin/main`, no published release for the tag, matching CHANGELOG heading with non-empty notes. Both modes: extract the notes body. |
+| `validate` | Linux | Tag mode: tag format `vX.Y.Z`, each field at most 65535, tagged commit is an ancestor of `origin/main`, no published release for the tag, the tagged commit has a parent, exactly one CHANGELOG hash heading matches that first parent, with non-empty notes. Dry run: the hash check against the merge-base. Both modes: extract the notes body. |
 | `pipeline-x86`, `pipeline-x64` | Windows | `arch-pipeline.yml` with `release-version` set to `X.Y.Z` in tag mode, empty in a dry run. |
 | `export-table` | Linux | The same composite action `ci.yml` uses; uploads the generated markdown. |
 | `assemble` | Linux | `SHA256SUMS`, `notes.md` (at most 125,000 characters), both written to the job summary. No rebuild after this point. |
@@ -67,7 +86,9 @@ Every job that runs `make` and `validate` check out with `fetch-depth: 0`:
 the Makefile runs `git` on every call and the ancestor check needs
 `origin/main`. The other jobs download artifacts and need no checkout.
 
-CHANGELOG matching is line by line and allows `\r?` at line ends, because
+A hash heading has the form `## [<12 hex characters>] - YYYY-MM-DD`; the
+parent of a tagged merge commit is its first parent. CHANGELOG matching is
+line by line and allows `\r?` at line ends, because
 Linux checkouts are CRLF too. The section ends at the next `## [` heading or
 at a column-0 link definition (`[v1.2.3]: https://...`), so the link
 definitions at the bottom of the file never enter the notes. More than one
@@ -98,6 +119,9 @@ definitions at the bottom of the file never enter the notes. More than one
   heading `[YANKED]`.
 - **D, the release went public but the job reports failure:** handled as a
   normal defect, like any other. There is no extra post-release check.
+- **Wrong or missing hash heading:** `validate` fails with the expected hash,
+  before anything is built or public. Delete the tag, fix the heading through
+  a PR, and tag the new squash-merge commit.
 
 Attestations created for builds that are never published are harmless and
 stay.
