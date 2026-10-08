@@ -618,8 +618,10 @@ function Find-Pwsh7 {
 
     foreach ($candidate in $candidates) {
         if (-not (Test-Path -LiteralPath $candidate)) { continue }
-        $major = & $candidate -NoProfile -Command '$PSVersionTable.PSVersion.Major' 2>$null | Select-Object -First 1
-        if ($LASTEXITCODE -eq 0 -and "$major" -match '^\d+$' -and [int]"$major" -ge 7) {
+        $out = & $candidate -NoProfile -Command '$PSVersionTable.PSVersion.Major' 2>$null
+        $code = $LASTEXITCODE
+        $major = @($out)[0]
+        if ($code -eq 0 -and "$major" -match '^\d+$' -and [int]"$major" -ge 7) {
             return $candidate
         }
     }
