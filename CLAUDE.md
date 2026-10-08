@@ -107,12 +107,13 @@ include the CAPL SDK headers.
 - **Tests run outside CANoe**: logic that can be unit-tested must be
   reachable without going through the CAPL export glue.
 - **Versioning**: the single source of truth for the product (DLL) version is
-  the Git tag (`vX.Y.Z`) used for a release. Build inputs
-  (`src/module/version.rc`, the Makefile, CI workflows) never contain a
-  hand-written product version; the one hand-written occurrence, the
-  `CHANGELOG.md` release heading, must equal that tag. Third-party pins
-  (action SHAs with their `# vX.Y.Z` label, tool and dependency versions) are
-  not product versions. See the `msvc-build-conventions` skill for the full
+  the Git tag (`vX.Y.Z`) pushed for a release; the tag is the only place a
+  product version is typed. No tracked file contains a hand-written product
+  version: build inputs (`src/module/version.rc`, the Makefile, CI workflows)
+  derive it from the tag, and `CHANGELOG.md` release sections are headed by
+  commit hash, not by version (see `project-docs`). Third-party pins (action
+  SHAs with their `# vX.Y.Z` label, tool and dependency versions) are not
+  product versions. See the `msvc-build-conventions` skill for the full
   mechanism.
 
 ## Agents
