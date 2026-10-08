@@ -61,8 +61,9 @@ risk exists here, so each document has exactly one job:
   not two.
 - **`examples/*.can`** — working, verified CAPL code showing real usage of
   exported operations. Not prose documentation; runnable samples.
-- **`CHANGELOG.md`** — a dated record of what changed release
-  over release, each release section identified by a commit hash, for someone upgrading between DLL versions.
+- **`CHANGELOG.md`** — a dated record of what changed release over release, each
+  release section identified by a commit hash, for someone upgrading between DLL
+  versions.
 
 If you're about to write the same sentence in two of these files, stop —
 one of them should link to the other instead.
