@@ -253,7 +253,8 @@ jobs:
             cat parts/body/notes-body.md
             printf '\n### Using this release\n\n'
             printf '%s\n\n' 'Take `capl/` from this tag'"'"'s source archive; a DLL and `capl/` from different versions fail at CAPL compile.'
-            printf 'Verify a download: `gh attestation verify restifycapl-x64.dll --repo %s` (likewise `restifycapl-x86.dll`).\n' "$GITHUB_REPOSITORY"
+            printf '%s\n\n' 'Check a download: in PowerShell, `Get-FileHash restifycapl-x64.dll` must print the hash listed for that file in `SHA256SUMS` (likewise `restifycapl-x86.dll`).'
+            printf '%s\n' 'Both DLLs carry a GitHub build-provenance attestation, which the release workflow verifies before publishing; to verify it yourself, see `docs/release-process.md` in the source archive.'
             printf '\n### Export table\n\n<details>\n<summary>%s functions</summary>\n\n' "$rows"
             cat parts/table/export-table.md
             printf '\n</details>\n'

@@ -104,9 +104,19 @@ stay.
 
 ## Verifying a download
 
+In PowerShell, compare the hash of each downloaded DLL with the line for that
+file in `SHA256SUMS`:
+
 ```
-gh attestation verify restifycapl-x64.dll --repo <owner>/<repo>
-gh attestation verify restifycapl-x86.dll --repo <owner>/<repo>
+Get-FileHash restifycapl-x64.dll
+Get-FileHash restifycapl-x86.dll
 ```
 
-The release notes carry the same line with the repository filled in.
+With the GitHub CLI installed, the build-provenance attestation can be
+verified as well:
+
+```
+gh attestation verify <dll> --repo <owner>/<repo> --signer-workflow <owner>/<repo>/.github/workflows/release.yml
+```
+
+This is the command the `attest` job runs for both DLLs on every release.
