@@ -383,8 +383,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          draft=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" \
-            | jq -c --arg tag "$TAG" '[.[] | select(.draft and .tag_name == $tag)]')
+          draft=$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases" \
+            | jq -c --arg tag "$TAG" '[.[][] | select(.draft and .tag_name == $tag)]')
           if [ "$(echo "$draft" | jq 'length')" -ne 1 ]; then
             echo "::error::expected exactly one draft for $TAG"
             exit 1
