@@ -18,7 +18,8 @@ table defines, for one function:
 - the name CAPL sees (which does not have to match the C++ function name),
 - the function pointer,
 - the return type,
-- the number and types of parameters (encoded as a type string),
+- the number and types of parameters (encoded as type characters; see
+  'Write every row out in full'),
 - category/description metadata.
 
 The first row of the table is a reserved version entry
@@ -32,6 +33,21 @@ The first row of the table is a reserved version entry
 - **Only append new entries** for new functionality. If a function's
   signature must change, add a new entry with a new name rather than
   changing an existing one in place.
+- **Write every row out in full.** `parTypes` and `array` are each written
+  either as a string literal (one character per parameter, counted after
+  decoding escapes; the implicit terminator does not count) or as a brace
+  list of character or integer values. `parNames` is always a brace list of
+  string literals. For `parCount` ≥ 1, each of the three gives exactly
+  `parCount` entries: no `""` dimension string, and no omitted trailing
+  types, dimensions or names. A reference parameter's type is written with
+  a named constant (`kRefLong`, `kRefDword`, `kRefDouble`: the type
+  character minus 128, defined in `exports.cpp`), never as an inline
+  expression. A function without parameters is written in Vector's
+  documented form: `parCount` 0, `parTypes` `""`, `array` `""`, `parNames`
+  `{""}`. No other zero-parameter notation is used, and the first row in
+  this form is compiled in CANoe before the release that ships it. This is
+  stricter than Vector's own examples, and is enforced by
+  `scripts/list-export-table.ps1` and its fixtures in `tests/export-table/`.
 - Functions exposed through the table should be declared `extern "C"` to
   avoid C++ name-mangling issues tying the export to a specific compiler
   version.
@@ -59,7 +75,7 @@ produce two differently-named DLLs. It must contain only an EXPORTS
 section:
 
     EXPORTS
-        CAPLDLLEntryPoint
+        caplDllGetTable4
 
 Do NOT add a `LIBRARY` line (e.g. `LIBRARY restifycapl-x86`). It pins one
 internal module name into a file both builds share, so it can only ever be

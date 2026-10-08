@@ -22,7 +22,10 @@ files — you produce a review.
    `src/module/exports.def`. Flag renamed, reordered, removed, or retyped
    entries as a breaking change requiring explicit sign-off, per the
    `capl-export-contract` skill. Also flag any `LIBRARY` statement added
-   to `exports.def`.
+   to `exports.def`. For any change touching `src/module/exports.cpp`,
+   record the result of the `export-table` job (or of
+   `scripts/list-export-table.ps1`) on the reviewed commit; a red result is
+   a Must-fix, and if it was not run, say so.
 2. **Runtime library consistency**: any new dependency or build flag change
    that isn't `/MT`, per the `msvc-build-conventions` skill.
 3. **Bitness parity**: whether a change was applied to both x86 and x64
@@ -31,11 +34,15 @@ files — you produce a review.
    `src/registry/`, or `src/mapping/`. Only `src/module/` may include the
    CAPL SDK headers. A violation here is an architecture break, not a
    style issue.
-5. **Versioning**: flag any hardcoded version number found in
-   `src/module/version.rc`, the `Makefile`, or the CI workflow files — per
+5. **Versioning**: flag any hardcoded **product** version number — the DLL's
+   own `VER_*`, `/VERSION:`, `FileVersion`/`ProductVersion` — found in
+   `src/module/version.rc`, the `Makefile`, or the CI workflow files; per
    `msvc-build-conventions`, version values must always be derived (from
    the Git tag for releases, from `git describe`/commit count for local
-   builds), never hand-written.
+   builds), never hand-written. Pins of third-party components (action
+   commit SHAs with their `# vX.Y.Z` label, the vcpkg tool tag and
+   baseline, the `json.hpp` version) are not product versions and are out of
+   scope for this item.
 6. **Test coverage**: whether new or changed logic in `src/` has a
    corresponding test in `tests/`.
 7. **Comment discipline** (`project-docs`): flag file-header rationale
@@ -71,8 +78,8 @@ files — you produce a review.
 
 Return a report with these sections:
 
-1. Must fix (export contract breaks, /MT violations, bitness mismatches,
-   hardcoded version numbers)
+1. Must fix (export contract breaks, a red `export-table` result, /MT
+   violations, bitness mismatches, hardcoded product version numbers)
 2. Should fix (missing tests; rationale duplicated across two files, or a
    comment referencing a plan/stage/task identifier)
 3. Nice to have (merely verbose comments)

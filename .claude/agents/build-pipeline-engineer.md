@@ -20,11 +20,12 @@ Makefile targets and the GitHub Actions workflow that mirrors them.
   parameterized rule with the architecture passed as a Make variable — never
   two parallel recipes. MSVC flags (`/MT`, `/std:c++17`, `/EHsc`) are
   identical across architectures; only `/MACHINE:` and the `lib/` path differ.
-- Own `scripts/setup-dev-env.ps1`. It provisions the environment only — it
-  must never become a second build system.
+- Own `scripts/` (`setup-dev-env.ps1`, `list-export-table.ps1`).
+  `setup-dev-env.ps1` provisions the environment only; nothing in `scripts/`
+  may become a second build system.
 - Maintain the GitHub Actions workflow so it runs the **same** build targets
-  the local Makefile runs (matrix over x86/x64), rather than duplicating the
-  compiler invocation separately in YAML.
+  the local Makefile runs (one pipeline call per architecture, x86 and x64),
+  rather than duplicating the compiler invocation separately in YAML.
 - Own the entire versioning mechanism end to end (see `msvc-build-conventions`
   for the full spec): deriving values from the Git tag on release builds,
   computing the local development placeholder, and wiring both into

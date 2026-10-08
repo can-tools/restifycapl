@@ -83,7 +83,8 @@ capl/                   CAPL framework (preliminary): *.can verification nodes,
                           committed (.gitkeep only)
   includes/dll/win-x86/   restifycapl-x86.dll copied in by the user; never
                           committed (.gitkeep only)
-scripts/                setup-dev-env.ps1 — environment bootstrap
+scripts/                environment setup and small repo helpers
+                          (e.g. list-export-table.ps1); never a second build system
 docs/                   project documentation
 ```
 
