@@ -29,13 +29,15 @@ runs:
   # VCPKG_ROOT from here. See docs/ci-pipeline.md.
   - name: Pin VCPKG_ROOT to a CI-only path (avoid VS-bundled vcpkg collision)
     shell: pwsh
+    env:
+      ARCH: ${{ inputs.arch }}
     run: |
       echo "VCPKG_ROOT=$env:RUNNER_TEMP\vcpkg" >> $env:GITHUB_ENV
       # Pins the vcpkg TOOL itself (docs/development-environment.md#pinning-the-vcpkg-tool-itself).
       # Must match scripts/setup-dev-env.ps1's $VcpkgPinnedTag exactly.
       echo "VCPKG_PINNED_TAG=2026.07.29" >> $env:GITHUB_ENV
       # Per-triplet install root (docs/development-environment.md#manifest-mode-triplet-installs-need-separate-install-roots).
-      echo "VCPKG_INSTALL_ROOT=${{ github.workspace }}\vcpkg_installed-${{ inputs.arch }}" >> $env:GITHUB_ENV
+      echo "VCPKG_INSTALL_ROOT=${{ github.workspace }}\vcpkg_installed-$env:ARCH" >> $env:GITHUB_ENV
 
   # Runner-image env vars aren't exposed to the `env` expression context
   # until written to GITHUB_ENV explicitly (docs/ci-pipeline.md, section
@@ -124,12 +126,14 @@ runs:
   - name: vcpkg install (${{ inputs.arch }}-windows-static)
     shell: pwsh
     working-directory: ${{ github.workspace }}
+    env:
+      ARCH: ${{ inputs.arch }}
     run: |
       $ErrorActionPreference = 'Stop'
-      & "$env:VCPKG_ROOT\vcpkg.exe" install "--triplet=${{ inputs.arch }}-windows-static" "--x-install-root=$env:VCPKG_INSTALL_ROOT"
-      if ($LASTEXITCODE -ne 0) { throw "vcpkg install --triplet=${{ inputs.arch }}-windows-static failed (exit $LASTEXITCODE)" }
+      & "$env:VCPKG_ROOT\vcpkg.exe" install "--triplet=$env:ARCH-windows-static" "--x-install-root=$env:VCPKG_INSTALL_ROOT"
+      if ($LASTEXITCODE -ne 0) { throw "vcpkg install --triplet=$env:ARCH-windows-static failed (exit $LASTEXITCODE)" }
 
-      $tripletLibDir = Join-Path "$env:VCPKG_INSTALL_ROOT" "${{ inputs.arch }}-windows-static\lib"
+      $tripletLibDir = Join-Path "$env:VCPKG_INSTALL_ROOT" "$env:ARCH-windows-static\lib"
       if (-not (Test-Path -LiteralPath $tripletLibDir)) {
         throw "vcpkg install exited 0 but expected lib directory not found: $tripletLibDir -- do not trust exit code alone (see scripts/setup-dev-env.ps1's Install-ManifestTriplet)."
       }
@@ -139,11 +143,13 @@ runs:
   # include/vendor/gtest/ (test-only).
   - name: Place libs where the Makefile expects them
     shell: pwsh
+    env:
+      ARCH: ${{ inputs.arch }}
     run: |
       $ErrorActionPreference = 'Stop'
 
-      $triplet = "${{ inputs.arch }}-windows-static"
-      $arch = "${{ inputs.arch }}"
+      $triplet = "$env:ARCH-windows-static"
+      $arch = $env:ARCH
       $srcLib = Join-Path "$env:VCPKG_INSTALL_ROOT" "$triplet\lib"
       $srcManualLink = Join-Path $srcLib 'manual-link'
       $srcGtestInclude = Join-Path "$env:VCPKG_INSTALL_ROOT" "$triplet\include\gtest"
@@ -184,9 +190,11 @@ runs:
   # every push instead of spot-checked once locally.
   - name: Verify /MT provenance (dumpbin /directives)
     shell: pwsh
+    env:
+      ARCH: ${{ inputs.arch }}
     run: |
       $ErrorActionPreference = 'Stop'
-      $arch = "${{ inputs.arch }}"
+      $arch = $env:ARCH
       $libs = @(
         "lib\$arch\libcurl.lib",
         "lib\$arch\zs.lib",

@@ -35,10 +35,11 @@ restLib) in capl/includes/libs/ in the same change.
 - `make all` — builds x86, then x64, from any shell once
   `scripts/setup-dev-env.ps1` has stored the build environment (see below).
   CI does not use it: each architecture's jobs run `make build-<arch>` in
-  their own MSVC environment. Without those stored variables, one shell only ever has one architecture's
-  `cl.exe`/`link.exe` on `PATH`, so `make all` in such a shell fails at link
-  time (`LNK1112`) at the architecture the shell does not target — run
-  `make build-x86` and `make build-x64` in separately activated shells then.
+  their own MSVC environment. Without those stored variables, one shell only
+  ever has one architecture's `cl.exe`/`link.exe` on `PATH`, so `make all` in
+  such a shell fails at link time (`LNK1112`) at the architecture the shell
+  does not target — run `make build-x86` and `make build-x64` in separately
+  activated shells then.
 - Local build environment: `scripts/setup-dev-env.ps1` stores each
   architecture's MSVC environment as user environment variables
   (`RESTIFY_MSVC_X64_*`, `RESTIFY_MSVC_X86_*`). The Makefile uses the set

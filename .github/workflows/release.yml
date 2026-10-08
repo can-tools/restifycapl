@@ -21,7 +21,6 @@ jobs:
     permissions:
       contents: read
     outputs:
-      mode: ${{ steps.mode.outputs.mode }}
       tag: ${{ steps.tag.outputs.tag }}
       version: ${{ steps.tag.outputs.version }}
     steps:
@@ -228,6 +227,7 @@ jobs:
           name: release-notes-body
           path: ${{ runner.temp }}/notes-body.md
           if-no-files-found: error
+          overwrite: true
 
   pipeline-x86:
     needs: validate
@@ -263,6 +263,7 @@ jobs:
           name: export-table-markdown
           path: ${{ steps.table.outputs.markdown-path }}
           if-no-files-found: error
+          overwrite: true
 
   assemble:
     needs: [validate, pipeline-x86, pipeline-x64, export-table]
@@ -346,6 +347,7 @@ jobs:
           name: release-assets
           path: dist
           if-no-files-found: error
+          overwrite: true
 
   attest:
     needs: assemble

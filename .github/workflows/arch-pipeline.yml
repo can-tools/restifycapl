@@ -43,6 +43,7 @@ jobs:
         shell: pwsh
         env:
           RELEASE_VERSION: ${{ inputs.release-version }}
+          ARCH: ${{ inputs.arch }}
         run: |
           $ErrorActionPreference = 'Stop'
           $verArgs = @()
@@ -58,8 +59,8 @@ jobs:
             }
             $verArgs = @("VER_MAJOR=$($fields[0])", "VER_MINOR=$($fields[1])", "VER_BUILD=$($fields[2])", 'VER_REV=0')
           }
-          make build-${{ inputs.arch }} @verArgs
-          if ($LASTEXITCODE -ne 0) { throw "make build-${{ inputs.arch }} failed (exit $LASTEXITCODE)" }
+          make "build-$env:ARCH" @verArgs
+          if ($LASTEXITCODE -ne 0) { throw "make build-$env:ARCH failed (exit $LASTEXITCODE)" }
 
       - name: Check version resource against release-version
         if: inputs.release-version != ''
@@ -127,6 +128,7 @@ jobs:
           name: restifycapl-${{ inputs.arch }}
           path: build/${{ inputs.arch }}/restifycapl-${{ inputs.arch }}.dll
           if-no-files-found: error
+          overwrite: true
 
   test:
     name: test
@@ -145,10 +147,11 @@ jobs:
         with:
           arch: ${{ inputs.arch }}
 
-      # The test suite runs on every pipeline call, once per architecture, keeping bitness parity continuously enforced.
       - name: make test (ARCH=${{ inputs.arch }})
         shell: pwsh
+        env:
+          ARCH: ${{ inputs.arch }}
         run: |
           $ErrorActionPreference = 'Stop'
-          make test ARCH=${{ inputs.arch }}
-          if ($LASTEXITCODE -ne 0) { throw "make test ARCH=${{ inputs.arch }} failed (exit $LASTEXITCODE)" }
+          make test "ARCH=$env:ARCH"
+          if ($LASTEXITCODE -ne 0) { throw "make test ARCH=$env:ARCH failed (exit $LASTEXITCODE)" }

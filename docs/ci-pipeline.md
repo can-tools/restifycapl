@@ -131,10 +131,12 @@ is the ceiling.
 
 ## Checkout depth (decided during Stage 14, BPE-37)
 
-Every job that runs `make` checks out with `fetch-depth: 0`: the Makefile
-runs `git describe` and `git rev-list` on every call, including `make test`,
-and a shallow checkout would degrade the version values silently. Other
-jobs, when they exist, use the default shallow checkout.
+Every job that runs `make`, and the release workflow's `validate` job, checks
+out with `fetch-depth: 0`: the Makefile runs `git describe` and `git rev-list`
+on every call, including `make test`, and a shallow checkout would degrade the
+version values silently. The other jobs (for example `export-table`) use the
+default shallow checkout. The release workflow's jobs are covered by the
+`fetch-depth` note in `docs/release-process.md`.
 
 ## The `export-table` job (decided during Stage 14, BPE-12)
 
