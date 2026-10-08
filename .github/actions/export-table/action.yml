@@ -1,0 +1,64 @@
+name: export-table
+description: Runs the export-table fixtures, checks src/module/exports.cpp and writes the job summary.
+
+outputs:
+  markdown-path:
+    description: Path of the generated export table markdown (written only when the table could be parsed).
+    value: ${{ steps.table.outputs.markdown-path }}
+
+runs:
+  using: composite
+  steps:
+    - name: Run export-table fixtures
+      id: fixtures
+      shell: pwsh
+      env:
+        FIXTURE_DIR: tests/export-table
+      run: |
+        ./scripts/list-export-table.ps1 -FixtureDir $env:FIXTURE_DIR
+        exit $LASTEXITCODE
+
+    - name: Check src/module/exports.cpp
+      id: table
+      if: always()
+      shell: pwsh
+      env:
+        EXPORTS_CPP: src/module/exports.cpp
+      run: |
+        $dir = Join-Path $env:RUNNER_TEMP 'export-table'
+        New-Item -ItemType Directory -Force -Path $dir | Out-Null
+        $md = Join-Path $dir 'export-table.md'
+        Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "markdown-path=$md"
+        ./scripts/list-export-table.ps1 -Path $env:EXPORTS_CPP -MarkdownPath $md | Tee-Object -FilePath (Join-Path $dir 'output.txt')
+        exit $LASTEXITCODE
+
+    - name: Write job summary
+      if: always()
+      shell: pwsh
+      env:
+        FIXTURES_OUTCOME: ${{ steps.fixtures.outcome }}
+      run: |
+        $dir = Join-Path $env:RUNNER_TEMP 'export-table'
+        $resultFile = Join-Path $dir 'output.txt'
+        $mdFile = Join-Path $dir 'export-table.md'
+        $result = ''
+        if (Test-Path -LiteralPath $resultFile) {
+          $result = (Get-Content -LiteralPath $resultFile | Where-Object { $_ -match '^export-table( passed)?:' } | Select-Object -Last 1)
+        }
+        if ($result -match '^export-table passed: (\d+) functions in (\d+) categories') {
+          $line = "export-table passed: $($Matches[1]) functions in $($Matches[2]) categories, checks 1-12 clean. Not a required check; read it on any branch that touches src/module/exports.cpp."
+        }
+        elseif ($result -match '^export-table: (\d+) of 12 checks failed') {
+          $line = "export-table FAILED: $($Matches[1]) of 12 checks failed in src/module/exports.cpp. This check is not required and does not block the merge, but a failing table cannot be released: release.yml requires it. Fix it before merging any change that touches src/module/exports.cpp."
+        }
+        else {
+          $line = 'export-table FAILED: no result was produced for src/module/exports.cpp; see the step log.'
+        }
+        $text = $line + "`n`n"
+        if ($env:FIXTURES_OUTCOME -ne 'success') {
+          $text = 'The export-table fixture run did not succeed; see the "Run export-table fixtures" step.' + "`n`n" + $text
+        }
+        if (Test-Path -LiteralPath $mdFile) {
+          $text += [System.IO.File]::ReadAllText($mdFile, (New-Object System.Text.UTF8Encoding($false)))
+        }
+        [System.IO.File]::AppendAllText($env:GITHUB_STEP_SUMMARY, $text, (New-Object System.Text.UTF8Encoding($false)))

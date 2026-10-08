@@ -1,8 +1,8 @@
 # CI pipeline
 
 Archival, CI-only rationale for `.github/workflows/ci.yml`,
-`.github/workflows/arch-pipeline.yml`, the `.github/actions/provision`
-composite action and `auto-pr.yml`. Local provisioning material (shallow clones,
+`.github/workflows/arch-pipeline.yml`, the `.github/actions/provision` and
+`.github/actions/export-table` composite actions and `auto-pr.yml`. Local provisioning material (shallow clones,
 per-triplet install roots, the pinned vcpkg tool tag) lives in
 `docs/development-environment.md` and `scripts/setup-dev-env.ps1`'s
 `Repair-ShallowVcpkgClone` doc comment instead — the local and CI paths
@@ -135,6 +135,41 @@ Every job that runs `make` checks out with `fetch-depth: 0`: the Makefile
 runs `git describe` and `git rev-list` on every call, including `make test`,
 and a shallow checkout would degrade the version values silently. Other
 jobs, when they exist, use the default shallow checkout.
+
+## The `export-table` job (decided during Stage 14, BPE-12)
+
+`ci.yml` has a short `export-table` job on `ubuntu-latest` (`pwsh` 7, default
+shallow checkout, `permissions: contents: read`) that calls the composite
+action `.github/actions/export-table`. The action runs
+`scripts/list-export-table.ps1` twice: first with `-FixtureDir
+tests/export-table`, then on `src/module/exports.cpp` with the 12 table
+checks. Each step runs even if the one before it failed, and a failing step
+fails the job. The job summary carries one status line (the M1 line, stating
+whether the check passed and, if not, how many of the 12 checks failed)
+followed by the full generated table: one heading per category, then row
+number, signature in CAPL declaration style and description. The action
+exposes the markdown path as its `markdown-path` output; only `release.yml`
+uploads it.
+
+The job is not a gate and not a required check, and no gate waits for it
+(accepted risk R18: a table defect does not block a merge). The mitigations
+are M1, the summary line, which says the check is not required but that a
+failing table cannot be released; M2, the reviewer rule that the result is
+recorded for any change touching `src/module/exports.cpp` and red is a
+Must-fix; and M3, a reminder in the `exports.cpp` warning of the
+auto-created pull-request body. The release workflow runs the same action in
+its own `export-table` job, and `publish` requires it, so a defective table
+cannot be released.
+
+The fixtures in `tests/export-table/*.fixture` are plain text, never
+compiled. The first line of each is a directive, `// expect: pass` or
+`// expect: fail N [N...]`. The runner executes the same checks on the
+fixture content (the file need not be named `exports.cpp`), sorted by file
+name, and compares the set of failing check numbers with the directive by
+exact set equality; a first line that is not a valid directive fails that
+fixture. The script exits 0 when everything passed, 1 when a check or fixture
+failed, and 2 on a usage or I/O error. It needs only text processing, which is
+why the job runs on Linux.
 
 ## `ci.yml` never calls `scripts/setup-dev-env.ps1` (found during Stage 6/7, BPE-24)
 

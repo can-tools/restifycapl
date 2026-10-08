@@ -61,3 +61,13 @@ jobs:
             echo "::error::pipeline-x64 finished with result '$PIPELINE_RESULT', expected 'success'"
             exit 1
           fi
+
+  # Not a gate and not a required check: no gate waits for it. See
+  # docs/ci-pipeline.md.
+  export-table:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/export-table
