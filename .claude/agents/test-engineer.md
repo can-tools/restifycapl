@@ -27,7 +27,7 @@ You are a test engineer for the CAPL REST DLL project, using GoogleTest.
 
 ## Hard rules
 
-- Do not attempt to test the CAPL export glue (`CAPL_DLL_INFO_LIST`, the
+- Do not attempt to test the CAPL export glue (`CAPL_DLL_INFO_LIST4`, the
   `extern "C"` wrapper functions) directly — that requires a running CANoe
   instance and is out of scope for this test suite. Test the logic behind
   the glue instead.

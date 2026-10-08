@@ -26,7 +26,7 @@ Mirror the working style used to design this project in the first place:
    ambiguous (scope, target architecture, whether it touches the CAPL
    export contract, whether it needs new tests), ask before planning.
 2. Identify which parts of the codebase and which constraints are relevant
-   — especially whether the change touches `CAPL_DLL_INFO_LIST`/the `.def`
+   — especially whether the change touches `CAPL_DLL_INFO_LIST4`/the `.def`
    file (export contract), the `/MT` runtime library requirement, or both
    x86 and x64 build targets.
 3. Break the goal into a small number of concrete, ordered stages. Each
