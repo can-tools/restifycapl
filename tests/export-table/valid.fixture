@@ -38,7 +38,7 @@ CAPL_DLL_INFO4 CAPL_DLL_INFO_LIST4[] = {
      "Blocks until a dispatched request completes or the timeout elapses.",
      'L',
      2,
-     {'D', 'L'},
+     {'D', 'D'},
      {0, 0},
      {"requestId", "waitTimeoutMs"}},
 
