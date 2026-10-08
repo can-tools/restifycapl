@@ -108,7 +108,7 @@ Human-only throughout: push, merging `main` into the stage branch (step 0f), ope
 | 3 | BPE-43: rule, skill and agent texts as one commit; the full list with status is in §10 item 2 | `build-pipeline-engineer` | **HUM-43**: you confirm the pending texts on the finished diff | `CLAUDE.md`, `msvc-build-conventions`, `build-pipeline-engineer.md`, `capl-export-contract`, `project-docs`, `code-reviewer.md` |
 | 4 | BPE-42: `pwsh` 7 in setup. Check for `pwsh` ≥ 7; otherwise install with `winget install -e --id Microsoft.PowerShell` (or Chocolatey `powershell-core`); otherwise **WARN** with the manual command. Compatible with Windows PowerShell 5.1; remind to open a new window. | `build-pipeline-engineer` | — | `scripts/setup-dev-env.ps1`, `docs/development-environment.md` |
 | 5a | BPE-37, part 1: resolve every action SHA once (`checkout`, `cache`, `upload-artifact`, `download-artifact`, `msvc-dev-cmd`, `attest-build-provenance`) and report the action → SHA → `vX.Y.Z` table; pin the `uses:` lines of today's `ci.yml` and add its workflow-level `permissions: contents: read`. Behaviour unchanged. | `build-pipeline-engineer` (you run the `ls-remote` lines if the agents cannot reach github.com) | covered by HUM-38 | `ci.yml` |
-| 5b | BPE-37, part 2: move today's setup steps 2–12 unchanged into the `provision` action; `ci.yml` keeps its single job, which calls the action. | `build-pipeline-engineer` | covered by HUM-38 | `.github/actions/provision/action.yml`, `ci.yml` |
+| 5b | BPE-37, part 2: move today's setup steps 2–12 unchanged into the `provision` action; `ci.yml` keeps its single job, which calls the action. Values that depend on `matrix` come from the action's `arch` input. | `build-pipeline-engineer` | covered by HUM-38 | `.github/actions/provision/action.yml`, `ci.yml` |
 | 5c | BPE-37, part 3: `arch-pipeline.yml` (build ‖ test, `contents: read` and `fetch-depth: 0` on both jobs, `dumpbin` step, version-check step that is off in CI), restructured `ci.yml` (gates, no concurrency block) and the `docs/ci-pipeline.md` update (§4 "Comments"). Behaviour of the moved steps stays exactly the same (§7). | `build-pipeline-engineer` | covered by HUM-38 | `.github/workflows/arch-pipeline.yml`, `ci.yml`, `docs/ci-pipeline.md` |
 | 6 | TEST-24: fixtures, one valid fragment plus at least one failing fragment for each check 1–12, written from the step 1 interface, including the zero-parameter and reference fixtures P1–P2 and F1–F9 (§4) | `test-engineer` | — | `tests/export-table/*.fixture` |
 | 7 | BPE-12: `list-export-table.ps1`, the composite action `.github/actions/export-table` (fixtures, script, job summary with the M1 line and the full table), the short `export-table` job in `ci.yml`, and the `export-table` section of `docs/ci-pipeline.md` | `build-pipeline-engineer` | covered by HUM-38 | `scripts/list-export-table.ps1`, `.github/actions/export-table/action.yml`, `ci.yml`, `docs/ci-pipeline.md` |
@@ -298,6 +298,7 @@ R8, R11, R15 and R17 are obsolete: there is no DLL-loading tool, no new compiled
   - every check has at least one failing fixture;
   - fixtures run only in `export-table` and are never compiled;
   - M1 present.
+- **Signature style:** style A in all generated output (export tables, job summary, notes) and in the step 7b comment.
 - **Export contract:** the table in `exports.cpp` unchanged (only the step 7b comment changes), `exports.def` unchanged; no `LIBRARY` line. **M2:** for any branch touching `exports.cpp`, the `export-table` result is recorded, and red is a Must-fix.
 - **Repo files:**
   - `.gitattributes` and `.editorconfig` content exactly as approved; renormalize staged nothing else;
@@ -319,6 +320,7 @@ R8, R11, R15 and R17 are obsolete: there is no DLL-loading tool, no new compiled
   - "after `main`'s CI is green" is a convention (OQ15b);
   - add the OQ10 policy.
 - **§8 Stage 13:** the heading and "CI PENDING" are corrected to CI green on both legs, merged as `8bd35f4`. HUM-36 is recorded at `8bd35f4`, compiled from branch head `9758c04`, whose tree is identical.
+- **Master plan line 97:** the row-1 signature is rewritten in style A, `long restifyReadVersion(char buffer[], dword bufferSize)`; the rest of that line is unchanged (§11 Q5).
 - **§5:** add the "rows written out in full" rule (pointer to `capl-export-contract`), the CHANGELOG `### Development` rule (OQ19) with no stage or task IDs anywhere in `CHANGELOG.md` (G1), and M2 as a `code-reviewer` rule (G7).
 - **§12:**
   - new: BPE-37 to BPE-40, BPE-42 to BPE-44, TEST-24 (redefined), REV-24;
@@ -374,12 +376,12 @@ R8, R11, R15 and R17 are obsolete: there is no DLL-loading tool, no new compiled
 2. **Q2 tag type:** annotated and lightweight tags are both accepted, with no check and no warning; annotated stays the convention (step 18, `docs/release-process.md`).
 3. **Q3 action pins:** §2 "Action pins"; `code-reviewer.md` item 5 and the `msvc-build-conventions` Ownership sentence narrowed to product versions (§2); Dependabot is a follow-up after Stage 14.
 4. **Q4 image version:** no PE image-version assertion (§4).
-5. **Q5 signature notation:** style A everywhere; row 0 left out of the tables with one note line; the style-B comment in `exports.cpp` is fixed in step 7b, the CHANGELOG entries in step 16; master-plan line 97 also uses style B and is converted at fold-in.
+5. **Q5 signature notation:** style A everywhere; row 0 left out of the tables with one note line; the style-B comment in `exports.cpp` is fixed in step 7b, the CHANGELOG entries in step 16; master-plan line 97 also uses style B and is converted at fold-in (§8).
 6. **Q6 CHANGELOG extraction:** §4 "Section extraction"; links inline and absolute; no relative-link guard; no "Full changelog" link.
 7. **Q7 export-table sharing:** composite action `.github/actions/export-table`, a short job in `ci.yml` and `release.yml`, upload only in `release.yml`; the CI job summary carries the M1 line and the full table.
 8. **Q8 zero-parameter functions:** supported in Vector's form `<returnType>, 0, "", "", {""}`; checks 7 and 12 amended, checks 3 and 10 unchanged; fixtures P1–P2 and F1–F9; rendered as `long restifyFoo()` / `void restifyFoo()`; the first such row is compiled in CANoe (x64, compile only) before its release.
 9. **Q9 permissions:** workflow-level `permissions: contents: read` in `ci.yml`; `contents: read` on each `arch-pipeline.yml` job. The repository default token setting is left open (human-only).
-10. **Q10 attestation:** `attest` verifies with `--repo` and `--signer-workflow`; no attestation verify in `publish`; the old step 19 (post-release local `gh` verify and manual release-page check) is removed; a post-release defect is handled like any other.
+10. **Q10 attestation:** `attest` verifies with `--repo` and `--signer-workflow`; no attestation verify in `publish`; the former post-release check step (local `gh` verify and manual release-page check) is removed; a post-release defect is handled like any other.
 11. **Q11 checkout depth:** `fetch-depth: 0` for every job that runs `make` and for `validate`; other jobs shallow.
 12. **Q12 notes layout:** §4 "Release notes layout"; the verify line also names `restifycapl-x86.dll`, exact wording at HUM-44.
 13. **Q13 commits:** step 5 split into 5a, 5b, 5c; all action SHAs resolved at the start of step 5; new step 7b; the style-B CHANGELOG conversion in step 16.
