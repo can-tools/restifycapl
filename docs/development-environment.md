@@ -457,6 +457,24 @@ foreach ($a in 'X64','X86') { foreach ($n in 'PATH','INCLUDE','LIB','LIBPATH') {
 
 (found during Stage 12, D23)
 
+## Line endings
+
+`.gitattributes` sets `* text=auto eol=crlf`: the repository index stores
+text files with LF, and the working tree is checked out with CRLF.
+`include/vendor/json.hpp` is marked `-text` and is never converted, so the
+pinned, SHA-256-verified file stays byte-identical to the upstream release.
+`*.sh` files are the exception and keep LF in the working tree.
+
+`.editorconfig` sets `end_of_line = crlf` only. It has no `charset` line
+because the `.can` and `.cin` files are Windows-1250, and a `utf-8` setting
+would make editors re-encode them on save. It has no trailing-whitespace
+rule either.
+
+A file whose working-tree copy is still LF (`git ls-files --eol` shows
+`w/lf`) is refreshed by deleting the working copy and running
+`git restore <file>`, which checks it out again with CRLF. Do this by hand;
+do not convert files with `sed -i` or any other automated rewrite.
+
 ## Human approval gate
 
 The script installs software and touches global machine state (VS Build
