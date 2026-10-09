@@ -1,14 +1,15 @@
 # restifycapl
 
 [![CI](https://github.com/can-tools/restifycapl/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/can-tools/restifycapl/actions/workflows/ci.yml)
-<!-- TODO: version badge once tagged releases are published; license badge once a license is chosen -->
+[![Release](https://img.shields.io/github/v/release/can-tools/restifycapl)](https://github.com/can-tools/restifycapl/releases)
+<!-- TODO: license badge once a license is chosen -->
 
 Native Windows DLL for Vector CANoe that gives CAPL scripts synchronous and asynchronous REST/HTTP calls (libcurl + Schannel), built for x86 and x64
 
 ## Project status
 
 > [!NOTE]
-> This project is pre-1.0 and has no tagged release — the only way to get the DLL today is to build it from source (see [Building the DLL](#building-the-dll)).
+> This project is pre-1.0. Tagged releases are available on [GitHub Releases](https://github.com/can-tools/restifycapl/releases) (see [Installation and download](#installation-and-download)), or the DLL can be built from source (see [Building the DLL](#building-the-dll)).
 >
 > The CAPL compiler recognises the synchronous, asynchronous and JSON operations (via the [CAPL framework](#capl-framework-preliminary) in `capl/`) in a real CANoe instance. This is confirmed for the x64 build and covers compilation only. Behaviour in a running measurement is not yet verified: no request has been run against a live server from a measurement. No 32-bit CANoe configuration is available, so the x86 DLL is verified by the CI test suite only.
 
@@ -30,6 +31,7 @@ Native Windows DLL for Vector CANoe that gives CAPL scripts synchronous and asyn
 - [Why this exists](#why-this-exists)
 - [Requirements](#requirements)
 - [Building the DLL](#building-the-dll)
+- [Installation and download](#installation-and-download)
 - [Usage from CAPL](#usage-from-capl)
 - [Writing JSON in CAPL source](#writing-json-in-capl-source)
 - [Operations](#operations)
@@ -53,7 +55,7 @@ restifycapl gives CAPL scripts direct REST/HTTP access: blocking calls for Measu
 
 ## Building the DLL
 
-There is no tagged release yet, so building from source is the only way to get the DLL. Running the setup script first is required on a fresh clone — no compiled dependency is committed to this repository.
+Pre-built binaries are available under [Installation and download](#installation-and-download). To build the DLL from source instead, run the setup script first on a fresh clone — no compiled dependency is committed to this repository.
 
 Run it from a plain PowerShell window at the repository root — not from a Developer or Native Tools prompt, where it cannot store the build environment. Elevation is only needed if MSVC Build Tools have to be installed; the script tells you when it is:
 
@@ -95,7 +97,46 @@ foreach ($a in 'X64','X86') { foreach ($n in 'PATH','INCLUDE','LIB','LIBPATH') {
 
 See [`docs/development-environment.md`](docs/development-environment.md) for the script's switches and the engineering rationale behind its design.
 
-TODO: download instructions once tagged releases are published on GitHub Releases.
+## Installation and download
+
+Pre-built binary releases are published on [GitHub Releases](https://github.com/can-tools/restifycapl/releases). Each release provides three assets:
+
+- `restifycapl-x64.dll` — 64-bit DLL for 64-bit CANoe installations.
+- `restifycapl-x86.dll` — 32-bit DLL for 32-bit CANoe installations.
+- `SHA256SUMS` — SHA-256 checksums for both DLLs.
+
+Asset file names do not carry a version string (`restifycapl-x64.dll`, not `restifycapl-v0.1.0-x64.dll`) because CANoe scripts and the CAPL framework master include (`capl/includes/includes.cin`) load the DLL by its static file name. To check the version of a downloaded DLL, inspect its file properties in Windows Explorer, verify its build attestation, or call `restifyReadVersion` from CAPL.
+
+### Verifying the download
+
+In PowerShell, verify the downloaded file's SHA-256 hash against the entry in `SHA256SUMS`:
+
+```powershell
+Get-FileHash restifycapl-x64.dll
+Get-FileHash restifycapl-x86.dll
+```
+
+The output hash must match the line for that file in `SHA256SUMS`.
+
+Both DLLs carry a cryptographic build-provenance attestation signed via GitHub Actions and Sigstore. If you have the GitHub CLI installed, you can verify that the DLL was built by the official repository workflow without tampering:
+
+```shell
+gh attestation verify restifycapl-x64.dll --repo can-tools/restifycapl --signer-workflow can-tools/restifycapl/.github/workflows/release.yml
+gh attestation verify restifycapl-x86.dll --repo can-tools/restifycapl --signer-workflow can-tools/restifycapl/.github/workflows/release.yml
+```
+
+See [`docs/release-process.md`](docs/release-process.md) for full details on the release pipeline and attestation verification.
+
+### Pairing with the CAPL framework
+
+The `capl/` folder is not packaged separately in release assets. Download the source archive (`Source code (zip)` or `Source code (tar.gz)`) for the matching release tag from the same release page, or clone the repository at that tag.
+
+Place the downloaded DLL into the corresponding directory inside the framework:
+- 64-bit: `capl/includes/dll/win-x64/restifycapl-x64.dll`
+- 32-bit: `capl/includes/dll/win-x86/restifycapl-x86.dll`
+
+> [!IMPORTANT]
+> The `capl/` framework and the DLLs must come from the same release tag or source commit. A DLL and `capl/` from different versions will fail at CAPL compilation because the wrapper signatures and export contract must match.
 
 ## Usage from CAPL
 
@@ -277,7 +318,8 @@ See [`CLAUDE.md`](CLAUDE.md) for the full directory layout and project conventio
 
 Planned, non-conditional work:
 
-- Tagged releases — publish built DLLs (x86 and x64) as downloadable GitHub Releases assets, instead of build-from-source being the only way to get the DLL.
+- Repository cleanup, test coverage audit, and consistency pass across documentation and export contracts (Stage 15).
+- Runtime verification in a live CANoe measurement session against test HTTP endpoints.
 
 ## Changelog
 
