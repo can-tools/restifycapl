@@ -76,7 +76,8 @@ ways:
   branch and rewrite the heading hash and the links.
 - Once the cut is merged (the first-parent commit after the heading's hash
   carries the heading) it passes and names that commit, which is the one to
-  tag.
+  tag. After a fix has merged it still names that old commit, and that commit
+  must not be tagged; redo the cut instead (see case B below).
 - When that commit already carries a `v*.*.*` tag it passes with a warning
   that the section was already released; the notes are previewed again, and
   the next release needs entries in `[Unreleased]`.
@@ -126,9 +127,13 @@ so the link definitions at the bottom of the file never enter the notes. More th
 - **A, transient failure before anything is public** (a Sigstore outage, a
   runner error): re-run the failed jobs.
 - **B, defect found before anything is public:** delete the draft and the tag,
-  fix through a `fix/` PR with its entry in the unpublished CHANGELOG section
-  (release-machinery fixes under `### Development`), and tag again. Never
-  reuse the tag name for a different version.
+  fix through a `fix/` PR, then redo the cut: move the fix's entry into the
+  cut section (release-machinery fixes under `### Development`), rewrite the
+  cut section's heading hash and its links to the new `origin/main` tip, run
+  the dry run, squash-merge, and tag the new squash-merge commit. Never tag the
+  old cut's merge commit after a fix has merged, because it would publish
+  without the fix; tagging a later commit instead fails in `validate`, as no
+  commit has the old cut's hash as its first parent any more. Never reuse the tag name for a different version.
 - **C, the release is public and defective:** never move the tag. Ship the
   next patch version, mark the bad release "Withdrawn" and its CHANGELOG
   heading `[YANKED]`.
