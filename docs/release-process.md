@@ -103,12 +103,12 @@ the Makefile runs `git` on every call and the ancestor check needs
 
 A hash heading has the form `## [<12 hex characters>] - YYYY-MM-DD`; the
 parent of a tagged merge commit is its first parent. CHANGELOG matching is
-line by line and allows `\r?` at line ends, because
-Linux checkouts are CRLF too. The section ends at the next `## [` heading or
-at a column-0 link definition
+line by line and allows `\r?` at line ends, because Linux checkouts are CRLF
+too. The section ends at the next `## [` heading or at a column-0 link
+definition
 (`[<12-char hash>]: https://github.com/<owner>/<repo>/commit/<full 40-char hash>`),
-so the link definitions at the bottom of the file never enter the notes. More than one
-`### Development` block, or an empty section after removing it, fails.
+so the link definitions at the bottom of the file never enter the notes. More
+than one `### Development` block, or an empty section after removing it, fails.
 
 ## Safeguards in `publish`
 
@@ -140,10 +140,11 @@ so the link definitions at the bottom of the file never enter the notes. More th
   heading `[YANKED]`.
 - **D, the release went public but the job reports failure:** handled as a
   normal defect, like any other. There is no extra post-release check.
-- **Wrong or missing hash heading, or a heading whose hash is not a commit in
-  this run's history:** `validate` fails with the expected hash,
-  before anything is built or public. Delete the tag, fix the heading through
-  a PR, and tag the new squash-merge commit.
+- **Wrong or missing hash heading:** `validate` fails with the expected hash,
+  before anything is built or public. A heading whose hash is not a commit
+  matches no first parent, so it fails the same way ("found 0"); only a dry
+  run reports it as not a commit in the run's history. Delete the tag, fix the
+  heading through a PR, and tag the new squash-merge commit.
 
 Attestations created for builds that are never published are harmless and
 stay.
