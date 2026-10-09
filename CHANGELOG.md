@@ -3,211 +3,130 @@
 All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
-Version headings correspond to Git tags on this repository; there are no
-hand-invented version numbers.
+Release headings correspond to commit hashes of the cut's base on this
+repository; there are no version numbers in files.
 
 ## [Unreleased]
 
+## [0d0f52240d49] - 2026-10-09
+
+The export table contract covers rows 0–29 in [src/module/exports.cpp](https://github.com/can-tools/restifycapl/blob/0d0f52240d4976240efcd619384e770c09abda2c/src/module/exports.cpp).
+
+Verification status:
+- Unit tests pass on both architectures (x86 and x64) outside CANoe.
+- Export table checker verifies all 12 structural and semantic checks on [src/module/exports.cpp](https://github.com/can-tools/restifycapl/blob/0d0f52240d4976240efcd619384e770c09abda2c/src/module/exports.cpp).
+- CANoe verification: x64 build compiled and verified in CANoe (rows 1–29 recognized, wrapper libraries and verification nodes compile); x86 has not been loaded by CANoe (covered by CI only); no measurement has ever run, and runtime behavior has not been observed in CANoe.
+
+Reference documentation: [docs/capl-sync-surface.md](https://github.com/can-tools/restifycapl/blob/0d0f52240d4976240efcd619384e770c09abda2c/docs/capl-sync-surface.md), [docs/capl-async-surface.md](https://github.com/can-tools/restifycapl/blob/0d0f52240d4976240efcd619384e770c09abda2c/docs/capl-async-surface.md), [docs/capl-json-surface.md](https://github.com/can-tools/restifycapl/blob/0d0f52240d4976240efcd619384e770c09abda2c/docs/capl-json-surface.md), [docs/capl-framework.md](https://github.com/can-tools/restifycapl/blob/0d0f52240d4976240efcd619384e770c09abda2c/docs/capl-framework.md), and [docs/release-process.md](https://github.com/can-tools/restifycapl/blob/0d0f52240d4976240efcd619384e770c09abda2c/docs/release-process.md).
+
 ### Added
 
-- `restifyReadVersion(char buffer[], dword bufferSize) : long` -- the
-  project's first CAPL-exported operation (Stage 5, ABI proof), renamed
-  from `restifyGetVersion` while still unreferenced by any observed
-  runtime call. Writes the DLL's build version string into a
-  caller-supplied buffer; returns 0 on success or a negative error code
-  (see `src/module/exports.cpp`).
-- `scripts/setup-dev-env.ps1`: development environment bootstrap script
-  that provisions MSVC Build Tools, `make`, vcpkg-built libcurl (x86 and
-  x64, static, SChannel), and the pinned `nlohmann/json` single header.
-  Verified working end to end on a real machine (19 OK, 0 WARN, 0 FAIL).
-- `.github/workflows/auto-pr.yml`: bot-side workflow that opens a draft PR
-  into `main` on a push to a `stage/`, `chore/`, `fix/`, or `docs/` branch,
-  guarded against no-op reruns and branches with no commits ahead of `main`
-  (Stage 7, BPE-21).
-- `.claude/skills/stage-branch/SKILL.md`: branch-naming convention and
-  create-and-push procedure for starting new work (Stage 7, BPE-22).
-- `.github/workflows/ci.yml`: the project's first CI pipeline. Runs on
-  `windows-latest`, matrix over x86/x64, calling the same `make build-<arch>`
-  and `make test ARCH=<arch>` targets used locally, with its own `/MT`
-  provenance check and both DLLs uploaded as workflow artifacts (Stage 6,
-  BPE-9).
-- `restifyGetSync(char url[], dword urlSize, char requestHeaders[], dword requestHeadersSize, char responseBody[], dword responseBodySize, long& httpStatusCode, dword& responseBodyLength) : long`
-  -- blocking HTTP GET.
-- `restifyDeleteSync(...same shape as restifyGetSync...) : long` -- blocking
-  HTTP DELETE.
-- `restifyPostSync(char url[], dword urlSize, char requestHeaders[], dword requestHeadersSize, char requestBody[], dword requestBodySize, char responseBody[], dword responseBodySize, long& httpStatusCode, dword& responseBodyLength) : long`
-  -- blocking HTTP POST.
-- `restifyPutSync(...same shape as restifyPostSync...) : long` -- blocking
-  HTTP PUT.
-- `restifyPatchSync(...same shape as restifyPostSync...) : long` -- blocking
-  HTTP PATCH.
-- `restifyRequestSync(char method[], dword methodSize, char url[], dword urlSize, char requestHeaders[], dword requestHeadersSize, char requestBody[], dword requestBodySize, char responseBody[], dword responseBodySize, dword connectTimeoutMs, dword totalTimeoutMs, dword maxResponseBytes, long& httpStatusCode, dword& responseBodyLength) : long`
-  -- general-purpose blocking HTTP request covering any method and explicit
-  timeouts/response cap, for cases the five verb helpers above don't reach.
-- `restifyGetAsync(char url[], dword urlSize, char requestHeaders[], dword requestHeadersSize, dword& requestId) : long`
-  -- dispatches a non-blocking HTTP GET, returning immediately with a
-  request id (see `docs/capl-async-surface.md`).
-- `restifyDeleteAsync(...same shape as restifyGetAsync...) : long` --
-  dispatches a non-blocking HTTP DELETE.
-- `restifyPostAsync(char url[], dword urlSize, char requestHeaders[], dword requestHeadersSize, char requestBody[], dword requestBodySize, dword& requestId) : long`
-  -- dispatches a non-blocking HTTP POST with the given request body.
-- `restifyPutAsync(...same shape as restifyPostAsync...) : long` --
-  dispatches a non-blocking HTTP PUT.
-- `restifyPatchAsync(...same shape as restifyPostAsync...) : long` --
-  dispatches a non-blocking HTTP PATCH.
-- `restifyRequestAsync(char method[], dword methodSize, char url[], dword urlSize, char requestHeaders[], dword requestHeadersSize, char requestBody[], dword requestBodySize, dword connectTimeoutMs, dword totalTimeoutMs, dword maxResponseBytes, dword& requestId) : long`
-  -- dispatches a non-blocking HTTP request using any method and explicit
-  timeouts/response cap, for cases the five verb helpers above don't reach.
-- `restifyPollResponse(dword requestId, long& state) : long` -- non-blocking
-  check of whether a dispatched request is still in flight or has completed.
-- `restifyAwaitResponse(dword requestId, dword waitTimeoutMs) : long` --
-  blocks until a dispatched request completes or the given timeout elapses.
-- `restifyReadResponse(dword requestId, char responseBody[], dword responseBodySize, long& requestStatus, long& httpStatusCode, dword& responseBodyLength) : long`
-  -- copies a completed response's body into the caller's buffer without
-  blocking, retryable on `BufferTooSmall`.
-- `restifyDiscardResponse(dword requestId) : long` -- releases a single
-  response's slot without blocking.
-- `restifyDiscardAllResponses(dword& stillRunning) : long` -- releases every
-  response's memory at once and reports how many requests are still running;
-  frees memory on the caller's thread.
-- `restifyJsonParse(char json[], dword jsonSize, dword& documentId) : long`
-  -- parses JSON text (strings may be written in apostrophes instead of
-  double quotes), flattens it and stores it under a document id; entry
-  key text over 4 MiB gives `KeyTextTooLarge` (-36), and a NUL in the text or
-  a `\u0000` in an object key gives `ParseError` (-10) (see
-  `docs/capl-json-surface.md`).
-- `restifyJsonCountEntries(dword documentId, dword& entryCount) : long` --
-  writes how many flattened entries a document holds to `entryCount`.
-- `restifyJsonReadEntry(dword documentId, dword entryIndex, char key[], dword keySize, char value[], dword valueSize, long& valueType) : long`
-  -- copies one entry's key (a JSON Pointer) and value text and reports its
-  value type, retryable on `BufferTooSmall`.
-- `restifyJsonReadValue(dword documentId, char path[], dword pathSize, char value[], dword valueSize, long& valueType) : long`
-  -- copies the value text at a JSON Pointer path and reports its value type,
-  retryable on `BufferTooSmall`.
-- `restifyJsonReadLong(dword documentId, char path[], dword pathSize, long& value) : long`
-  -- writes the integer at a JSON Pointer path to `value`; returns 0, -1, -6,
-  -11, -12, -13, -14, -15 (null), -16 (outside 32-bit range), -17
-  (fractional), -31 or -35.
-- `restifyJsonReadDouble(dword documentId, char path[], dword pathSize, float& value) : long`
-  -- writes the number at a JSON Pointer path to `value`; returns 0, -1, -6,
-  -11, -12, -13, -14, -15 (null), -31 or -35.
-- `restifyJsonReadBool(dword documentId, char path[], dword pathSize, long& value) : long`
-  -- writes the boolean at a JSON Pointer path to `value` as 1 or 0; returns
-  0, -1, -6, -11, -12, -13, -14, -15 (null), -31 or -35.
-- `restifyJsonCountElements(dword documentId, char path[], dword pathSize, dword& elementCount) : long`
-  -- writes the element count of the array at a JSON Pointer path to
-  `elementCount`; returns 0, -1, -6, -11, -12, -13, -14, -15 (null), -31 or
-  -35.
-- `restifyJsonDiscardDocument(dword documentId) : long` -- releases a single
-  document.
-- `restifyJsonDiscardAllDocuments(dword& discardedCount) : long` -- releases
-  every document and reports how many were released.
-- `restifyJsonNormalize(char json[], dword jsonSize, char normalized[], dword normalizedSize) : long`
-  -- converts apostrophe-quoted JSON strings to standard JSON and checks the
-  result; returns 0, -1, -2 (retry with a larger buffer), -6, -10, -32 or
-  -35, and `normalized` holds text only on 0.
-- Preliminary CAPL framework in `capl/` (include entry point, `restLib`
-  wrapper libraries, verification nodes); see `docs/capl-framework.md`.
+- `long restifyReadVersion(char buffer[], dword bufferSize)`: writes the DLL's
+  build version string into a caller-supplied buffer; returns 0 on success or a
+  negative error code (see [src/module/exports.cpp](https://github.com/can-tools/restifycapl/blob/0d0f52240d4976240efcd619384e770c09abda2c/src/module/exports.cpp)).
+- Synchronous HTTP operations:
+  `long restifyGetSync(char url[], dword urlSize, char requestHeaders[], dword requestHeadersSize, char responseBody[], dword responseBodySize, long& httpStatusCode, dword& responseBodyLength)` (blocking GET),
+  `long restifyDeleteSync(...)` (DELETE),
+  `long restifyPostSync(char url[], dword urlSize, char requestHeaders[], dword requestHeadersSize, char requestBody[], dword requestBodySize, char responseBody[], dword responseBodySize, long& httpStatusCode, dword& responseBodyLength)` (POST),
+  `long restifyPutSync(...)` (PUT),
+  `long restifyPatchSync(...)` (PATCH), and
+  `long restifyRequestSync(char method[], dword methodSize, char url[], dword urlSize, char requestHeaders[], dword requestHeadersSize, char requestBody[], dword requestBodySize, char responseBody[], dword responseBodySize, dword connectTimeoutMs, dword totalTimeoutMs, dword maxResponseBytes, long& httpStatusCode, dword& responseBodyLength)`
+  for general-purpose blocking requests covering any HTTP method, explicit timeouts and response body cap (see [docs/capl-sync-surface.md](https://github.com/can-tools/restifycapl/blob/0d0f52240d4976240efcd619384e770c09abda2c/docs/capl-sync-surface.md)).
+- Asynchronous HTTP operations: non-blocking request dispatch helpers
+  `long restifyGetAsync(char url[], dword urlSize, char requestHeaders[], dword requestHeadersSize, dword& requestId)`,
+  `long restifyDeleteAsync(...)`,
+  `long restifyPostAsync(char url[], dword urlSize, char requestHeaders[], dword requestHeadersSize, char requestBody[], dword requestBodySize, dword& requestId)`,
+  `long restifyPutAsync(...)`,
+  `long restifyPatchAsync(...)`, and
+  `long restifyRequestAsync(char method[], dword methodSize, char url[], dword urlSize, char requestHeaders[], dword requestHeadersSize, char requestBody[], dword requestBodySize, dword connectTimeoutMs, dword totalTimeoutMs, dword maxResponseBytes, dword& requestId)`;
+  plus response polling and lifecycle management
+  `long restifyPollResponse(dword requestId, long& state)`,
+  `long restifyAwaitResponse(dword requestId, dword waitTimeoutMs)`,
+  `long restifyReadResponse(dword requestId, char responseBody[], dword responseBodySize, long& requestStatus, long& httpStatusCode, dword& responseBodyLength)`,
+  `long restifyDiscardResponse(dword requestId)`, and
+  `long restifyDiscardAllResponses(dword& stillRunning)`
+  (see [docs/capl-async-surface.md](https://github.com/can-tools/restifycapl/blob/0d0f52240d4976240efcd619384e770c09abda2c/docs/capl-async-surface.md)).
+- JSON parsing, normalization and typed path accessors:
+  `long restifyJsonParse(char json[], dword jsonSize, dword& documentId)` (parses JSON text into a flattened document; strings may use apostrophe notation),
+  `long restifyJsonCountEntries(dword documentId, dword& entryCount)`,
+  `long restifyJsonReadEntry(dword documentId, dword entryIndex, char key[], dword keySize, char value[], dword valueSize, long& valueType)`,
+  `long restifyJsonReadValue(dword documentId, char path[], dword pathSize, char value[], dword valueSize, long& valueType)`,
+  `long restifyJsonReadLong(dword documentId, char path[], dword pathSize, long& value)`,
+  `long restifyJsonReadDouble(dword documentId, char path[], dword pathSize, float& value)`,
+  `long restifyJsonReadBool(dword documentId, char path[], dword pathSize, long& value)`,
+  `long restifyJsonCountElements(dword documentId, char path[], dword pathSize, dword& elementCount)`,
+  `long restifyJsonDiscardDocument(dword documentId)`,
+  `long restifyJsonDiscardAllDocuments(dword& discardedCount)`, and
+  `long restifyJsonNormalize(char json[], dword jsonSize, char normalized[], dword normalizedSize)`
+  (see [docs/capl-json-surface.md](https://github.com/can-tools/restifycapl/blob/0d0f52240d4976240efcd619384e770c09abda2c/docs/capl-json-surface.md)).
+- Preliminary CAPL framework in
+  [capl/](https://github.com/can-tools/restifycapl/blob/0d0f52240d4976240efcd619384e770c09abda2c/capl/)
+  (include entry point, `restLib` wrapper libraries, verification nodes); see
+  [docs/capl-framework.md](https://github.com/can-tools/restifycapl/blob/0d0f52240d4976240efcd619384e770c09abda2c/docs/capl-framework.md).
 - Tagged releases: pushing a `vX.Y.Z` tag builds both DLLs and publishes
   `restifycapl-x86.dll`, `restifycapl-x64.dll` and a `SHA256SUMS` file as a
   GitHub release, with the tag's changelog section as the release notes and a
-  build-provenance attestation for the DLLs. The release is created as a
-  draft, checked, and only then made public. Running the `Release` workflow
-  manually performs a dry run that builds and checks everything without
-  publishing. See `docs/release-process.md`.
-
-### Changed
-
-- `scripts/setup-dev-env.ps1` stores per-architecture MSVC environment
+  build-provenance attestation for the DLLs. The release is created as a draft,
+  checked, and only then made public. Running the `Release` workflow manually
+  performs a dry run that builds and checks everything without publishing. See
+  [docs/release-process.md](https://github.com/can-tools/restifycapl/blob/0d0f52240d4976240efcd619384e770c09abda2c/docs/release-process.md).
+- [scripts/setup-dev-env.ps1](https://github.com/can-tools/restifycapl/blob/0d0f52240d4976240efcd619384e770c09abda2c/scripts/setup-dev-env.ps1):
+  development environment bootstrap script that provisions MSVC Build Tools,
+  `make`, vcpkg-built libcurl (x86 and x64, static, SChannel), and the pinned
+  `nlohmann/json` single header. Stores per-architecture MSVC environment
   variables (`RESTIFY_MSVC_X64_*`, `RESTIFY_MSVC_X86_*`, user scope) so
-  `make build-x64` / `make build-x86` work from any new shell; bare `make`
-  now prints the target list instead of building. See
-  `docs/development-environment.md`.
-- Product and test builds now actually link libcurl: `curl/curl.h` is
-  provisioned into `include/vendor/curl/` by both `scripts/setup-dev-env.ps1`
-  and CI, `CURL_STATICLIB` is defined for both compile paths so the static
-  import resolves, and `iphlpapi.lib` is linked alongside the existing
-  Windows system libs to satisfy libcurl's `if_nametoindex` reference. The
-  libcurl/zs link line itself was already in place and needed no change.
-- `Makefile`: `SYSLIBS` now includes `version.lib`, required by
-  `CopyOwnVersionString`'s `GetFileVersionInfo` calls; applies identically to
-  both architectures via the shared parameterized rule (Stage 6, BPE-9).
-- `.github/workflows/ci.yml`: `push`/`pull_request` triggers now filtered
-  to `main` and the four working-branch prefixes, so a future release tag
-  push no longer also matches this workflow's `push` trigger (Stage 7,
-  BPE-20).
-- `.github/workflows/auto-pr.yml`: the draft-PR body is now derived from
-  the branch's compare-API data instead of a fully static scaffold --
-  plan-only classification with a pointer to `plan.md` §7.8/§7.10, a
-  pre-seeded `TODO: stage and task IDs` line for `stage/`/`chore/`
-  branches, the branch's own commit subjects, and a safety warning when
-  the branch touches `src/module/exports.cpp`. `plan.md` §7.2 now also
-  documents that the bot always opens against `main`, never a stacked
-  parent (BPE-27, `plan.md` §7.13's Defect 2).
-- `.claude/skills/stage-branch/SKILL.md`: records the PR-base behavior
-  above as a fourth load-bearing use of the four branch-prefix
-  conventions, and notes that retargeting a PR's base off `main` costs it
-  its `pull_request` CI runs (BPE-27).
-- `.github/workflows/ci.yml`: `actions/checkout` bumped `v4` -> `v7`,
-  `actions/cache` bumped `v4` -> `v6` (both occurrences), and
-  `actions/upload-artifact` bumped `v4` -> `v7`, so each now runs on the
-  `node24` runtime instead of the deprecated `node20`. Verified against each
-  action's own `action.yml` and release notes that no input or default
-  behavior this workflow relies on (`fetch-depth: 0`, plain `path`/`key`
-  cache usage, single-file DLL artifact upload) changed across the jump.
-  `ilammy/msvc-dev-cmd` stays pinned to `v1` -- its latest release
-  (`v1.13.0`) still declares `node20`, so no bump resolves the warning for
-  that action yet -- but is now pinned to the exact commit `v1.13.0`
-  resolves to, with a trailing version comment, for supply-chain hardening
-  independent of the Node.js question.
+  `make build-x64` and `make build-x86` work from any new shell; bare `make`
+  prints the target list instead of building. See
+  [docs/development-environment.md](https://github.com/can-tools/restifycapl/blob/0d0f52240d4976240efcd619384e770c09abda2c/docs/development-environment.md).
+- Statically linked runtime: `/MT` CRT for the DLL and all static dependencies
+  (libcurl, zlib, GoogleTest), linking static libcurl with the Windows
+  SChannel TLS backend.
 
 ### Development
 
-- The build and test sequence of `ci.yml` moved into the reusable workflow
-  `.github/workflows/arch-pipeline.yml`, called once per architecture by both
-  `ci.yml` and the release workflow, so both run the same Make targets. The
-  shared dependency provisioning lives in the composite action
-  `.github/actions/provision`.
-- `.github/workflows/release.yml`: the tag-driven release workflow described
-  above (tag and `CHANGELOG.md` validation, the two architecture pipelines,
-  the export-table check, `SHA256SUMS`, build-provenance attestation, draft
-  then verify then publish), plus the manual dry run.
-- `scripts/list-export-table.ps1` and `.github/actions/export-table`: a check
-  of the CAPL export table in `src/module/exports.cpp` (12 checks) that also
-  renders the table as markdown. It runs as a short job in `ci.yml` and
-  `release.yml`; a defective table cannot be released. Its fixtures in
-  `tests/export-table/` pin the expected result of each check.
-- `scripts/setup-dev-env.ps1` detects PowerShell 7 (`pwsh`), which
-  `scripts/list-export-table.ps1` requires, and installs it through winget
-  (or Chocolatey) when missing; it warns with the manual install command
-  otherwise.
-- `.gitattributes` and `.editorconfig` set the line-ending policy: CRLF in
-  the working tree, LF for shell scripts and vendored `json.hpp` untouched.
-- Every `uses:` in the workflows and composite actions is pinned to a full
-  commit SHA with a trailing version comment.
+- CI pipeline in
+  [.github/workflows/ci.yml](https://github.com/can-tools/restifycapl/blob/0d0f52240d4976240efcd619384e770c09abda2c/.github/workflows/ci.yml):
+  runs on `windows-latest` calling a reusable per-architecture pipeline
+  ([.github/workflows/arch-pipeline.yml](https://github.com/can-tools/restifycapl/blob/0d0f52240d4976240efcd619384e770c09abda2c/.github/workflows/arch-pipeline.yml))
+  once for x86 and once for x64, running `make build-<arch>` and `make test ARCH=<arch>`
+  in parallel with shared dependency provisioning in
+  [.github/actions/provision](https://github.com/can-tools/restifycapl/blob/0d0f52240d4976240efcd619384e770c09abda2c/.github/actions/provision),
+  dependency caching, static `/MT` CRT provenance checks (`dumpbin /directives`),
+  and uploading both DLLs as workflow artifacts. Triggers are filtered to `main`
+  and working-branch prefixes (`stage/**`, `chore/**`, `fix/**`, `docs/**`).
+- Tag-driven release workflow in
+  [.github/workflows/release.yml](https://github.com/can-tools/restifycapl/blob/0d0f52240d4976240efcd619384e770c09abda2c/.github/workflows/release.yml):
+  validates the tag and `CHANGELOG.md` heading hash, calls `arch-pipeline.yml` for
+  x86 and x64 with tag-derived version resources, verifies export table integrity,
+  assembles release notes and `SHA256SUMS`, attests build provenance via GitHub
+  Attestations, and creates a draft release that is verified before publication.
+  Includes a manual dry-run mode via `workflow_dispatch`.
+- [scripts/list-export-table.ps1](https://github.com/can-tools/restifycapl/blob/0d0f52240d4976240efcd619384e770c09abda2c/scripts/list-export-table.ps1)
+  and
+  [.github/actions/export-table](https://github.com/can-tools/restifycapl/blob/0d0f52240d4976240efcd619384e770c09abda2c/.github/actions/export-table):
+  validation of the CAPL export table in `src/module/exports.cpp` (12 checks)
+  that also renders the table as markdown for CI job summaries and release notes.
+  Test fixtures in `tests/export-table/` pin expected check results.
+- [.github/workflows/auto-pr.yml](https://github.com/can-tools/restifycapl/blob/0d0f52240d4976240efcd619384e770c09abda2c/.github/workflows/auto-pr.yml):
+  workflow that opens a draft PR into `main` on a push to a `stage/`, `chore/`,
+  `fix/`, or `docs/` branch, guarded against no-op reruns and branches with no
+  commits ahead of `main`, with PR body derived from branch compare data.
+- [.claude/skills/stage-branch/SKILL.md](https://github.com/can-tools/restifycapl/blob/0d0f52240d4976240efcd619384e770c09abda2c/.claude/skills/stage-branch/SKILL.md):
+  branch-naming convention and create-and-push procedure for starting new work.
+- [Makefile](https://github.com/can-tools/restifycapl/blob/0d0f52240d4976240efcd619384e770c09abda2c/Makefile):
+  `SYSLIBS` includes `version.lib` for `GetFileVersionInfo` version queries and
+  `iphlpapi.lib` for libcurl's `if_nametoindex` reference, applying identically
+  to both architectures via the shared parameterized build rule.
+- [scripts/setup-dev-env.ps1](https://github.com/can-tools/restifycapl/blob/0d0f52240d4976240efcd619384e770c09abda2c/scripts/setup-dev-env.ps1)
+  detects PowerShell 7 (`pwsh`), required by `scripts/list-export-table.ps1`,
+  and installs it via winget or Chocolatey when missing, warning with the
+  manual install command otherwise.
+- [.gitattributes](https://github.com/can-tools/restifycapl/blob/0d0f52240d4976240efcd619384e770c09abda2c/.gitattributes)
+  and
+  [.editorconfig](https://github.com/can-tools/restifycapl/blob/0d0f52240d4976240efcd619384e770c09abda2c/.editorconfig)
+  enforce line-ending policy: CRLF in the working tree, LF for shell scripts,
+  and vendored `include/vendor/json.hpp` untouched.
+- Every action `uses:` in workflows and composite actions is pinned to a full
+  40-character commit SHA with a trailing version comment.
 
-### Fixed
-
-- `vcpkg.json`: `builtin-baseline` was a newer vcpkg registry commit than
-  the pinned vcpkg tool (`VCPKG_PINNED_TAG` in `ci.yml` /
-  `$VcpkgPinnedTag` in `scripts/setup-dev-env.ps1`), so `vcpkg install`
-  resolved baseline versions (curl 8.22.0, gtest 1.18.0) that don't exist
-  in the older, checked-out version database, failing both triplets with
-  "no version database entry for curl/gtest at X.Y.Z" (BPE-25).
-  `builtin-baseline` is now pinned to
-  `9e593bb18ea69cc5095e012465dcd675a822ed0d`, the exact commit
-  `VCPKG_PINNED_TAG`'s tag (`2026.07.29`) dereferences to, and the
-  now-redundant `curl` version override was removed. This downgrades the
-  DLL's linked dependencies to libcurl 8.21.0#1 and (test-only) GoogleTest
-  1.17.0#3. A drift guard (CI step + `Assert-VcpkgBaselinePin` in
-  `scripts/setup-dev-env.ps1`) now fails loudly if these two pins ever
-  diverge again instead of only being documented.
-- `.github/workflows/ci.yml`: the vcpkg tool checkout step cloned
-  unconditionally into `VCPKG_ROOT`, which `ilammy/msvc-dev-cmd@v1` had
-  silently repointed at the VS-bundled vcpkg checkout already present on
-  `windows-latest` runners (`<VS install>\VC\vcpkg`), so the clone failed
-  with "already exists and is not an empty directory" on the workflow's
-  first real run. `VCPKG_ROOT` is now explicitly re-pinned to a CI-only
-  path under `$RUNNER_TEMP` immediately after the MSVC activation step,
-  leaving the pinned-tag clone/checkout/bootstrap sequence itself
-  unchanged.
+[0d0f52240d49]: https://github.com/can-tools/restifycapl/commit/0d0f52240d4976240efcd619384e770c09abda2c
