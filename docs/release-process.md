@@ -133,7 +133,8 @@ so the link definitions at the bottom of the file never enter the notes. More th
   the dry run, squash-merge, and tag the new squash-merge commit. Never tag the
   old cut's merge commit after a fix has merged, because it would publish
   without the fix; tagging a later commit instead fails in `validate`, as no
-  commit has the old cut's hash as its first parent any more. Never reuse the tag name for a different version.
+  commit has the old cut's hash as its first parent any more. Never reuse the
+  tag name for a different version.
 - **C, the release is public and defective:** never move the tag. Ship the
   next patch version, mark the bad release "Withdrawn" and its CHANGELOG
   heading `[YANKED]`.
