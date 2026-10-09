@@ -147,6 +147,8 @@ jobs:
         with:
           arch: ${{ inputs.arch }}
 
+      # The test suite runs on every pipeline call, once per architecture,
+      # keeping bitness parity continuously enforced.
       - name: make test (ARCH=${{ inputs.arch }})
         shell: pwsh
         env:
