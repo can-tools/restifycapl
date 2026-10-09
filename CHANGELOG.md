@@ -108,6 +108,13 @@ hand-invented version numbers.
   -35, and `normalized` holds text only on 0.
 - Preliminary CAPL framework in `capl/` (include entry point, `restLib`
   wrapper libraries, verification nodes); see `docs/capl-framework.md`.
+- Tagged releases: pushing a `vX.Y.Z` tag builds both DLLs and publishes
+  `restifycapl-x86.dll`, `restifycapl-x64.dll` and a `SHA256SUMS` file as a
+  GitHub release, with the tag's changelog section as the release notes and a
+  build-provenance attestation for the DLLs. The release is created as a
+  draft, checked, and only then made public. Running the `Release` workflow
+  manually performs a dry run that builds and checks everything without
+  publishing. See `docs/release-process.md`.
 
 ### Changed
 
@@ -153,6 +160,31 @@ hand-invented version numbers.
   that action yet -- but is now pinned to the exact commit `v1.13.0`
   resolves to, with a trailing version comment, for supply-chain hardening
   independent of the Node.js question.
+
+### Development
+
+- The build and test sequence of `ci.yml` moved into the reusable workflow
+  `.github/workflows/arch-pipeline.yml`, called once per architecture by both
+  `ci.yml` and the release workflow, so both run the same Make targets. The
+  shared dependency provisioning lives in the composite action
+  `.github/actions/provision`.
+- `.github/workflows/release.yml`: the tag-driven release workflow described
+  above (tag and `CHANGELOG.md` validation, the two architecture pipelines,
+  the export-table check, `SHA256SUMS`, build-provenance attestation, draft
+  then verify then publish), plus the manual dry run.
+- `scripts/list-export-table.ps1` and `.github/actions/export-table`: a check
+  of the CAPL export table in `src/module/exports.cpp` (12 checks) that also
+  renders the table as markdown. It runs as a short job in `ci.yml` and
+  `release.yml`; a defective table cannot be released. Its fixtures in
+  `tests/export-table/` pin the expected result of each check.
+- `scripts/setup-dev-env.ps1` detects PowerShell 7 (`pwsh`), which
+  `scripts/list-export-table.ps1` requires, and installs it through winget
+  (or Chocolatey) when missing; it warns with the manual install command
+  otherwise.
+- `.gitattributes` and `.editorconfig` set the line-ending policy: CRLF in
+  the working tree, LF for shell scripts and vendored `json.hpp` untouched.
+- Every `uses:` in the workflows and composite actions is pinned to a full
+  commit SHA with a trailing version comment.
 
 ### Fixed
 

@@ -1,6 +1,6 @@
-# Plan (v15): Build the CAPL REST DLL (restifycapl) from zero
+# Plan (v16): Build the CAPL REST DLL (restifycapl) from zero
 
-Revision of v14. **Stage 7 has been executed, not merely designed** — the branching flow, `auto-pr.yml` and CI all ran for real, and three units of work have been through them. This revision records that; folds comment discipline in as **§6b**; replaces §7.10's `plan.md` maintenance rule with the working-document/fold-in model now in force; adds **§7.13**, Stage 7's closeout; and reconciles a review ledger in which three of five completed reviews were absent from this document. Phases, stage numbers and task IDs are unchanged except for two recorded renumbers, **`BPE-27`** and **`REV-17`** (§7.11). **v14 stated that Stage 6 had never executed and that HUM-12 was the next action; both claims were false for the whole of Stage 7 and are corrected here — that drift is precisely what §7.10's new rule exists to prevent.**
+Revision of v15. **Stage 14 (tag-driven automatic release) is complete, reviewed clean, with CI green on both legs at `50233f2` (user-confirmed):** shared provisioning and a reusable per-architecture pipeline, the export-table check, `release.yml` with attestation and draft-then-publish, and no approval gate (HUM-18 dropped by user decision). CHANGELOG release sections are headed by commit hash, so no product version is written into a tracked file; versioned headings are parked as a follow-up in the Stage 14 plan's §12. Phases and stage numbers are unchanged. New task IDs: BPE-37–40, BPE-42–47, CPP-46, TEST-24, REV-24, HUM-38, HUM-40, HUM-41, HUM-43, HUM-44 (§12). CPP-45, TEST-25, BPE-41, HUM-39 and HUM-42 were proposed in the Stage 14 plan and never spent.
 
 ---
 
@@ -62,9 +62,11 @@ A developer machine and a CI runner are independent environments. Each provision
 
 **Stage 12 — COMPLETE, REVIEWED CLEAN, COMPILE-VERIFIED IN CANOE (x64).** Seven JSON rows appended — rows 19–24 (flattening) and row 25 `restifyJsonNormalize` — all with `categoryName "Json"`; `Status` block `-30..-36`; RFC 6901 paths; the preliminary CAPL framework in `capl/`; the per-architecture local build environment and `make help`. REV-7 clean; CI green on both legs at `5d938c2` (runs 169/170); the x64 CANoe compile confirmed at `5a32872`. The rest of HUM-29 and HUM-30 are open human checks, deferred until a CANoe licence is available together with HUM-14 and HUM-27 — not merge-gating (D14). See §8's Stage 12 entry.
 
-**Stage 13 — COMPLETE, REVIEWED CLEAN; x64 CANOE COMPILE CONFIRMED; CI PENDING.** Four typed JSON rows appended — rows 26–29 (`restifyJsonReadLong`, `restifyJsonReadDouble`, `restifyJsonReadBool`, `restifyJsonCountElements`), all with `categoryName "Json"`. No new `Status` code; `kRefDouble` (`'F' - 128`) is the first `float&` in the table. REV-8 clean (zero Must-fix; full pass plus a delta). 723 tests pass locally on both x64 and x86. CI on both legs is pending the human push of the head commit. HUM-36 (x64 CANoe compile) is satisfied: the user confirmed that everything compiles; compile only. HUM-37 (runtime) is deferred until a CANoe licence is available, together with HUM-14, HUM-27, the rest of HUM-29 and HUM-30. See §8's Stage 13 entry.
+**Stage 13 — COMPLETE, REVIEWED CLEAN; x64 CANOE COMPILE CONFIRMED; CI GREEN ON BOTH LEGS; MERGED AS `8bd35f4`.** Four typed JSON rows appended — rows 26–29 (`restifyJsonReadLong`, `restifyJsonReadDouble`, `restifyJsonReadBool`, `restifyJsonCountElements`), all with `categoryName "Json"`. No new `Status` code; `kRefDouble` (`'F' - 128`) is the first `float&` in the table. REV-8 clean (zero Must-fix; full pass plus a delta). 723 tests pass locally on both x64 and x86. CI was green on both legs; merged as `8bd35f4`. HUM-36 (x64 CANoe compile) is satisfied: the user confirmed that everything compiles; compile only. HUM-37 (runtime) is deferred until a CANoe licence is available, together with HUM-14, HUM-27, the rest of HUM-29 and HUM-30. See §8's Stage 13 entry.
 
-**Next:** **Stage 14 — tag-driven release with an approval gate**, started after the human merges Stage 13. HUM-12 is **done** — it is what made Stages 6 and 7 real.
+**Stage 14 — COMPLETE, REVIEWED CLEAN (REV-9 + DELTA); CI GREEN ON BOTH LEGS; RELEASE PENDING.** Tag-driven automatic release without an approval gate: `ci.yml` restructured around the `provision` action and the reusable `arch-pipeline.yml` (one call per architecture), the export-table check (`scripts/list-export-table.ps1`, 12 checks, 51 fixtures), `release.yml` (validate, two pipelines, export-table, assemble, attest, publish: draft, verify, make public), the line-ending guard, and every action pinned to a commit SHA. CHANGELOG release sections are headed by commit hash; no product version is written into a tracked file. REV-9 in two parts plus a delta review, zero Must-fix; CI green on both legs at `50233f2` (user-confirmed). HUM-18 dropped by user decision. See §9's Stage 14 entry and `docs/work/stage-14-release-pipeline/plans/plan.md`.
+
+**Next:** the first release (Stage 14 steps 15–20: dry run on `main`, CHANGELOG cut, tag), then **Stage 15**. Before the second release: the Stage 14 follow-ups (that plan's §12). HUM-12 is **done** — it is what made Stages 6 and 7 real.
 
 ---
 
@@ -77,7 +79,7 @@ Six phases, seventeen sequentially numbered stages, no letter suffixes, no gaps:
 | **Phase 1 — Foundation & Environment** | 1–4 | Config correctness, scripted bootstrap, manual CANoe setup, repo skeleton |
 | **Phase 2 — ABI Proof, Continuous Verification & Workflow** | 5–7 | Hello DLL in CANoe, CI running on every push, then branching + PR automation |
 | **Phase 3 — Business Logic & CAPL Surface** | 8–13 | Core logic, HTTP, async, flattening, accessors |
-| **Phase 4 — Release Pipeline** | 14 | Tag-driven versioning, approval gate, publish |
+| **Phase 4 — Release Pipeline** | 14 | Tag-driven versioning, attestation, publish |
 | **Phase 5 — Hardening** | 15 | Cleanup and consistency |
 | **Phase 6 — Conditional Extensions** | 16–17 | Only on demonstrated need |
 
@@ -90,11 +92,14 @@ Documentation practice is deliberately not a numbered stage — see §6a.
 - **Compiled dependency binaries are never committed and never shared between environments** (§2). Each environment provisions its own from `vcpkg.json`.
 - **Both the vcpkg registry content and the vcpkg tool binary are pinned.** `builtin-baseline` pins port versions; `$VcpkgPinnedTag` (currently `2026.07.29`, commit `9e593bb18ea69cc5095e012465dcd675a822ed0d`) pins the tool, in both `setup-dev-env.ps1` and `ci.yml`. Pin-enforcement failure is **WARN, not FAIL** — it is defence in depth over an already-solid content pin, and aborting an otherwise-working provisioning run over a speculative future flag change would be the wrong trade. WARN is not silent here, because the project's success bar is 0 WARN.
 - **`/MT` static CRT** for the DLL and every static dependency. Never mix `/MT` and `/MD` in one link. Verify with `dumpbin /directives` — expect `/DEFAULTLIB:LIBCMT`, never `MSVCRT`. **The check must require the release `LIBCMT` token *and* the absence of the debug `LIBCMTD` token**: a bare substring match on `/DEFAULTLIB:LIBCMT` also matches `LIBCMTD` and would pass a debug-CRT lib. This was a live defect caught by REV-4 and is now correct in `ci.yml`; replicate the two-part form anywhere else this check is written.
-- **Bitness parity.** x86 and x64 must both build and behave identically — same sources, same flags (`/std:c++17`, `/EHsc`, `/MT`), same export table. Only `/MACHINE:` and library path differ; the Makefile enforces this structurally via one parameterized rule, and CI now runs both legs of a matrix over the same targets.
+- **Bitness parity.** x86 and x64 must both build and behave identically — same sources, same flags (`/std:c++17`, `/EHsc`, `/MT`), same export table. Only `/MACHINE:` and library path differ; the Makefile enforces this structurally via one parameterized rule, and CI runs the same targets through one pipeline call per architecture.
 - **Export contract.** The `CAPL_DLL_INFO_LIST4` / `CAPL_DLL_INFO4` table in `src/module/exports.cpp` is the real API. Append-only; never rename, reorder, or remove. Reserved first entry (`CDLL_VERSION_NAME`/`CDLL_VERSION`) always present. Exported functions `extern "C"`.
+- **Rows written out in full** (Stage 14): every export-table row gives all `parCount` types, dimensions and names, reference types as named `kRef…` constants, and zero-parameter rows in Vector's form; enforced by `scripts/list-export-table.ps1`. Rule in `capl-export-contract`.
+- **CHANGELOG `### Development`** (Stage 14): internal changes go under `### Development`, which is removed from the release notes; no stage or task IDs anywhere in `CHANGELOG.md`. Rule in `project-docs`.
+- **M2** (Stage 14): a review of any change touching `src/module/exports.cpp` records the `export-table` result on the reviewed commit; red is a Must-fix. Rule in `code-reviewer.md`.
 - **The export table, as of Stage 13 — this is what every later stage appends to:**
   - row 0: `CDLL_VERSION_NAME` / `(CAPL_FARCALL)CDLL_VERSION` — reserved sentinel, never a real function pointer;
-  - row 1: `restifyReadVersion(char buffer[], dword bufferSize) : long` — returns 0 on success, `-1` empty buffer, `-2` truncation. Signature unchanged since Stage 5; **renamed once at Stage 10** under the closed exception below;
+  - row 1: `long restifyReadVersion(char buffer[], dword bufferSize)` — returns 0 on success, `-1` empty buffer, `-2` truncation. Signature unchanged since Stage 5; **renamed once at Stage 10** under the closed exception below;
   - rows 2–7, appended at Stage 10: `restifyGetSync` and `restifyDeleteSync` (8 parameters), `restifyPostSync`, `restifyPutSync`, `restifyPatchSync` (10), `restifyRequestSync` (15). Every input `char[]` carries an explicit `dword` size; `httpStatusCode` and `responseBodyLength` are reference out-parameters (`type - 128`). The detailed signature table lives in `docs/work/stage-10-capl-sync-exports/plans/plan.md` and `docs/capl-sync-surface.md`;
   - rows 8–18, appended at Stage 11: six `…Async` dispatch rows (`restifyGetAsync`, `restifyDeleteAsync` — 5 parameters; `restifyPostAsync`, `restifyPutAsync`, `restifyPatchAsync` — 7; `restifyRequestAsync` — 12) plus five lifecycle rows (`restifyPollResponse` — 2, `restifyAwaitResponse` — 2, `restifyReadResponse` — 6, `restifyDiscardResponse` — 1, `restifyDiscardAllResponses` — 1). Every dispatch row returns a `requestId` (`dword&`, `kRefDword`) instead of a response body; the body is retrieved later through `restifyReadResponse`. All eleven carry `categoryName "Async"`. The detailed signature table (D4) lives in `docs/work/stage-11-capl-async-exports/plans/plan.md` and `docs/capl-async-surface.md`;
   - rows 19–25, appended at Stage 12, all `categoryName "Json"`: `restifyJsonParse` (3 parameters; `documentId` returned as `dword&`), `restifyJsonCountEntries` (2), `restifyJsonReadEntry` (7), `restifyJsonReadValue` (6), `restifyJsonDiscardDocument` (1), `restifyJsonDiscardAllDocuments` (1; `discardedCount` as `dword&`), and row 25 `restifyJsonNormalize` (4: `char json[]`, `dword jsonSize`, `char normalized[]`, `dword normalizedSize`). All return `long`; out-parameters are zeroed on entry and written only on 0. All seven are allowed from any context (see the realtime bullet below). The detailed signature table lives in `docs/work/stage-12-json-flatten/plans/plan.md` §4 and `docs/capl-json-surface.md`;
@@ -118,7 +123,7 @@ Documentation practice is deliberately not a numbered stage — see §6a.
 - **JSON paths are RFC 6901 JSON Pointer — contract since Stage 12 (D3, D5; normative table in `docs/json-path.md`).** The interim Stage 8 dot/bracket syntax (`data.items[0].name`) is removed, not kept in parallel; entered by hand it gives `-11`, a loud error. `""` is the whole document and `/` is the key `""` at the root. `~1` is decoded before `~0`. At an object every token is a key, including `"0"`. At an array only `0` or `[1-9][0-9]*` is an index; `-` or a number beyond `uint32` gives `-13`. The keys `restifyJsonReadEntry` lists use the same format, and each one resolves back to its own value through `restifyJsonReadValue`. Uses its own parser, not `nlohmann::json_pointer`, which throws. **Since Stage 13, `src/core/json-path` also exports the `PathTokens` alias and a `ResolvePath` overload that takes tokens.** The string overload is now `ParsePath` followed by that overload, with unchanged behaviour. This lets rows 26–29 parse the path once, outside the store lock. It is an approved deviation from the Stage 13 plan, which said `src/core/` would stay untouched (§8, Stage 13). Once a release ships, changing this syntax breaks compatibility (Stage 12 R1).
 - **`lib/<arch>/` is product-linked; `lib/gtest/<arch>/` is test-only** and must never enter the DLL link line.
 - **Tests run outside CANoe.** The CAPL export glue is the documented exception (`cpp-testing-conventions`) — it can only be verified inside a real CANoe instance, which is why `src/module` is excluded from the test compile and why HUM-13 is irreplaceable.
-- **No version number is ever typed by hand.** `vcpkg.json`'s `version-string` is manifest boilerplate and is not an exception — it feeds nothing. `restifyReadVersion` reads the DLL's *own* version resource at runtime (`GetModuleHandleExA` / `GetFileVersionInfoA`), so even the version string CAPL sees derives from the Git tag through `version.rc` rather than from a literal.
+- **No product version number is ever typed by hand into a tracked file; the Git tag is the only place it is typed.** CHANGELOG release sections are headed by commit hash (Stage 14). Third-party pins (action SHAs with their `# vX.Y.Z` label, tool and dependency versions) are not product versions. `vcpkg.json`'s `version-string` is manifest boilerplate and is not an exception — it feeds nothing. `restifyReadVersion` reads the DLL's *own* version resource at runtime (`GetModuleHandleExA` / `GetFileVersionInfoA`), so even the version string CAPL sees derives from the Git tag through `version.rc` rather than from a literal.
 - **Every export-table append gets a `CHANGELOG.md` `[Unreleased]` entry in the same change.** BPE-18 exists because the adjacent rule — *build and CI changes also get an entry* — was the half that slipped.
 - **Comment discipline.** Inline comments explain **why**, never **what** — three tiers, with multi-line blocks permitted only as named editing traps. The rule lives in exactly one place, `.claude/skills/project-docs/SKILL.md`; every coding agent carries a pointer, never a copy. See §6b.
 - **Plan changes are recorded in the unit of work's own `docs/work/<slug>/plans/plan.md` and folded into this document as the last commit on the branch, before the merge.** This document is never edited mid-flight. **An ID is spent when it is written into §12, not when it is spoken.** See §7.10.
@@ -586,11 +591,11 @@ on:
 
 **One expectation corrected while it is cheap:** the post-merge run on `main` is the *same* workflow as the PR run, not a heavier one. The `pull_request` run already builds the **merge result** (`refs/pull/N/merge`), not just the branch tip, so it is already testing the merged state. The `main` run is confirmation and a record for `main`'s history, not additional coverage. The genuinely heavier pipeline is the tag-driven release workflow, which does not exist yet (Stage 14).
 
-- **Release tags are cut from `main` only, on the merge commit, after `main`'s own CI run is green.** Never from a stage branch, never from a PR head. `release.yml` (BPE-11, Stage 14) builds and publishes from whatever commit the tag points at; a tag on an unmerged branch would publish code that is not on `main`, under a real release version, with no way to un-ship it.
+- **Release tags are cut from `main` only, on the squash-merge commit of the CHANGELOG cut, after `main`'s own CI run is green** (a convention; `validate` does not check CI — Stage 14 OQ15b). Never from a stage branch, never from a PR head. `release.yml` (BPE-11, Stage 14) builds and publishes from whatever commit the tag points at; a tag on an unmerged branch would publish code that is not on `main`, under a real release version, with no way to un-ship it.
 - **`main` is always the release source** — the concrete reason `develop` was rejected in 7.2.
 - **Tagging is a human action (HUM-17).** `Bash(git tag *)` stays denied and HUM-21 explicitly does not relax it; `git push --tags` is denied too.
-- **`fetch-depth: 0` must be in `release.yml` too.** `ci.yml` has it; `release.yml` does not exist yet. Without it `git describe` degrades silently rather than failing loudly — flag for BPE-11.
-- **Stage 14's approval gate is a GitHub *Environment* with required reviewers**, under Settings → Environments. Different from branch protection and configured separately, also by hand.
+- **`fetch-depth: 0` in `release.yml`:** done for every job that runs `make` and for `validate` (Stage 14 §11 Q11); without it `git describe` degrades silently rather than failing loudly.
+- **No approval gate** (Stage 14 OQ16a): pushing the tag is the decision to publish; the release is created as a draft, verified, and only then made public. Failed releases follow OQ10: A re-run; B nothing public — delete the draft and the tag, fix, redo the cut, tag the new cut; C public — never move the tag, ship the next patch version, mark the release withdrawn and its CHANGELOG heading `[YANKED]`; D public but the job failed — a normal defect. Details in `docs/release-process.md`.
 
 #### 7.8 What "done enough to land on `main`" means, and the manual GitHub configuration (HUM-20 verified it absent; HUM-23 applied and verified it present — §7.14)
 
@@ -974,7 +979,7 @@ Stages 10–13 each append to the export table. Every append requires `code-revi
   Defects found go through new planned steps, and the affected checks are repeated.
 - **Merge:** done by the human (`--no-ff`, §7.8). Stage 13 starts afterwards.
 
-### Stage 13 — Typed JSON accessors (fourth contract append) — COMPLETE, REVIEWED CLEAN; x64 CANOE COMPILE CONFIRMED (HUM-36); CI PENDING; RUNTIME CHECKS DEFERRED UNTIL A CANOE LICENCE
+### Stage 13 — Typed JSON accessors (fourth contract append) — COMPLETE, REVIEWED CLEAN; x64 CANOE COMPILE CONFIRMED (HUM-36); CI GREEN ON BOTH LEGS, MERGED AS `8bd35f4`; RUNTIME CHECKS DEFERRED UNTIL A CANOE LICENCE
 
 **Detailed record: `docs/work/stage-13-json-accessors/plans/plan.md`** — left in place as the detailed record per §7.10 condition 3, as for Stages 8–12. It carries OQ1–OQ12, the rows 26–29 signature table and check order (§4), the CAPL wrapper-name table, the REV-8 checklist and the risk register R1–R10 as **normative specifications**. One exception: its statements that `src/core/` stays untouched are superseded by the approved core deviation below. The user-facing references are `docs/capl-json-surface.md`, `docs/type-conversion.md`, `docs/status-codes.md` and `docs/capl-framework.md`. This entry is the summary.
 
@@ -1031,7 +1036,7 @@ The set was kept minimal on purpose, because struct mapping, not path access, is
   - N2: a doc rewrap;
   - N3: a note on the `{}` overload ambiguity;
   - N4: the "`-11` before `-31`" wording.
-- **BPE-36:** local verification on both architectures — 723 tests pass on x64 and x86. `dumpbin /exports` shows only `caplDllGetTable4`; `LIBCMT` only. **CI on both legs is pending the human push of the head commit**, and §7.8 still requires it before merge.
+- **BPE-36:** local verification on both architectures — 723 tests pass on x64 and x86. `dumpbin /exports` shows only `caplDllGetTable4`; `LIBCMT` only. **CI on both legs was green and the branch merged as `8bd35f4`**, as §7.8 required before merge.
 - **HUM-36 — SATISFIED.** The user confirmed that everything compiles in CANoe on x64: rows 26–29, `restify-json.cin` and `restify-verify-json.can`. Compile only; the checked commit was not recorded. Not merge-gating (OQ8).
 - **HUM-37 — OPEN.** Runtime checks, x64. Deferred until a CANoe licence is available, with HUM-14, HUM-27, the rest of HUM-29 and HUM-30. Per §7.10's guardrail, HUM-37 is not recorded as passed.
 - **Unverified at runtime in CANoe:** a `float &` reference parameter in a `.cin` function (Stage 13 R3), and `double*` through `'F' - 128`, including the x86 calling convention (R2). 32-bit CANoe is not checked; x86 is covered by CI only.
@@ -1054,18 +1059,20 @@ The set was kept minimal on purpose, because struct mapping, not path access, is
 
 ## 9. Phase 4 — Release Pipeline
 
-### Stage 14 — Tag-driven release with an approval gate
+### Stage 14 — Tag-driven automatic release — COMPLETE, REVIEWED CLEAN (REV-9 + DELTA); CI GREEN ON BOTH LEGS; RELEASE PENDING
 
-**BPE-11 — Write `.github/workflows/release.yml`.** Triggered by a `vX.Y.Z` tag push. Extracts `X.Y.Z` from `github.ref_name`, overriding `VER_MAJOR`/`VER_MINOR`/`VER_BUILD`/`VER_REV` — the Makefile declares these with `?=` specifically so CI can override without edits. **Reuse `ci.yml`'s provisioning steps rather than rewriting them** — it already encodes all three carry-over traps, the two-part `/MT` check and the cache keying, and a hand-rewritten second copy is exactly how those hard-won fixes get lost. Builds both architectures, runs tests, then **halts at a manual approval gate** (a GitHub Environment with required reviewers), publishing only after approval.
+Detailed plan, decisions, deviations and follow-ups: `docs/work/stage-14-release-pipeline/plans/plan.md`; procedure: `docs/release-process.md`.
 
-**BPE-12 — Generate the exposed-operation list from the export table at build time.** **Trap:** `"Sync"` is a case-insensitive substring of `"Async"`, in both operation names and `categoryName` values — any filtering or grouping by dispatch mode must be **case-sensitive**, or every async operation is reported as synchronous. Grouping by `categoryName` (§5) is the intended axis.
-**BPE-14 — Convert `CHANGELOG.md`'s `[Unreleased]` into a released section.**
-**REV-9 — Review** the release workflow: no hardcoded version anywhere, approval gate genuinely blocks.
-**HUM-17 — Create the release tag.** **HUM-18 — Verify the CI-built artifact in CANoe, then approve the publish.**
+**BPE-11 — `.github/workflows/release.yml`.** Triggered by a `vX.Y.Z` tag push; `workflow_dispatch` is a dry run that never publishes. `validate` checks the tag (format, fields ≤ 65535, ancestor of `origin/main`, no published release) and finds the cut's CHANGELOG section through the tagged commit's first parent. Both architectures build and test through the same `arch-pipeline.yml` and `provision` action as CI, with `VER_*` from the tag and a version-resource check. `assemble` writes `SHA256SUMS` and the notes; `attest` creates and verifies build-provenance attestations; `publish` creates a draft, verifies its assets and hashes, and makes it public as its last command. No approval gate.
+
+**BPE-12 — Generate the exposed-operation list from the export table.** `scripts/list-export-table.ps1` reads each `CAPL_DLL_INFO_LIST4` row by field position, runs 12 checks pinned by fixtures in `tests/export-table/`, and renders the table grouped by `categoryName`. **Trap:** `"Sync"` is a case-insensitive substring of `"Async"`, in both operation names and `categoryName` values — any filtering or grouping by dispatch mode must be **case-sensitive**, or every async operation is reported as synchronous. Grouping by `categoryName` (§5) is the intended axis.
+**BPE-14 — Cut `CHANGELOG.md`'s `[Unreleased]` into a release section** headed by the commit hash of the cut's base; no version in the file.
+**REV-9 — Review** the release workflow per the Stage 14 plan's §7 checklist: two parts plus a delta review, zero Must-fix.
+**HUM-17 — Push the release tag** on the cut's squash-merge commit. **HUM-18 — dropped by user decision, not done.**
 
 **First real exercise of the release versioning path.** Everything up to here has run against a zero-tag repository. Stage 14 is the first time `git describe` sees a real tag and CI overrides `VER_*` from it — and `restifyReadVersion` makes that path observable from CAPL for the first time, since it reads the resource the tag produced. A good early check: call `restifyReadVersion` against a tagged CI artifact and confirm the string matches the tag.
 
-**Human approval gate: YES.**
+**Human acts:** approving the CHANGELOG cut and pushing the tag.
 
 ---
 
@@ -1101,7 +1108,7 @@ Raised during Stage 9 (OQ9). The governing principle, which is broader than any 
 
 ## 12. Task index by agent
 
-### `build-pipeline-engineer` — 36 tasks
+### `build-pipeline-engineer` — 46 tasks
 
 | ID | Stage | Task | Status |
 |---|---|---|---|
@@ -1115,7 +1122,7 @@ Raised during Stage 9 (OQ9). The governing principle, which is broader than any 
 | BPE-15 | 4 | `vcpkg.json` manifest, per-triplet install roots, lib allow-list, tool pin | **DONE — EXECUTION-VERIFIED** |
 | BPE-16 | 4 | One-line note that `vcpkg.json`'s `version-string` is not a version source | **DONE — added to `msvc-build-conventions`'s Versioning section** |
 | BPE-17 | 4 | Make `Copy-TripletLibs` synchronising; clear stale `lib/x64/` residue | **DONE — residue deleted; `Copy-TripletLibs` now prunes non-allow-listed `.lib` files before copying** |
-| BPE-8 | 5 | Link/resource wiring for both DLLs; `dumpbin /exports` | **Both architectures build green in CI; `dumpbin /exports` surface confirmation still outstanding** |
+| BPE-8 | 5 | Link/resource wiring for both DLLs; `dumpbin /exports` | **DONE — both architectures build green in CI; `dumpbin /exports` runs as a build step on both architectures in `arch-pipeline.yml` (Stage 14)** |
 | BPE-9 | 6 | `ci.yml` — independent provisioning + build + `make test` both arches + artifacts + caching; `version.lib` in `SYSLIBS` | **DONE — EXECUTED; first runs red, two defects found and fixed** |
 | BPE-18 | 6 | CHANGELOG entries for `ci.yml` and `version.lib`; correct stale 14→19 OK count | **DONE — verified, not assumed: all three items were actually still missing/stale, all three added/corrected** |
 | BPE-19 | 6 | Trim duplicated `version.lib` rationale in `exports.cpp` + Makefile | **CLOSED — absorbed by BPE-24 + CPP-17** |
@@ -1123,10 +1130,10 @@ Raised during Stage 9 (OQ9). The governing principle, which is broader than any 
 | BPE-30 | 9 | Correct the comment rule (identifier ban, three exempt categories, worked patterns); scope `cpp-implementer`'s "match existing style"; add the constraint to `planner`; collapse duplicated substance in four agent files | **DONE** |
 | BPE-31 | 9 | `.gitkeep` disposition in three buckets; D17 installed in `msvc-build-conventions` | **DONE** |
 | BPE-32 | 9 | Apply the audit's build-file and script fixes, incl. eight settled identifier instances across `setup-dev-env.ps1`, `auto-pr.yml`, `ci.yml`; `-?` help and PR-body rendering verified by execution | **DONE** |
-| BPE-11 | 14 | Release workflow — reuse `ci.yml` provisioning, tag extraction, approval gate, publish | |
-| BPE-12 | 14 | Generate the operation list from the export table | |
+| BPE-11 | 14 | `release.yml`: `validate` (tag format, ancestor of `origin/main`, no published release, cut section found through the tagged commit's first parent), two `arch-pipeline` calls with `VER_*` from the tag, `export-table`, `assemble`, `attest`, `publish` (draft, verify, make public); `docs/release-process.md` | **DONE — dry runs at HUM-40; the tag-mode path first runs on the release tag** |
+| BPE-12 | 14 | `scripts/list-export-table.ps1` (12 checks, fields by position, case-sensitive grouping) and the composite action `.github/actions/export-table`, run in `ci.yml` and `release.yml` | **DONE** |
 | BPE-13 | 15 | Build-system cleanup pass | |
-| BPE-14 | 14 | Cut `CHANGELOG.md` `[Unreleased]` into a released section | |
+| BPE-14 | 14 | Cut `CHANGELOG.md` `[Unreleased]` into a release section headed by the commit hash of the cut's base; no version in the file | **OPEN — after HUM-40; text approved at HUM-44** |
 | BPE-21 | 7 | `auto-pr.yml` — bot-side draft PR, GITHUB_TOKEN, ahead-by + idempotency guards | **DONE** |
 | BPE-22 | 7 | `.claude/skills/stage-branch/SKILL.md` — branch creation + push procedure | **DONE** |
 | BPE-20 | 7 | `ci.yml` `branches:` filter — tag-collision fix | **DONE** |
@@ -1140,9 +1147,19 @@ Raised during Stage 9 (OQ9). The governing principle, which is broader than any 
 | BPE-33 | 11 | `Makefile`: header-dependency tracking via `cl.exe /sourceDependencies`, closing a stale-`.obj` incremental-build hazard | **DONE — `3f56f9e`** |
 | BPE-34 | 11 | Build-verification policy: local defaults to x64, x86 via CI matrix before human gates; `CLAUDE.md` `make all` correction; scratch-dir rule for ad-hoc probes | **DONE — `922a4b0`** |
 | BPE-35 | 12 | D23: `setup-dev-env.ps1` stores and verifies the eight `RESTIFY_MSVC_*` user variables; `Makefile` per-`ARCH` substitution, `.DEFAULT_GOAL := help`, `help` target; `docs/development-environment.md`; CHANGELOG `Changed` bullet | **DONE** |
-| BPE-36 | 13 | Full Stage 13 verification on both architectures: build and test x64 and x86; `dumpbin /exports` and `/directives` on both DLLs | **DONE locally — 723 tests pass on x64 and on x86; only `caplDllGetTable4`; `LIBCMT` only. CI on both legs pending the human push** |
+| BPE-36 | 13 | Full Stage 13 verification on both architectures: build and test x64 and x86; `dumpbin /exports` and `/directives` on both DLLs | **DONE locally — 723 tests pass on x64 and on x86; only `caplDllGetTable4`; `LIBCMT` only. CI green on both legs; merged as `8bd35f4`** |
+| BPE-37 | 14 | Every action SHA-pinned with a `# vX.Y.Z` label; `provision` composite action; reusable `arch-pipeline.yml` (build ‖ test, `dumpbin /exports`, release-version check); `ci.yml` with gate jobs, no concurrency block, `contents: read`; `docs/ci-pipeline.md` | **DONE** |
+| BPE-38 | 14 | `[Unreleased]` entries for the stage; local build and test on both architectures | **DONE** |
+| BPE-39 | 14 | Read-only line-ending check of the five Stage 13 files | **DONE — loose end closed; HUM-42 not needed** |
+| BPE-40 | 14 | `.gitattributes` and `.editorconfig`; renormalize staged nothing else | **DONE** |
+| BPE-42 | 14 | `setup-dev-env.ps1` detects or installs `pwsh` 7, otherwise warns | **DONE** |
+| BPE-43 | 14 | Rule, skill and agent texts of the stage plan | **DONE — confirmed at HUM-43** |
+| BPE-44 | 14 | `auto-pr.yml` `exports.cpp` warning names the `export-table` job | **DONE** |
+| BPE-45 | 14 | CHANGELOG release sections headed by commit hash: tag-mode lookup through `GITHUB_SHA^`; dry-run check of the cut (pending, merged, already released); failure case B redoes the cut; `docs/release-process.md`, `project-docs` | **DONE — tag-mode lookup first runs on the release tag** |
+| BPE-46 | 14 | `### Using this release` without `gh`: `Get-FileHash` line and attestation sentence; `docs/release-process.md` "Verifying a download" | **DONE** |
+| BPE-47 | 14 | Rule texts approved during the stage: product-version rule with hash headings in `CLAUDE.md` and `build-pipeline-engineer.md`; "one pipeline call per architecture"; `CLAUDE.md` `make all` correction; `CAPL_DLL_INFO_LIST4` in five places | **DONE** |
 
-### `cpp-implementer` — 44 tasks
+### `cpp-implementer` — 45 tasks
 
 | ID | Stage | Task | Status |
 |---|---|---|---|
@@ -1190,8 +1207,9 @@ Raised during Stage 9 (OQ9). The governing principle, which is broader than any 
 | CPP-15 | 17 | CAPL-side request building (conditional) | |
 | CPP-17 | 6b | Trim `exports.cpp` comments (absorbs BPE-19's half) | **DONE — human-gated; export-table rows byte-identical** |
 | CPP-18 | 8 | `src/core/status.h` — shared `Status` enum; absorbs the shipped `0`/`-1`/`-2`/`-3` codes | **DONE — `0a548be`** |
+| CPP-46 | 14 | Comment-only: the style-B signature comment near row 1 in `exports.cpp` rewritten in style A; table unchanged (export-table check green) | **DONE** |
 
-### `test-engineer` — 23 tasks
+### `test-engineer` — 24 tasks
 
 | ID | Stage | Task | Status |
 |---|---|---|---|
@@ -1218,8 +1236,9 @@ Raised during Stage 9 (OQ9). The governing principle, which is broader than any 
 | TEST-9 | 15 | Coverage audit across all of `src/` | |
 | TEST-10 | 16 | Struct mapping tests (conditional) | |
 | TEST-11 | 17 | Request-builder tests (conditional) | |
+| TEST-24 | 14 | `tests/export-table/` fixtures: one valid, P1–P2, boundary fixtures, and at least one failing fixture per check 1–12 incl. F1–F9; two overflow fixtures added after review (`parCount` and dimension literals above 32 bits fail checks 7 and 11) | **DONE — 51 fixtures** |
 
-### `code-reviewer` — 22 tasks
+### `code-reviewer` — 23 tasks
 
 | ID | Stage | Focus | Status |
 |---|---|---|---|
@@ -1232,8 +1251,8 @@ Raised during Stage 9 (OQ9). The governing principle, which is broader than any 
 | REV-6 | 11 | Contract append — async; full-branch review against the Stage 11 checklist | **CLEAN — 1 Should-fix (stale trap comment) fixed in `b8f6c52`** |
 | REV-23 | 11 | Combined review of post-REV-6 hardening (BPE-33, CPP-29, CPP-30, TEST-16) | **CLEAN — ZERO MUST/SHOULD-FIX** |
 | REV-7 | 12 | Contract append — flattening + normalize (rows 19–25), framework, D23 | **CLEAN — ZERO MUST-FIX; full review + deltas (steps 12c, 12f); its key-text amplification finding produced D19–D21 (CPP-36, TEST-21)** |
-| REV-8 | 13 | Contract append — accessors (rows 26–29), `kRefDouble`, `restify-json.cin` wrappers | **CLEAN — ZERO MUST-FIX; full pass: 2 Should-fix (double path parse → CPP-44; CI evidence → pending the human push), 5 nits addressed; delta: zero Must/Should-fix, nits N1–N4 applied** |
-| REV-9 | 14 | Release workflow; no hardcoded versions; approval gate blocks | |
+| REV-8 | 13 | Contract append — accessors (rows 26–29), `kRefDouble`, `restify-json.cin` wrappers | **CLEAN — ZERO MUST-FIX; full pass: 2 Should-fix (double path parse → CPP-44; CI evidence → green on both legs, merged as `8bd35f4`), 5 nits addressed; delta: zero Must/Should-fix, nits N1–N4 applied** |
+| REV-9 | 14 | Stage 14 full branch against its plan's §7 checklist, in two parts, plus a delta review of the later commits | **CLEAN — ZERO MUST-FIX; findings fixed on the branch; delta: zero Must-fix, two Should-fix fixed** |
 | REV-10 | 15 | Final consistency review incl. `project-docs` agreement | |
 | REV-11 | 16 | Contract append — struct mapping (conditional) | |
 | REV-12 | 17 | Contract append — request building (conditional) | |
@@ -1245,8 +1264,9 @@ Raised during Stage 9 (OQ9). The governing principle, which is broader than any 
 | REV-19 | 8 | Stage 8 full branch — `src/core/` modules, the `exports.cpp` rewiring, Makefile, tests | **CLEAN — ZERO MUST-FIX; export table byte-identical; 1 Should-fix applied (`763cd4e`), 1 declined** |
 | REV-21 | 9 | Comment-discipline audit — `src/`, `tests/`, `Makefile`, both workflows, `setup-dev-env.ps1`; routed findings to three fix tasks | **DONE — findings closed, spot-checked against target docs** |
 | REV-20 | 9 | Stage 9 full branch — HTTP layer, sync operations, `Status` block, comment-discipline pass, `.gitkeep` | **CLEAN — ZERO MUST-FIX; 1 Should-fix fixed; `/MT` check best-effort, CI's `dumpbin` remains authoritative** |
+| REV-24 | 14 | Light review of the `docs/capl-framework.md` "Verified in CANoe" update (rows 26–29) | **CLEAN** |
 
-### Human — 37 tasks
+### Human — 42 tasks
 
 | ID | Stage | Task | Status |
 |---|---|---|---|
@@ -1263,8 +1283,8 @@ Raised during Stage 9 (OQ9). The governing principle, which is broader than any 
 | HUM-15 | 11 | Compile-only verification of all 11 async operations in real CANoe — the stage's acceptance gate | **PASSED — x64 only, locally-built DLL; x86 not separately verified in CANoe (open gap, recorded, not assumed)** |
 | HUM-27 | 11 | Runtime/measurement verification of async operations (8-item checklist incl. cancel timing, worker idle exit, redeploy check) | **OPEN — blocked by the same CANoe licensing problem as HUM-14; carries forward past merge, no ETA. Never to be recorded as passed until it actually has been. Deferred with the rest of HUM-29 and HUM-30 until a CANoe licence (Stage 12 R31).** |
 | HUM-16 | 12 | Verify CAPL associative-field syntax against the official CANoe help | **OPTIONAL, non-blocking since Stage 12** — framework uses no associative fields, examples deferred (D13); revisited with CPP-11 |
-| HUM-17 | 14 | Create the release tag | |
-| HUM-18 | 14 | Verify the CI artifact in CANoe, then approve the publish | |
+| HUM-17 | 14 | Push the release tag on the cut's squash-merge commit | **OPEN — after HUM-44 and the cut merge** |
+| HUM-18 | 14 | Verify the CI artifact in CANoe, then approve the publish | **DROPPED by user decision, not done — no approval gate; the `restifyReadVersion` call stays in the CANoe-licence batch** |
 | HUM-20 | 7 | GitHub config: branch protection, required checks, Actions-can-create-PRs, auto-delete branches | **VERIFIED 2026-09-21 — PARTIALLY CONFIGURED at the time.** "Allow Actions to create PRs" ON. Branch protection/ruleset on `main`: ABSENT. Auto-delete head branches: OFF. **Resolved by HUM-23, verified 2026-09-22 — see §7.14.** |
 | HUM-21 | 7 | Approve exact `settings.json` scoped-push wording **and make the edit by hand** | **DONE — applied by hand** |
 | HUM-22 | 6b | Approve the exact comment-discipline rule wording | **APPROVED** |
@@ -1277,8 +1297,13 @@ Raised during Stage 9 (OQ9). The governing principle, which is broader than any 
 | HUM-33 | 12 | Approve the `project-docs` setup-before-build sentence | **APPROVED — applied by `build-pipeline-engineer` (`10178cd`) after `docs-writer` refused it as outside its scope (step 11g named `docs-writer`)** |
 | HUM-34 | 12 | Decide on locale-leak hardening: `LC_NUMERIC` GoogleTest listener; CI must not skip the `de-DE` test | **DECIDED — not implemented; user observes in later stages; recorded in `docs/ci-pipeline.md` (`b6df13b`)** |
 | HUM-35 | 13 | Accept the Stage 13 plan: OQ1–OQ12 and the rows 26–29 table | **SATISFIED — accepted as written** |
-| HUM-36 | 13 | CANoe compile of rows 26–29, `restify-json.cin` and `restify-verify-json.can`, x64 | **SATISFIED — the user confirmed that everything compiles in CANoe (x64, compile only; commit not recorded); not merge-gating (OQ8)** |
+| HUM-36 | 13 | CANoe compile of rows 26–29, `restify-json.cin` and `restify-verify-json.can`, x64 | **SATISFIED — the user confirmed that everything compiles in CANoe (x64, compile only; recorded at `8bd35f4`, compiled from branch head `9758c04`, whose tree is identical); not merge-gating (OQ8)** |
 | HUM-37 | 13 | Runtime check of the Stage 13 verification keys, x64, incl. `float &` returning the correct double | **OPEN — deferred until a CANoe licence, with HUM-14, HUM-27, the rest of HUM-29 and HUM-30; not merge-gating** |
+| HUM-38 | 14 | Approve the Stage 14 design: job graph, permissions, script interface, M1/M3 wording, generated note sentences | **APPROVED** |
+| HUM-40 | 14 | Dry run of `release.yml` on `main`; read export table, notes, `SHA256SUMS`, `dumpbin` output of both architectures, attestation | **OPEN** |
+| HUM-41 | 14 | Approve the README install/download section and the Roadmap item | **OPEN — after the release** |
+| HUM-43 | 14 | Confirm the rule, skill and agent texts on the finished diff | **SATISFIED** |
+| HUM-44 | 14 | Approve the exact cut CHANGELOG section, incl. the hash heading form and the reworded preamble | **OPEN** |
 
 ---
 
@@ -1294,7 +1319,7 @@ The RC2237 scare showed the inverse failure: a hand-reconstructed invocation pro
 
 **Verify against the pinned source, not memory — Stage 11's positive counter-example to this section's pattern.** Every instance above is a failure this project suffered; Stage 11's finding #4 is the same discipline applied prospectively and it held. Design 3's race-freedom depends on a specific claim about libcurl's cleanup behaviour — that a DNS worker thread is joined, not detached, when an easy handle is cleaned up, unless `CURLOPT_QUICK_EXIT` is set. Rather than trusting that claim from familiarity with libcurl in general, it was traced through the **actual installed 8.21.0 source** (`url.c:220-223` → `multi.c:3027` → `thrdpool.c:342-347`) at the specific version this project vendors, not a remembered or generic version. This is also what caught the BPE-15 snippet's own staleness (§7, BPE-15): the snippet said `8.22.0` with a `curl` override, while the real, installed, and now-corrected pin has been `8.21.0#1` with no override since §7.13's BPE-25 downgrade, weeks before Stage 11 started. **Treat "verify against the pinned source" as the standing antidote to this section's failure mode, not a one-off.**
 
-**R-K — the BPE-12 case-sensitivity trap (§9) is now live, not merely foreseen.** `"Sync"` is a case-insensitive substring of `"Async"`, in both operation names and `categoryName` values. Stage 10 alone could not exercise this — only `Sync` existed. Stage 11 makes it real: the export table now carries both families side by side, so any future case-insensitive filtering or grouping by dispatch mode (Stage 14's BPE-12, generating the released operation list from the table) will silently report every async operation as synchronous unless the comparison is case-sensitive. This is now a live trap for Stage 14, not a hypothetical one.
+**R-K — the BPE-12 case-sensitivity trap (§9) is now live, not merely foreseen.** `"Sync"` is a case-insensitive substring of `"Async"`, in both operation names and `categoryName` values. Stage 10 alone could not exercise this — only `Sync` existed. Stage 11 makes it real: the export table now carries both families side by side, so any future case-insensitive filtering or grouping by dispatch mode (Stage 14's BPE-12, generating the released operation list from the table) will silently report every async operation as synchronous unless the comparison is case-sensitive. This is now a live trap for Stage 14, not a hypothetical one. **Mitigated at Stage 14:** BPE-12 groups by whole `categoryName` strings, compared case-sensitively, with a comment at the comparison.
 
 **R-E — Stage 11 merged before full runtime verification; the residual gap is an accepted risk, not an oversight.** At merge, Stage 11 is backed by full-branch review (REV-6, REV-23), a real CANoe compile check (HUM-15, x64 only), and deterministic gated-fake unit tests of the async state machine and concurrency on both architectures — but **four behaviours have no automated evidence at merge**: design 3's real unload path (`FreeLibraryAndExitThread` and the DLL actually unloading after its idle timeout); the cancel hook aborting a live libcurl transfer within about a second; the shims called through the table's function pointers on x86 specifically; and real CANoe/VN/VT load-and-unload behaviour. A local real-DLL smoke harness covering the first three without CANoe was proposed and **explicitly declined by the user**, on the grounds that the stage merges before full CANoe verification in any case, as Stage 10 did. All four are on HUM-27's checklist (still **OPEN**, not passed) and the harness stays available later if HUM-27 is delayed long enough, or if one of the four fails in the field. **HUM-14 (Stage 10's own runtime-verification gate) is likewise still OPEN** — neither it nor HUM-27 is to be recorded as passed before it actually has been.
 
@@ -1328,6 +1353,22 @@ The RC2237 scare showed the inverse failure: a hand-reconstructed invocation pro
 - **R9:** a stale DLL with a newer `restify-json.cin` fails loudly at CAPL compile. Take the DLL and `capl/` from the same commit.
 - **R10 (narrowed by CPP-44):** rows 26–29 are allowed from any context, which extends D10's deliberate departure. The path is parsed, with allocation, **once, on the caller's thread, outside the store lock**; the lock is held only to walk the parsed tokens and convert the target. The risk is described only in `docs/capl-json-surface.md`.
 
+**Stage 14 risks carried forward (numbered as in `docs/work/stage-14-release-pipeline/plans/plan.md` §6 — not this document's numbering).** That plan's R1, R8, R11, R15 and R17 are obsolete and not carried; R13 (line endings) is resolved.
+- **R4:** the tag-mode path (`validate`'s tag checks and parent lookup, the `VER_*` plumbing and version check, `publish`) first runs on the release tag; dry runs cover the rest. A failure before the release is public is OQ10 B, after it C or D.
+- **R5:** contract freeze of rows 0–29, the status codes and the JSON limits at the first tag push. Accepted by the user; later defects are fixed only by appending rows.
+- **R6:** no CANoe has ever loaded the x86 DLL, and no measurement has run; stated in the release's verification statement.
+- **R9:** after the first tag, local builds show developer versions derived from it; harmless.
+- **R10:** unattended jobs with write permissions. Only `publish` has `contents: write`, only `attest` has `id-token`/`attestations: write`, every action is SHA-pinned. Dependabot is a follow-up.
+- **R12:** the hash heading's date is off if tagging slips; accepted.
+- **R16:** a layout change in `exports.cpp` breaks `list-export-table.ps1`; it fails loudly, and the fixtures pin its behaviour.
+- **R18:** a defective export table does not block a merge, only a release (`publish` needs `export-table`); M1–M3 make a red result visible.
+- **R19:** a Sigstore or attestation outage fails `attest`; re-run (OQ10 A).
+- **R20:** the `attest` job can mint OIDC tokens; separate job without `contents: write`, GitHub's own action, SHA-pinned.
+- **R21:** dry runs record attestations for builds that are never released; accepted, they are truthful.
+- **R-T:** a mistaken tag publishes within minutes. `validate` checks format, ancestry and a CHANGELOG hash heading matching the tagged commit's first parent, so only the cut's squash-merge commit can be released; agents cannot create tags.
+- **R-H:** `main` moves after a passing dry run on the cut branch. The dry run itself fails when the heading is not the `origin/main` tip or the branch lacks that tip; the up-to-date rule forces a merge of `main` and a new dry run; otherwise tag-mode `validate` fails before anything is built.
+- **R-N:** after an OQ10 B fix has merged, the old cut's merge commit still passes `validate`, and a dry run on `main` still names it as the commit to tag. Mitigation is procedural: case B redoes the cut and the old merge commit is never tagged (`docs/release-process.md`). A mechanical guard is a Stage 14 follow-up (that plan's §12).
+
 **Verifying the operation is not verifying the resulting state.** BPE-17's residue is the clean example: the copy step correctly reports "Copied 2 .lib file(s)", every review confirmed the code and the run output, and `lib/x64/` still contains four. A step that is additive rather than synchronising can be perfectly correct about what it did and still leave a directory that violates the invariant. Check destination state, not just the operation's own report.
 
 **Reviewed is not proven — the Stage 5 form of the same error.** REV-3 was clean, and REV-3 was a review of *source code against a specification*. It cannot detect a `CAPL_DLL_INFO4` field-order mismatch against the SDK build actually installed, a calling-convention error that only manifests as x86 stack corruption at call time, or a packing assumption that differs in the real compiler. Those surface when CANoe loads the DLL and calls the function, and nowhere earlier. **Do not let a clean export-contract review be recorded as ABI proof.**
@@ -1358,7 +1399,7 @@ The RC2237 scare showed the inverse failure: a hand-reconstructed invocation pro
 
 **A changelog rule scoped to one file type does not generalise itself.** The export-table CHANGELOG rule was followed precisely. Build and CI changes — equally user-visible — were not covered by it and were missed. §5 now states both halves.
 
-**Apparent second version sources.** `vcpkg.json`'s `version-string` feeds nothing but reads as a counterexample to "no version number is ever hand-edited". BPE-16 preempts it. The shape will recur; label them where they appear.
+**Apparent second version sources.** `vcpkg.json`'s `version-string` feeds nothing but reads as a counterexample to "no version number is ever hand-edited". BPE-16 preempts it. The shape will recur; label them where they appear. The `# vX.Y.Z` labels next to pinned action SHAs (Stage 14) are the same shape: third-party versions, not product versions, and labelled as such in `CLAUDE.md`.
 
 **Generated files silently reverting hand edits.** `lib/README` is produced by `setup-dev-env.ps1`; editing the artifact instead of the template appears to work and vanishes on the next run.
 
@@ -1384,14 +1425,15 @@ The RC2237 scare showed the inverse failure: a hand-reconstructed invocation pro
 4. **BPE-18 is done — it needed verifying, not assuming, and verification found all three items genuinely missing**, not merely unconfirmed: no `Added` entry existed for `ci.yml` itself, none for the `version.lib`/`SYSLIBS` addition, and the `setup-dev-env.ps1` entry still read the stale "14 OK, 0 WARN, 0 FAIL". All three added/corrected on the same branch.
 5. **`docs/work/branching-strategy/`** is superseded and reduced to a pointer. **`docs/work/comment-discipline/`** may now be reduced to a pointer — §6b satisfies its §8 exit condition (the `docs/` destinations are listed, and REV-14's rationale-migration check passed).
 6. **`docs/plan-v15` the branch is abandoned and deleted, not merged.** Its surviving content is in §6b, §7.13 and §5's baseline invariant. It was a sibling wholesale rewrite of v14 from a shared v13 ancestor (`33acd51`); merging it would have regressed this document and would have published a closeout narrative describing work already finished. See §7.10.
-7. **The `dumpbin /exports` confirmation for BPE-8 is still unevidenced** and is cheap — one CI step, or one local run per architecture.
+7. **Done (Stage 14):** `dumpbin /exports` is a build step on both architectures in `arch-pipeline.yml`, so BPE-8's export confirmation is evidenced on every CI run.
 8. **BPE-28 (new) is done** — same branch as BPE-16/17/18. `ci.yml`'s `actions/checkout`, `actions/cache` and `actions/upload-artifact` were bumped off the deprecated Node 20 runtime (verified via the GitHub API that the new majors declare `node24` and change no input/default this workflow relies on); `ilammy/msvc-dev-cmd` stays on `v1` (no newer major exists, still `node20`) but is now pinned to the exact commit `v1.13.0` resolves to, for supply-chain hardening independent of the Node.js question.
-9. **The authoritative `/MT` check is still CI's, and Stage 9 did not change that.** REV-20's `/MT` verification was a best-effort binary-string scan and says so in its own report; `dumpbin /directives` under a real MSVC environment remains the authoritative pass. This sits alongside loose end 7 (`dumpbin /exports` for BPE-8, still unevidenced) — **both are cheap, both want the same one CI step or one local run per architecture**, and neither should be recorded as satisfied by a review that could not run the tool.
+9. **The authoritative `/MT` check is still CI's, and Stage 9 did not change that.** REV-20's `/MT` verification was a best-effort binary-string scan and says so in its own report; `dumpbin /directives` under a real MSVC environment remains the authoritative pass. Loose end 7 (`dumpbin /exports` for BPE-8) is closed by Stage 14's build step; the `/MT` check stays CI's, and neither is recorded as satisfied by a review that could not run the tool.
 10. **`msvc-build-conventions` now names all eight system libs, including `iphlpapi`** (checked at the Stage 12 fold-in), so the skill half of this loose end is closed. `CLAUDE.md`'s Tech stack line still lists seven; fixing it is a one-line `CLAUDE.md` edit that needs user-approved wording.
-11. **Out of scope for Stage 12, left for a separate decision:** `project-docs` assigns cutting the CHANGELOG release section to "Stage 13", which in this plan is Stage 14 (BPE-14). The `project-docs` examples rules (one example per operation group; examples using the framework through `capl/includes/includes.cin`) are revisited when `examples/` is taken up (CPP-11).
+11. **Done (Stage 14):** the CHANGELOG cut is BPE-14, and `project-docs` no longer names a stage for it. The `project-docs` examples rules (one example per operation group; examples using the framework through `capl/includes/includes.cin`) are revisited when `examples/` is taken up (CPP-11).
 12. **Open user decision, not tied to a stage:** when the CAPL framework stops being preliminary and becomes append-only like the export table. Until then, renames are allowed and recorded in CHANGELOG.
 13. **Deferred CANoe checks:** the rest of HUM-29, HUM-30, HUM-14, HUM-27 and HUM-37 run once a CANoe licence is available. They are followed by the Stage 12 and Stage 13 follow-ups (§8, each stage's "Obligations").
-14. **Line endings, cosmetic (REV-8 nit, Stage 13).** The repository convention is LF in the index and CRLF in the working tree. REV-8 found five files with LF or mixed endings in the working tree. Left to the user to normalize or ignore; nothing depends on it.
+14. **Done (Stage 14):** line endings resolved — `.gitattributes` and `.editorconfig` set CRLF in the working tree, LF for shell scripts, `json.hpp` untouched.
+15. **Stage 14 follow-ups, before the second release:** versioned CHANGELOG headings, the release-notes and dry-run logic as a tested script with a guard against tagging an old cut, Dependabot, the Node 20 / `msvc-dev-cmd` item and the optional `provision` hardening — parked in `docs/work/stage-14-release-pipeline/plans/plan.md` §12.
 
 ---
 
@@ -1403,6 +1445,6 @@ The RC2237 scare showed the inverse failure: a hand-reconstructed invocation pro
 
 **Stages 8 through 13 are all complete and reviewed clean** (REV-19, REV-20, REV-5/REV-22, REV-6/REV-23, REV-7, REV-8 — zero Must-fix each). Stage 12 appended rows 19–25, compile-verified on x64 (HUM-29's compile part); its runtime checks are deferred with HUM-14 and HUM-27. Stage 13 appended rows 26–29, compile-verified on x64 (HUM-36); its runtime check (HUM-37) is deferred with the others. Stage 9 was logic-only: no export-table append, no human gate, so HUM-13 did not gate it. **Stages 10 and 11 each appended to the export table and each required HUM-13 to have passed before proceeding** — both were compile-verified in real CANoe (HUM-25, HUM-15) once it had. HUM-23 has passed, so "require branches up to date before merging" is the mechanically enforced half of the export-table merge-hazard mitigation (§7.10, §7.14); the convention half — never two open PRs touching `exports.cpp` — has held through both appends.
 
-**BPE-16, BPE-17, BPE-18 and BPE-28 are done** (`chore/bpe-16-17-18-cleanup`, 2026-09-22 — see §14). **HUM-23 is done** (§7.14). **Stage 13 (typed accessors) is complete** — rows 26–29, the fourth export-table append (§8, Stage 13). **Stage 14 (tag-driven release) is next**, on a `stage/14-*` branch cut from `main` after the human merges Stage 13. The deferred CANoe checks — the rest of HUM-29, HUM-30, HUM-14, HUM-27 and HUM-37 — block neither the Stage 13 merge nor Stage 14's start (Stage 12 D14, R31; Stage 13 OQ8). When a licence is available: the rest of HUM-29, then HUM-30, then HUM-37, then the Stage 12 and Stage 13 follow-ups.
+**BPE-16, BPE-17, BPE-18 and BPE-28 are done** (`chore/bpe-16-17-18-cleanup`, 2026-09-22 — see §14). **HUM-23 is done** (§7.14). **Stage 13 (typed accessors) is complete** — rows 26–29, the fourth export-table append (§8, Stage 13). **Stage 14 (tag-driven release) is complete, reviewed clean, CI green on both legs at `50233f2` (user-confirmed)**; the first release follows its steps 15–20. The deferred CANoe checks — the rest of HUM-29, HUM-30, HUM-14, HUM-27 and HUM-37 — block neither the Stage 13 merge nor Stage 14's start (Stage 12 D14, R31; Stage 13 OQ8). When a licence is available: the rest of HUM-29, then HUM-30, then HUM-37, then the Stage 12 and Stage 13 follow-ups.
 
-**Status:** v15. Stages 1, 2 and 4 complete and execution-verified. Stage 5 code complete and building on both architectures; hard gate open on Stage 3. **Stages 6 and 7 executed and closed out** — CI green on both legs, branching and auto-PR live, three units of work merged through the flow. **Stage 8 complete (REV-19 clean). Stage 9 complete (REV-20 clean): the HTTP layer and synchronous operations exist as pure logic behind an injectable seam, 139/139 tests green on both architectures, zero export-table change.** Comment discipline is a loaded rule that has now survived a second pass which traced its own regression back to a planning instruction rather than to implementer non-compliance (§6b). `plan.md` maintenance is the fold-in model (§7.10). **HUM-20 verified branch protection absent on 2026-09-21; HUM-23 applied and verified it present via the GitHub API on 2026-09-22 (§7.14).** **BPE-16/17/18/28 closed 2026-09-22** (§14). **Stages 10–13 complete** — export rows 1–29 behind the sentinel row, compile-verified in CANoe on x64. Open, all blocked on a CANoe licence: HUM-13's call half, HUM-14, HUM-27, the rest of HUM-29, HUM-30 and HUM-37. Deferred and unscheduled: containerized integration testing (§11). Next action: **Stage 14**, after the human merges Stage 13.
+**Status:** v16. Stages 1, 2 and 4 complete and execution-verified. Stage 5 code complete and building on both architectures; hard gate open on Stage 3. **Stages 6 and 7 executed and closed out** — CI green on both legs, branching and auto-PR live, three units of work merged through the flow. **Stage 8 complete (REV-19 clean). Stage 9 complete (REV-20 clean): the HTTP layer and synchronous operations exist as pure logic behind an injectable seam, 139/139 tests green on both architectures, zero export-table change.** Comment discipline is a loaded rule that has now survived a second pass which traced its own regression back to a planning instruction rather than to implementer non-compliance (§6b). `plan.md` maintenance is the fold-in model (§7.10). **HUM-20 verified branch protection absent on 2026-09-21; HUM-23 applied and verified it present via the GitHub API on 2026-09-22 (§7.14).** **BPE-16/17/18/28 closed 2026-09-22** (§14). **Stages 10–13 complete** — export rows 1–29 behind the sentinel row, compile-verified in CANoe on x64. **Stage 14 complete, reviewed clean (REV-9 plus a delta review), CI green on both legs at `50233f2` (user-confirmed); the first release is pending (HUM-40, HUM-44, HUM-17).** Open, all blocked on a CANoe licence: HUM-13's call half, HUM-14, HUM-27, the rest of HUM-29, HUM-30 and HUM-37. Deferred and unscheduled: containerized integration testing (§11). Next action: the first release (Stage 14 steps 15–20), then Stage 15.

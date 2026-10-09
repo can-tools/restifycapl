@@ -36,6 +36,9 @@
           matching ARCH when defined. Open a new window (and restart VS Code) to see
           them; see docs/development-environment.md#per-architecture-msvc-environment-variables
       4. Detect `make`; install it (MSYS2 / Chocolatey / Scoop) if absent.
+      4b. Detect PowerShell 7 (`pwsh`), needed by scripts/list-export-table.ps1;
+          install it via winget or Chocolatey if absent. If neither works, a
+          WARN with the manual command is printed and the script continues.
       5. Detect or bootstrap vcpkg -- pinning the vcpkg TOOL itself to a
          known-good release tag ($VcpkgPinnedTag), separate from and in
          addition to vcpkg.json's own builtin-baseline pin on registry
@@ -600,6 +603,69 @@ automatically. Install one of the following manually, then re-run:
   MSYS2:       winget install -e --id MSYS2.MSYS2   (then: pacman -S make)
   Chocolatey:  choco install make -y   (elevated)
 "@
+}
+
+# ===========================================================================
+# Step 4b -- detect / install PowerShell 7 (pwsh)
+# ===========================================================================
+
+function Find-Pwsh7 {
+    # The default install folder is probed too: a fresh install is not on this session's PATH.
+    $candidates = @()
+    $cmd = Get-Command pwsh -ErrorAction SilentlyContinue
+    if ($cmd) { $candidates += $cmd.Source }
+    $candidates += (Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe')
+
+    $tried = @()
+    foreach ($candidate in $candidates) {
+        if (-not (Test-Path -LiteralPath $candidate)) { continue }
+        $full = [System.IO.Path]::GetFullPath($candidate)
+        if ($tried -contains $full) { continue }
+        $tried += $full
+        $out = & $candidate -NoProfile -Command '$PSVersionTable.PSVersion.Major' 2>$null
+        # Read right after the call: a pipeline that stops early (e.g. Select-Object -First 1) leaves $LASTEXITCODE unreliable in Windows PowerShell 5.1.
+        $code = $LASTEXITCODE
+        $major = "$(@($out)[0])".Trim()
+        if ($code -eq 0 -and $major -match '^\d+$' -and [int]$major -ge 7) {
+            return $candidate
+        }
+    }
+    return $null
+}
+
+Invoke-Step -Name 'pwsh 7' -Body {
+    $manual = 'winget install -e --id Microsoft.PowerShell   (or, elevated: choco install powershell-core -y)'
+    $warnText = "PowerShell 7 (pwsh) not found and could not be installed automatically; scripts/list-export-table.ps1 needs pwsh 7. Install it with: $manual, then open a new window."
+
+    $found = Find-Pwsh7
+    if ($found) {
+        Add-Result -Step 'pwsh 7' -Status 'OK' -Message "Already installed ($found)."
+        return
+    }
+
+    if (Get-Command winget -ErrorAction SilentlyContinue) {
+        Add-Result -Step 'pwsh 7' -Status 'WARN' -Message 'Not found; installing via winget.'
+        & winget install -e --id Microsoft.PowerShell --accept-package-agreements --accept-source-agreements 2>&1 | Out-Null
+        $found = Find-Pwsh7
+        if ($found) {
+            Add-Result -Step 'pwsh 7' -Status 'OK' -Message "Installed via winget ($found). Open a new terminal window to get pwsh on PATH."
+            return
+        }
+    }
+
+    if (Get-Command choco -ErrorAction SilentlyContinue) {
+        if (Test-IsElevated) {
+            Add-Result -Step 'pwsh 7' -Status 'WARN' -Message 'Not found; installing via Chocolatey.'
+            & choco install powershell-core -y 2>&1 | Out-Null
+            $found = Find-Pwsh7
+            if ($found) {
+                Add-Result -Step 'pwsh 7' -Status 'OK' -Message "Installed via Chocolatey ($found). Open a new terminal window to get pwsh on PATH."
+                return
+            }
+        }
+    }
+
+    Add-Result -Step 'pwsh 7' -Status 'WARN' -Message $warnText
 }
 
 # ===========================================================================

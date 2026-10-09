@@ -1,0 +1,490 @@
+# release.yml -- tag-driven release of the two DLLs; workflow_dispatch is a dry
+# run that never publishes. See docs/release-process.md.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      version: ${{ steps.tag.outputs.version }}
+    steps:
+      # Full history: the ancestor check needs origin/main.
+      - name: Checkout (full history)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Select mode
+        id: mode
+        shell: bash
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then mode=tag; else mode=dry-run; fi
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+
+      - name: Validate the tag
+        id: tag
+        if: steps.mode.outputs.mode == 'tag'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          re='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+          if [[ ! "$TAG" =~ $re ]]; then
+            echo "::error::tag '$TAG' is not of the form vX.Y.Z without leading zeros"
+            exit 1
+          fi
+          for field in "${BASH_REMATCH[@]:1}"; do
+            if [ "${#field}" -gt 5 ] || [ "$field" -gt 65535 ]; then
+              echo "::error::tag '$TAG' has a field above 65535 (version resource fields are 16-bit)"
+              exit 1
+            fi
+          done
+
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::the tagged commit is not an ancestor of origin/main"
+            exit 1
+          fi
+
+          # The CHANGELOG section is found through the first parent, as "^" does for a merge commit.
+          read -r -a ids <<< "$(git rev-list --parents -n 1 "$GITHUB_SHA")"
+          if [ "${#ids[@]}" -lt 2 ]; then
+            echo "::error::the tagged commit has no parent; tag the squash-merge commit of the CHANGELOG cut"
+            exit 1
+          fi
+
+          # A draft is not returned by the tags endpoint, only a published release is.
+          if err=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" 2>&1 >/dev/null); then
+            echo "::error::a published release for $TAG already exists; never move a published tag"
+            exit 1
+          elif [[ "$err" != *"HTTP 404"* ]]; then
+            echo "::error::could not check for an existing release: $err"
+            exit 1
+          fi
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Extract the CHANGELOG section for the release notes
+        shell: bash
+        env:
+          MODE: ${{ steps.mode.outputs.mode }}
+        run: |
+          set -euo pipefail
+          python3 -I - <<'PY'
+          import fnmatch, os, re, subprocess, sys
+
+          mode = os.environ['MODE']
+          sha = os.environ['GITHUB_SHA']
+          out = os.path.join(os.environ['RUNNER_TEMP'], 'notes-body.md')
+
+          # Linux checkouts are CRLF too (.gitattributes), so every line-end
+          # pattern allows an optional \r.
+          HEAD = re.compile(r'^## \[')
+          HASHHEAD = re.compile(r'^## \[([0-9a-f]{12})\] - \d{4}-\d{2}-\d{2}\r?$')
+          LINKDEF = re.compile(r'^\[[^\]]+\]:[ \t]*\S')
+          H3 = re.compile(r'^### ')
+          DEV = re.compile(r'^### Development\r?$')
+          BLANK = re.compile(r'^[ \t]*\r?$')
+
+          with open('CHANGELOG.md', encoding='utf-8', newline='') as f:
+              lines = f.read().split('\n')
+
+
+          def fail(message):
+              print('::error::' + message)
+              sys.exit(1)
+
+
+          def git(*args):
+              result = subprocess.run(['git'] + list(args), capture_output=True, text=True)
+              if result.returncode != 0:
+                  fail('git %s failed: %s' % (' '.join(args), result.stderr.strip()))
+              return result.stdout.strip()
+
+
+          def git_try(*args):
+              return subprocess.run(['git'] + list(args), capture_output=True, text=True)
+
+
+          def annotate(kind, message):
+              print('::%s::%s' % (kind, message))
+              with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as f:
+                  f.write(message + '\n\n')
+
+
+          # A cut is either merged already (the first-parent child of its base carries the
+          # heading) or pending (its base must be the origin/main tip the branch contains).
+          def check_cut(h, heading):
+              found = git_try('rev-parse', '--verify', '--quiet', h + '^{commit}')
+              base = found.stdout.strip()
+              if found.returncode != 0 or git_try('merge-base', '--is-ancestor', base, sha).returncode != 0:
+                  fail('the heading %s names %s, which is not a commit in this run\'s history; take the hash from git rev-parse --short=12 origin/main' % (heading, h))
+              tip = git('rev-parse', 'origin/main')
+              chain = git('rev-list', '--first-parent', 'origin/main').split()
+              if base in chain and chain.index(base) > 0:
+                  child = chain[chain.index(base) - 1]
+                  shown = git_try('show', child + ':CHANGELOG.md')
+                  if shown.returncode == 0 and heading in [l.rstrip('\r') for l in shown.stdout.split('\n')]:
+                      tags = [t for t in git('tag', '--points-at', child).split() if fnmatch.fnmatchcase(t, 'v*.*.*')]
+                      if tags:
+                          annotate('warning', 'The newest CHANGELOG section %s was already released as %s; this dry run previews its notes again. Add entries to [Unreleased] for the next release.' % (heading, tags[0]))
+                      else:
+                          annotate('notice', 'The cut %s is merged on main as %s; push the tag on %s.' % (heading, child[:12], child[:12]))
+                      return
+              errors = []
+              if h != tip[:12]:
+                  errors.append('the heading %s names %s, but the origin/main tip is %s; main has moved: merge main into the cut branch, then rewrite the heading hash and the links to %s' % (heading, h, tip[:12], tip[:12]))
+              if git_try('merge-base', '--is-ancestor', tip, sha).returncode != 0:
+                  errors.append('the cut branch does not contain the origin/main tip %s; merge main into the branch so the dry run builds what the squash merge will produce' % tip[:12])
+              if errors:
+                  for error in errors:
+                      print('::error::' + error)
+                  sys.exit(1)
+
+
+          def body_after(start):
+              end = len(lines)
+              for i in range(start + 1, len(lines)):
+                  if HEAD.match(lines[i]) or LINKDEF.match(lines[i]):
+                      end = i
+                      break
+              body = lines[start + 1:end]
+              dev = [i for i, line in enumerate(body) if DEV.match(line)]
+              if len(dev) > 1:
+                  fail('the section has more than one "### Development" block')
+              if dev:
+                  stop = len(body)
+                  for i in range(dev[0] + 1, len(body)):
+                      if H3.match(body[i]):
+                          stop = i
+                          break
+                  body = body[:dev[0]] + body[stop:]
+              while body and BLANK.match(body[0]):
+                  body.pop(0)
+              while body and BLANK.match(body[-1]):
+                  body.pop()
+              if not any(not BLANK.match(line) and not H3.match(line) for line in body):
+                  return None
+              return [line.rstrip('\r') for line in body]
+
+
+          if mode == 'tag':
+              # The squash-merge commit's first parent is the main commit the cut was based on.
+              parent = git('rev-parse', sha + '^')
+              starts = []
+              for i, line in enumerate(lines):
+                  m = HASHHEAD.match(line)
+                  if m and parent.startswith(m.group(1)):
+                      starts.append(i)
+              if len(starts) != 1:
+                  fail('the tag must be on the squash-merge commit of the CHANGELOG cut; expected exactly one "## [%s] - YYYY-MM-DD" heading, found %d' % (parent[:12], len(starts)))
+              chosen = lines[starts[0]].rstrip('\r')
+              body = body_after(starts[0])
+              if body is None:
+                  fail('the CHANGELOG section %s is empty once "### Development" is removed' % chosen)
+          else:
+              chosen, body = None, None
+              for i, line in enumerate(lines):
+                  if HEAD.match(line):
+                      candidate = body_after(i)
+                      if candidate is not None:
+                          chosen, body = line.rstrip('\r'), candidate
+                          break
+              if body is None:
+                  fail('no CHANGELOG.md section has release notes once "### Development" is removed')
+              m = HASHHEAD.match(chosen)
+              if m:
+                  check_cut(m.group(1), chosen)
+
+          with open(out, 'w', encoding='utf-8', newline='\n') as f:
+              f.write('\n'.join(body) + '\n')
+
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as f:
+              f.write('Release notes taken from the CHANGELOG section `%s` (%s mode).\n' % (chosen, mode))
+          PY
+
+      - name: Upload the notes body
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: release-notes-body
+          path: ${{ runner.temp }}/notes-body.md
+          if-no-files-found: error
+          overwrite: true
+
+  pipeline-x86:
+    needs: validate
+    uses: ./.github/workflows/arch-pipeline.yml
+    with:
+      arch: x86
+      release-version: ${{ needs.validate.outputs.version }}
+
+  pipeline-x64:
+    needs: validate
+    uses: ./.github/workflows/arch-pipeline.yml
+    with:
+      arch: x64
+      release-version: ${{ needs.validate.outputs.version }}
+
+  export-table:
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Check the export table
+        id: table
+        uses: ./.github/actions/export-table
+
+      - name: Upload the export table markdown
+        if: ${{ !cancelled() && steps.table.outputs.markdown-path != '' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: export-table-markdown
+          path: ${{ steps.table.outputs.markdown-path }}
+          if-no-files-found: error
+          overwrite: true
+
+  assemble:
+    needs: [validate, pipeline-x86, pipeline-x64, export-table]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Download restifycapl-x86.dll
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
+        with:
+          name: restifycapl-x86
+          path: dist
+
+      - name: Download restifycapl-x64.dll
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
+        with:
+          name: restifycapl-x64
+          path: dist
+
+      - name: Download the notes body
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
+        with:
+          name: release-notes-body
+          path: parts/body
+
+      - name: Download the export table markdown
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
+        with:
+          name: export-table-markdown
+          path: parts/table
+
+      - name: Write SHA256SUMS and the release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          ls -1 dist
+          [ "$(ls -1 dist | sort | tr '\n' ' ')" = "restifycapl-x64.dll restifycapl-x86.dll " ] || {
+            echo "::error::dist must contain exactly the two DLLs"
+            exit 1
+          }
+          (cd dist && sha256sum restifycapl-x86.dll restifycapl-x64.dll > SHA256SUMS)
+
+          rows=$(grep -cE '^\| [0-9]+ \| ' parts/table/export-table.md || true)
+          if [ "$rows" -lt 1 ]; then
+            echo "::error::the export table markdown has no function rows"
+            exit 1
+          fi
+
+          {
+            cat parts/body/notes-body.md
+            printf '\n### Using this release\n\n'
+            printf '%s\n\n' 'Take `capl/` from this tag'"'"'s source archive; a DLL and `capl/` from different versions fail at CAPL compile.'
+            printf '%s\n\n' 'Check a download: in PowerShell, `Get-FileHash restifycapl-x64.dll` must print the hash listed for that file in `SHA256SUMS` (likewise `restifycapl-x86.dll`).'
+            printf '%s\n' 'Both DLLs carry a GitHub build-provenance attestation, which the release workflow verifies before publishing; to verify it yourself, see `docs/release-process.md` in the source archive.'
+            printf '\n### Export table\n\n<details>\n<summary>%s functions</summary>\n\n' "$rows"
+            cat parts/table/export-table.md
+            printf '\n</details>\n'
+          } > dist/notes.md
+
+          chars=$(python3 -I -c 'import sys; print(len(open(sys.argv[1], encoding="utf-8").read()))' dist/notes.md)
+          if [ "$chars" -gt 125000 ]; then
+            echo "::error::release notes are $chars characters, the limit is 125000"
+            exit 1
+          fi
+
+          {
+            echo '### SHA256SUMS'
+            echo
+            echo '```'
+            cat dist/SHA256SUMS
+            echo '```'
+            echo
+            echo '### notes.md'
+            echo
+            cat dist/notes.md
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the release assets
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: release-assets
+          path: dist
+          if-no-files-found: error
+          overwrite: true
+
+  attest:
+    needs: assemble
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      attestations: write
+      contents: read
+    steps:
+      - name: Download the release assets
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
+        with:
+          name: release-assets
+          path: dist
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
+        with:
+          subject-path: |
+            dist/restifycapl-x86.dll
+            dist/restifycapl-x64.dll
+
+      - name: Verify the attestations
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for dll in restifycapl-x86.dll restifycapl-x64.dll; do
+            verified=0
+            for attempt in 1 2 3; do
+              if gh attestation verify "dist/$dll" \
+                  --repo "$GITHUB_REPOSITORY" \
+                  --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"; then
+                verified=1
+                break
+              fi
+              sleep 10
+            done
+            if [ "$verified" -ne 1 ]; then
+              echo "::error::attestation of $dll could not be verified"
+              exit 1
+            fi
+          done
+
+  publish:
+    needs: [validate, export-table, assemble, attest]
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.validate.outputs.tag }}
+    steps:
+      - name: Download the release assets
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
+        with:
+          name: release-assets
+          path: dist
+
+      - name: Require that no published release exists for the tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          if err=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" 2>&1 >/dev/null); then
+            echo "::error::a published release for $TAG already exists; never move a published tag"
+            exit 1
+          elif [[ "$err" != *"HTTP 404"* ]]; then
+            echo "::error::could not check for an existing release: $err"
+            exit 1
+          fi
+
+      - name: Delete a leftover draft for the tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases" \
+            | jq -r --arg tag "$TAG" '.[] | select(.draft and .tag_name == $tag) | .id' \
+            | while read -r id; do
+                echo "deleting leftover draft $id"
+                gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id"
+              done
+
+      - name: Create the draft release and upload the assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --draft \
+            --verify-tag \
+            --title "$TAG" \
+            --notes-file dist/notes.md \
+            dist/restifycapl-x86.dll dist/restifycapl-x64.dll dist/SHA256SUMS
+
+      - name: Verify the draft
+        shell: bash
+        run: |
+          set -euo pipefail
+          draft=$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases" \
+            | jq -c --arg tag "$TAG" '[.[][] | select(.draft and .tag_name == $tag)]')
+          if [ "$(echo "$draft" | jq 'length')" -ne 1 ]; then
+            echo "::error::expected exactly one draft for $TAG"
+            exit 1
+          fi
+
+          names=$(echo "$draft" | jq -r '.[0].assets | map(.name) | sort | join(" ")')
+          if [ "$names" != "SHA256SUMS restifycapl-x64.dll restifycapl-x86.dll" ]; then
+            echo "::error::the draft must carry exactly three assets, found: $names"
+            exit 1
+          fi
+
+          chars=$(echo "$draft" | jq '.[0].body | length')
+          if [ "$chars" -gt 125000 ]; then
+            echo "::error::the draft notes are $chars characters, the limit is 125000"
+            exit 1
+          fi
+
+          mkdir verify
+          echo "$draft" | jq -r '.[0].assets[] | "\(.id) \(.name)"' | while read -r id name; do
+            gh api -H "Accept: application/octet-stream" "repos/$GITHUB_REPOSITORY/releases/assets/$id" > "verify/$name"
+          done
+          (cd verify && sha256sum -c SHA256SUMS)
+
+      - name: Make the release public
+        shell: bash
+        run: gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false
+
+      - name: Say what state the release is in
+        if: failure()
+        shell: bash
+        run: |
+          if gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" > /dev/null 2>&1; then
+            msg="The release for $TAG is public. Never move the tag; fix forward with a new version and mark this release as withdrawn."
+          else
+            msg="Nothing is public for $TAG. Re-run the failed jobs for a transient failure, or delete the draft and the tag, fix, and tag again."
+          fi
+          echo "::error::$msg"
+          echo "$msg" >> "$GITHUB_STEP_SUMMARY"

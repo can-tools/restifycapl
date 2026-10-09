@@ -1,0 +1,20 @@
+// expect: fail 11
+constexpr char kRefLong = static_cast<char>('L' - 128);
+constexpr char kRefDword = static_cast<char>('D' - 128);
+constexpr char kRefDouble = static_cast<char>('F' - 128);
+
+CAPL_DLL_INFO4 CAPL_DLL_INFO_LIST4[] = {
+    {CDLL_VERSION_NAME, (CAPL_FARCALL)CDLL_VERSION, "", "", 0, 0, "", "",
+     {""}},
+
+    {"restifyFoo",
+     (CAPL_FARCALL)restifyFoo,
+     "Common",
+     "Does a thing.",
+     'L',
+     1,
+     {'C'},
+     {3},
+     {"a"}},
+
+    {0}};

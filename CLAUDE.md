@@ -32,13 +32,14 @@ restLib) in capl/includes/libs/ in the same change.
 
 - `make` (no target) or `make help` — prints the available targets; builds
   nothing.
-- `make all` — builds x86, then x64. Works in CI, where each matrix leg has
-  its own MSVC environment, and locally from any shell once
+- `make all` — builds x86, then x64, from any shell once
   `scripts/setup-dev-env.ps1` has stored the build environment (see below).
-  Without those stored variables, one shell only ever has one architecture's
-  `cl.exe`/`link.exe` on `PATH`, so `make all` in such a shell fails at link
-  time (`LNK1112`) at the architecture the shell does not target — run
-  `make build-x86` and `make build-x64` in separately activated shells then.
+  CI does not use it: each architecture's jobs run `make build-<arch>` in
+  their own MSVC environment. Without those stored variables, one shell only
+  ever has one architecture's `cl.exe`/`link.exe` on `PATH`, so `make all` in
+  such a shell fails at link time (`LNK1112`) at the architecture the shell
+  does not target — run `make build-x86` and `make build-x64` in separately
+  activated shells then.
 - Local build environment: `scripts/setup-dev-env.ps1` stores each
   architecture's MSVC environment as user environment variables
   (`RESTIFY_MSVC_X64_*`, `RESTIFY_MSVC_X86_*`). The Makefile uses the set
@@ -83,7 +84,8 @@ capl/                   CAPL framework (preliminary): *.can verification nodes,
                           committed (.gitkeep only)
   includes/dll/win-x86/   restifycapl-x86.dll copied in by the user; never
                           committed (.gitkeep only)
-scripts/                setup-dev-env.ps1 — environment bootstrap
+scripts/                environment setup and small repo helpers
+                          (e.g. list-export-table.ps1); never a second build system
 docs/                   project documentation
 ```
 
@@ -94,10 +96,10 @@ include the CAPL SDK headers.
 ## Non-negotiable constraints
 
 - **Export contract**: the real contract with CANoe is the
-  `CAPL_DLL_INFO_LIST` / `CAPL_DLL_INFO4` table in `src/module/exports.cpp`,
-  not just `src/module/exports.def`. Never rename, reorder, or remove an
-  existing entry — see the `capl-export-contract` skill before touching
-  this file.
+  `CAPL_DLL_INFO_LIST4` array of `CAPL_DLL_INFO4` rows in
+  `src/module/exports.cpp`, not just `src/module/exports.def`. Never rename,
+  reorder, or remove an existing entry — see the `capl-export-contract` skill
+  before touching this file.
 - **Runtime library**: `/MT` is mandatory for the project and every static
   dependency (libcurl, zlib, GoogleTest). Never mix `/MT` and `/MD` in the
   same link — see the `msvc-build-conventions` skill.
@@ -105,9 +107,15 @@ include the CAPL SDK headers.
   select the correct DLL manually; there is no `.vmodule` auto-selection.
 - **Tests run outside CANoe**: logic that can be unit-tested must be
   reachable without going through the CAPL export glue.
-- **Versioning**: the single source of truth is the Git tag (`vX.Y.Z`) used
-  for a release — never edit a version number by hand in any file. See the
-  `msvc-build-conventions` skill for the full mechanism.
+- **Versioning**: the single source of truth for the product (DLL) version is
+  the Git tag (`vX.Y.Z`) pushed for a release; the tag is the only place a
+  product version is typed. No tracked file contains a hand-written product
+  version: build inputs (`src/module/version.rc`, the Makefile, CI workflows)
+  derive it from the tag, and `CHANGELOG.md` release sections are headed by
+  commit hash, not by version (see `project-docs`). Third-party pins (action
+  SHAs with their `# vX.Y.Z` label, tool and dependency versions) are not
+  product versions. See the `msvc-build-conventions` skill for the full
+  mechanism.
 
 ## Agents
 

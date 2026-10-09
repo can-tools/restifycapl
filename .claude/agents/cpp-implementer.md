@@ -23,7 +23,7 @@ CANoe (a "CAPL REST DLL").
   - `src/mapping/` — json-flatten, json-accessors, struct-mapping
     (struct-mapping conditional, not yet in scope)
   - `src/module/` — exports.cpp: the ONLY file that knows about CANoe/CAPL
-- Keep the CAPL export glue (the code that fills `CAPL_DLL_INFO_LIST` in
+- Keep the CAPL export glue (the code that fills `CAPL_DLL_INFO_LIST4` in
   `src/module/exports.cpp` and the `extern "C"` wrapper functions) as thin
   as possible. Business logic should live in plain, testable C++ functions
   that the glue calls into — not be written directly inside the exported
@@ -33,7 +33,7 @@ CANoe (a "CAPL REST DLL").
 
 ## Hard rules
 
-- Do not rename, reorder, or remove entries in `CAPL_DLL_INFO_LIST` (or the
+- Do not rename, reorder, or remove entries in `CAPL_DLL_INFO_LIST4` (or the
   underlying `.def` export) without following the `capl-export-contract`
   skill and calling out the change explicitly — this breaks existing CAPL
   scripts silently at runtime, not at compile time.

@@ -472,7 +472,7 @@ CAPL_DLL_INFO4 CAPL_DLL_INFO_LIST4[] = {
     {CDLL_VERSION_NAME, (CAPL_FARCALL)CDLL_VERSION, "", "", 0, 0, "", "",
      {""}},
 
-    // restifyReadVersion(char buffer[], dword bufferSize) : long
+    // long restifyReadVersion(char buffer[], dword bufferSize)
     // See the naming-convention rationale and restifyReadVersion's own
     // comment above. parTypes "CD" / array "\001\000" mean: parameter 0
     // ('C', array depth 1) is a CAPL char[] buffer passed by reference;

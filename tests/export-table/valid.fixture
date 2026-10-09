@@ -1,0 +1,69 @@
+// expect: pass
+constexpr char kRefLong = static_cast<char>('L' - 128);
+constexpr char kRefDword = static_cast<char>('D' - 128);
+constexpr char kRefDouble = static_cast<char>('F' - 128);
+
+#pragma pack(push, 1)
+
+CAPL_DLL_INFO4 CAPL_DLL_INFO_LIST4[] = {
+    {CDLL_VERSION_NAME, (CAPL_FARCALL)CDLL_VERSION, "", "", 0, 0, "", "",
+     {""}},
+
+    {"restifyReadVersion",
+     (CAPL_FARCALL)restifyReadVersion,
+     "Common",
+     "Writes this DLL's build version string into the caller-supplied "
+     "buffer. Returns 0 on success, a negative error code otherwise.",
+     'L',
+     2,
+     "CD",
+     "\001\000",
+     {"buffer", "bufferSize"}},
+
+    {"restifyGetSync",
+     (CAPL_FARCALL)restifyGetSync,
+     "Sync",
+     "Performs a blocking HTTP GET and copies the response body into the "
+     "caller's buffer. Blocking call \xe2\x80\x94 use from Measurement Setup "
+     "or a test node only.",
+     'L',
+     4,
+     {'C', 'D', kRefLong, kRefDword},
+     {1, 0, 0, 0},
+     {"url", "urlSize", "httpStatusCode", "responseBodyLength"}},
+
+    {"restifyAwaitResponse",
+     (CAPL_FARCALL)restifyAwaitResponse,
+     "Async",
+     "Blocks until a dispatched request completes or the timeout elapses.",
+     'L',
+     2,
+     {'D', 'D'},
+     {0, 0},
+     {"requestId", "waitTimeoutMs"}},
+
+    {"restifyFillGrid",
+     (CAPL_FARCALL)restifyFillGrid,
+     "Async",
+     "Reads a two-dimensional char array.",
+     'D',
+     2,
+     "CD",
+     "\002\000",
+     {"grid", "gridSize"}},
+
+    {"restifyJsonReadDouble",
+     (CAPL_FARCALL)restifyJsonReadDouble,
+     "Json",
+     "Writes the numeric value found at a JSON Pointer path in a parsed "
+     "document to value, returning 0 on success or a negative error code "
+     "otherwise.",
+     'L',
+     4,
+     {'D', 'C', 'D', kRefDouble},
+     {0, 1, 0, 0},
+     {"documentId", "path", "pathSize", "value"}},
+
+    {0}};
+
+#pragma pack(pop)

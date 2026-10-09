@@ -43,8 +43,9 @@ build/x86/, build/x64/   build output (.dll, .lib, .exp, .res) — gitignored
 include/vendor/          third-party headers (json.hpp, capl-dll-sdk/,
                          gtest/ — the latter is test-only, same rule as
                          lib/gtest/ above)
-scripts/                 setup-dev-env.ps1 — environment bootstrap only,
-                         never a second build system
+scripts/                 environment setup and small repo helpers
+                         (e.g. list-export-table.ps1); never a second
+                         build system
 ```
 
 **`.gitkeep` lifecycle.** A `.gitkeep` is removed in the same change that
@@ -56,7 +57,7 @@ all — `setup-dev-env.ps1` creates all four directories on every run.
 
 ## Versioning — single source of truth: the Git tag
 
-No version number is ever hand-edited in any file. The mechanism:
+No product version number is ever hand-edited in any file. The mechanism:
 
 `vcpkg.json`'s `"version-string": "0.0.0"` is manifest boilerplate required by
 vcpkg's own package format, not a version source — it feeds nothing here (not
@@ -109,8 +110,8 @@ VER_MAJOR 0 #endif`, etc.) for the rare case it's invoked without them.
 
 **Ownership.** `build-pipeline-engineer` owns this mechanism end to end.
 No other agent edits `version.rc`, the `/VERSION:` flags, or anything
-related to version numbers. `code-reviewer` flags any hardcoded version
-number found anywhere as a bug.
+related to version numbers. `code-reviewer` flags any hardcoded **product**
+version number found anywhere as a bug.
 
 ## Local builds — the only sanctioned invocation
 
@@ -177,8 +178,9 @@ number found anywhere as a bug.
 ## Local vs CI verification
 
 - Local verification defaults to x64 only: `make build-x64`, `make test`
-  (which defaults to `ARCH=x64`). x86 coverage comes from CI's build/test
-  matrix, which must be green on both legs for a given commit before any
+  (which defaults to `ARCH=x64`). x86 coverage comes from CI's per-architecture
+  pipelines, whose gate checks `build + test (x86)` and
+  `build + test (x64)` must both be green for a given commit before any
   human sign-off gate (e.g. HUM-15). Building or testing x86 locally is the
   exception, not the default — do it only to reproduce an x86-only CI
   failure, or when the dispatch explicitly asks for it (e.g. the user
@@ -206,6 +208,9 @@ number found anywhere as a bug.
 - CI runs on `windows-latest` and must activate the MSVC developer
   environment (`vcvarsall.bat` or an equivalent action) for the matching
   architecture before invoking Make.
+- Every `uses:` in a workflow or action file is pinned to a full
+  40-character commit SHA with a trailing `# vX.Y.Z` label; local references
+  (`./.github/...`) are not pinned.
 - Do not introduce CMake or replace the Makefile-based build unless
   explicitly asked to.
 

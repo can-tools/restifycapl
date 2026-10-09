@@ -61,11 +61,21 @@ risk exists here, so each document has exactly one job:
   not two.
 - **`examples/*.can`** — working, verified CAPL code showing real usage of
   exported operations. Not prose documentation; runnable samples.
-- **`CHANGELOG.md`** — a dated, tag-linked record of what changed release
-  over release, for someone upgrading between DLL versions.
+- **`CHANGELOG.md`** — a dated record of what changed release over release, each
+  release section identified by a commit hash, for someone upgrading between DLL
+  versions.
 
 If you're about to write the same sentence in two of these files, stop —
 one of them should link to the other instead.
+
+## CAPL signatures
+
+CAPL signatures in `docs/`, `README.md`, `CHANGELOG.md`, release notes and
+source comments use CAPL declaration style: return type first, then
+`type name`, `char name[]` (`char name[][]` for two dimensions) and
+`type& name` for references, with parameter names, e.g.
+`long restifyJsonReadDouble(dword documentId, char path[], dword pathSize, float& value)`.
+A function without parameters is written `long restifyFoo()`.
 
 ## README.md
 
@@ -127,13 +137,27 @@ one of them should link to the other instead.
 
 - Format: [Keep a Changelog](https://keepachangelog.com/) — an
   `## [Unreleased]` section at the top with `Added`/`Changed`/`Fixed`
-  subheadings, moved to a dated, tag-linked section
-  (`## [vX.Y.Z] - YYYY-MM-DD`) at release time.
-- Tied to the project's existing git-tag versioning mechanism (see
-  `msvc-build-conventions`): the version in a CHANGELOG heading is never
-  hand-invented — it's the same tag that triggers the release workflow.
-  Never write a CHANGELOG heading for a version that isn't an actual git
-  tag.
+  subheadings, moved to a dated section headed
+  `## [<12-char hash>] - YYYY-MM-DD` at release time, under a fresh empty
+  `## [Unreleased]`.
+- The hash is the base commit of the cut: it comes from git
+  (`git rev-parse --short=12 origin/main`), never typed from memory. The cut
+  is squash-merged and the tag goes on the squash-merge commit, whose first
+  parent is that commit; the release workflow checks this. The version lives
+  only in the git tag (see `msvc-build-conventions`): no version is written
+  into a CHANGELOG heading.
+- Internal changes (repository, CI and tooling changes that neither a CAPL
+  user nor someone building from source would notice) go under a
+  `### Development` subsection of the same release section. It stays in
+  `CHANGELOG.md` and is removed from the GitHub release notes. No stage or
+  task IDs anywhere in `CHANGELOG.md`, including `### Development`.
+- Links inside a release section are inline and absolute, pinned to the full
+  40-character hash
+  (`https://github.com/<owner>/<repo>/blob/<full 40-char hash>/...`); a
+  reference-style link definition at the bottom of the file
+  (`[<12-char hash>]: https://github.com/<owner>/<repo>/commit/<full 40-char hash>`)
+  makes the heading clickable. Link definitions serve the headings only and
+  never appear in the release notes.
 - **Who writes what, and when:**
   - Whoever appends an entry to the export table (`cpp-implementer`, after
     `code-reviewer` sign-off) adds a one-line bullet under
@@ -141,5 +165,6 @@ one of them should link to the other instead.
     the export table changes* — not deferred, the same principle as "tests
     aren't optional, add them with the change."
   - `build-pipeline-engineer` owns the mechanics of cutting a release
-    section (Stage 13): renaming `[Unreleased]` to the tagged version and
-    date, and starting a fresh empty `[Unreleased]` above it.
+    section: renaming `[Unreleased]` to the hash heading
+    (`## [<12-char hash>] - date`) and starting a fresh empty `[Unreleased]`
+    above it.

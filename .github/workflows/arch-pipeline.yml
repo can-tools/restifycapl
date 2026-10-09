@@ -1,0 +1,159 @@
+# arch-pipeline.yml -- reusable build + test pipeline for one architecture,
+# called by ci.yml. See docs/ci-pipeline.md.
+
+name: Architecture pipeline
+
+on:
+  workflow_call:
+    inputs:
+      arch:
+        description: Target architecture, x86 or x64.
+        type: string
+        required: true
+      release-version:
+        description: X.Y.Z to build and verify as a release; empty for a development build.
+        type: string
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      # Full history: the Makefile runs git describe and git rev-list on every call.
+      - name: Checkout (full history)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Provision build environment
+        uses: ./.github/actions/provision
+        with:
+          arch: ${{ inputs.arch }}
+
+      # Same Make target run locally -- no cl.exe/rc.exe/link.exe invocation
+      # is duplicated in this YAML.
+      - name: make build-${{ inputs.arch }}
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ inputs.release-version }}
+          ARCH: ${{ inputs.arch }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $verArgs = @()
+          if (-not [string]::IsNullOrEmpty($env:RELEASE_VERSION)) {
+            if ($env:RELEASE_VERSION -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\z') {
+              throw "release-version must be X.Y.Z without leading zeros, got '$env:RELEASE_VERSION'"
+            }
+            $fields = $env:RELEASE_VERSION.Split('.')
+            foreach ($field in $fields) {
+              if ($field.Length -gt 5 -or [int]$field -gt 65535) {
+                throw "release-version field '$field' exceeds 65535 (version resource fields are 16-bit)"
+              }
+            }
+            $verArgs = @("VER_MAJOR=$($fields[0])", "VER_MINOR=$($fields[1])", "VER_BUILD=$($fields[2])", 'VER_REV=0')
+          }
+          make "build-$env:ARCH" @verArgs
+          if ($LASTEXITCODE -ne 0) { throw "make build-$env:ARCH failed (exit $LASTEXITCODE)" }
+
+      - name: Check version resource against release-version
+        if: inputs.release-version != ''
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ inputs.release-version }}
+          ARCH: ${{ inputs.arch }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:RELEASE_VERSION -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\z') {
+            throw "release-version must be X.Y.Z without leading zeros, got '$env:RELEASE_VERSION'"
+          }
+          $fields = $env:RELEASE_VERSION.Split('.')
+          $dll = (Resolve-Path -LiteralPath "build\$env:ARCH\restifycapl-$env:ARCH.dll").Path
+          $info = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($dll)
+
+          $expectedNumeric = "$($fields[0]).$($fields[1]).$($fields[2]).0"
+          $actualNumeric = "$($info.FileMajorPart).$($info.FileMinorPart).$($info.FileBuildPart).$($info.FilePrivatePart)"
+          $expectedString = "v$env:RELEASE_VERSION"
+
+          $problems = @()
+          if ($actualNumeric -ne $expectedNumeric) {
+            $problems += "numeric version is $actualNumeric, expected $expectedNumeric"
+          }
+          if ($info.FileVersion -cne $expectedString) {
+            $problems += "FileVersion is '$($info.FileVersion)', expected '$expectedString'"
+          }
+          if ($info.ProductVersion -cne $expectedString) {
+            $problems += "ProductVersion is '$($info.ProductVersion)', expected '$expectedString'"
+          }
+          if ($problems.Count -gt 0) {
+            throw "Version resource of $dll does not match release-version ${env:RELEASE_VERSION}:`n" + ($problems -join "`n")
+          }
+          Write-Host "Version resource of $dll matches $expectedNumeric / $expectedString."
+
+      - name: Check DLL exports (dumpbin /exports)
+        shell: pwsh
+        env:
+          ARCH: ${{ inputs.arch }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dll = "build\$env:ARCH\restifycapl-$env:ARCH.dll"
+          $output = & dumpbin /nologo /exports $dll
+          if ($LASTEXITCODE -ne 0) { throw "dumpbin /exports $dll failed (exit $LASTEXITCODE)" }
+
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value (@("### dumpbin /exports $dll", '', '```') + $output + @('```'))
+
+          $names = @($output | ForEach-Object {
+            if ($_ -match '^\s+\d+\s+[0-9A-F]+\s+[0-9A-F]{8}\s+(\S+)') { $Matches[1] }
+          })
+          $functionCount = $null
+          foreach ($line in $output) {
+            if ($line -match '^\s+(\d+)\s+number of functions') { $functionCount = [int]$Matches[1] }
+          }
+
+          if ($null -eq $functionCount) { throw "No 'number of functions' line found in the dumpbin output for $dll" }
+          if ($functionCount -ne 1 -or $names.Count -ne 1 -or $names[0] -cne 'caplDllGetTable4') {
+            throw "$dll must export exactly one function, caplDllGetTable4; found $functionCount function(s), named: $($names -join ', ')"
+          }
+          Write-Host "$dll exports exactly caplDllGetTable4."
+
+      - name: Upload DLL artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: restifycapl-${{ inputs.arch }}
+          path: build/${{ inputs.arch }}/restifycapl-${{ inputs.arch }}.dll
+          if-no-files-found: error
+          overwrite: true
+
+  test:
+    name: test
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      # Full history, same reason as in the build job.
+      - name: Checkout (full history)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Provision build environment
+        uses: ./.github/actions/provision
+        with:
+          arch: ${{ inputs.arch }}
+
+      # The test suite runs on every pipeline call, once per architecture,
+      # keeping bitness parity continuously enforced.
+      - name: make test (ARCH=${{ inputs.arch }})
+        shell: pwsh
+        env:
+          ARCH: ${{ inputs.arch }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          make test "ARCH=$env:ARCH"
+          if ($LASTEXITCODE -ne 0) { throw "make test ARCH=$env:ARCH failed (exit $LASTEXITCODE)" }

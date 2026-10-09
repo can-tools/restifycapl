@@ -128,7 +128,8 @@ jobs:
               echo
               echo '⚠️ This branch touches `src/module/exports.cpp`. Never have two open PRs that'
               echo 'both touch this file, and verify the human gate against the CI artifact from'
-              echo 'this PR before merge.'
+              echo 'this PR before merge. Also confirm the `export-table` check is green: it is'
+              echo 'not a required check, so a red result does not block the merge.'
             fi
 
             if [ -s "$RUNNER_TEMP/subjects.txt" ]; then
