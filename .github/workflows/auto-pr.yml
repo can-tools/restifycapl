@@ -116,6 +116,9 @@ jobs:
             echo '- [ ] CI green on both legs (`build + test (x86)`, `build + test (x64)`)'
             echo '- [ ] `code-reviewer` clean on this branch (`git diff main...HEAD`), zero Must-fix'
             echo '- [ ] Human gate passed against the PR CI artifact, if this branch has one'
+            if [ "${exports_touched}" = "true" ]; then
+              echo '- [ ] CANoe check: the CAPL nodes in capl/ compile in CANoe against the DLL from this PR'"'"'s CI artifact (author before Ready for review, or reviewer before approval)'
+            fi
             echo '- [ ] `CHANGELOG.md` `[Unreleased]` entry present'
             echo '- [ ] Branch up to date with `main`'
             echo '- [ ] Plan folded into `plan.md`, incl. any task-ID/section renumbering (last commit before marking Ready for review)'
@@ -127,8 +130,7 @@ jobs:
               echo '---'
               echo
               echo '⚠️ This branch touches `src/module/exports.cpp`. Never have two open PRs that'
-              echo 'both touch this file, and verify the human gate against the CI artifact from'
-              echo 'this PR before merge. Also confirm the `export-table` check is green: it is'
+              echo 'both touch this file. Also confirm the `export-table` check is green: it is'
               echo 'not a required check, so a red result does not block the merge.'
             fi
 
