@@ -1,216 +1,103 @@
-# Planning Report: Mermaid Syntax Analysis & CI/CD Optimization Plan (Zero-Touch & Parallel Arch Pipeline)
+# Plan: release automation and CI consistency
 
-Planning and architectural documentation for GitHub Actions workflow optimization in the `restifycapl` project.
+## 1. Goal
+The current goal is CI/CD consistency: one CHANGELOG parser in PowerShell instead of inline logic in YAML, scripts used only by CI in `scripts/ci/`, zero Python in the local toolchain, zero secrets and PATs. The direction is a zero-touch release: a bot maintains a release PR with a ready cut and a computed version, a human only verifies and merges (merge = release decision), and the tag and publication happen automatically.
 
----
+## 2. Constraints that apply to every stage
+- Version: the only source of the product version is the tag `vX.Y.Z`; no tracked file contains a version number; version fields ≤ 65535.
+- CHANGELOG: a release section has the heading `## [<12-char hash of the cut's base>] - YYYY-MM-DD`; the tag sits on the cut's squash-merge commit, whose first parent is the base named in the heading; links in the section are pinned to the full 40-character hash, with the heading's link definition at the bottom of the file; `### Development` stays in the file but does not go into the release notes. Every stage adds its internal changes (CI, tooling, repo) under `### Development` in `[Unreleased]`. This plan does not change that format.
+- `main` is protected by a ruleset: pull request required, required checks `build + test (x64)` and `build + test (x86)`, branch up to date before merging, force pushes blocked, deletions restricted. There is no ruleset on tags; there are no organization rulesets.
+- Facts from the GitHub documentation: events triggered by `GITHUB_TOKEN` do not create new workflow runs, except `workflow_dispatch` and `repository_dispatch`; a dispatch requires the Actions: write permission, granted by an explicit `permissions:` block; a dispatch `ref` may be a branch or a tag. An explicit `permissions:` block works regardless of the default "Workflow permissions" setting (confirmed by this repo's practice: `contents: write` in `release.yml`, `pull-requests: write` in `auto-pr.yml`).
+- No secrets, no PAT. No Python in the local toolchain; the parser is in PowerShell 7 (`pwsh`), available locally and on runners.
+- `scripts/ci/` contains only scripts used solely by CI. Scripts that are local, or used both locally and in CI (`setup-dev-env.ps1`, `list-export-table.ps1`), stay in `scripts/`. Neither directory is a second build system.
+- x86 and x64: every verification reports both architectures.
+- Export contract (`CAPL_DLL_INFO_LIST4`, `exports.def`) and `/MT`: no stage touches them.
+- Each stage = a separate branch from `main`, cut by `build-pipeline-engineer`; the push is done by a human. Documentation changes in the same PR as the behavior it describes. No plan identifiers (e.g. HG-x, R1, stage numbers) in tracked files outside plan documents. Code comments follow the comment discipline in `project-docs`; the plan does not dictate their content.
 
-## 1. Analysis of Mermaid Syntax & Decoding Issues
+## 3. Rule changes
 
-### Sources of decision node decoding errors in Markdown preview:
-1. **Unescaped special characters and relations inside node labels**:
-   - Nodes such as `VAL --> PARALLEL{'Uruchomienie równoległe'}:::decision` in certain Mermaid engines (e.g. VS Code Markdown Preview) caused parse errors due to single quotes `'` and unescaped format inside curly brackets `{}`.
-   - The presence of raw inequality characters `<` and `>` (e.g. `< 125,000 characters` or `make test ARCH=<arch>`) and arrow characters `->` inside node labels caused parsers to treat them as HTML tags or relation tokens, breaking the AST parser tree.
-2. **Use of multi-node operator `&` in edge relations**:
-   - Syntax like `RX86 & RX64 & RTAB --> ASM` or `FORK --> A & B & C` is a Mermaid extension that triggers `Parse error on line ...: Unexpected token &` in strict or older renderers.
-3. **Remediation rules applied in updated diagrams**:
-   - All node labels are enclosed in double quotes `""`.
-   - Inequality characters are replaced with safe HTML entities (`&lt;`, `&gt;`, `&le;`, `&ge;`).
-   - All graph connections are defined individually (line-by-line), eliminating the `&` operator.
+Approved:
+- R1. The cut mechanics are performed by a bot; `build-pipeline-engineer` owns the bot (changes the "Who writes what" line in `project-docs`).
+- R2. The manual dry run before merge is replaced by the preview in the release PR description plus CI on the same SHA; the manual dry run remains available.
+- R3. The release mode depends on the ref, not on the event: a dispatch on a tag publishes just like a tag push; a dispatch on a branch never publishes (new wording of safeguard 4 in `docs/release-process.md`).
+- R4. The labels `bump:major` / `bump:minor` / `bump:patch` on the release PR override the computed bump level (a level, not a version number).
+- R5. The branch `release/next` is reserved for the bot; manual commits on it are overwritten on rebuild.
+- R6. `[Unreleased]` on `main` is the only place where release content is edited.
+- R7. An entry in the Directory layout section of `CLAUDE.md` and in the directory conventions of the `msvc-build-conventions` skill, worded: "`scripts/ci/` — scripts invoked only by GitHub Actions workflows; never a second build system". The existing `scripts/` entry (with the `list-export-table.ps1` example) stays unchanged.
+- R8. `scripts/list-export-table.ps1` stays in `scripts/` (also used locally); its path and references do not change.
+- Release PR rebuild trigger: every push to `main`, plus `workflow_dispatch`.
+- Parser language: PowerShell.
+- Plan slug: `github-actions-optimization`; this plan replaces the previous content of `docs/work/github-actions-optimization/plans/plan.md`.
 
----
+Open: none.
 
-## 2. Target CI/CD Model (Target Flow & Optimization Architecture)
+## 4. Stages
 
-### 2.1 Key Principles
-- **Strict decoupling and parallelism of `build` and `test` in `arch-pipeline.yml`**: By design, compilation (`build`) and GoogleTest unit/integration testing (`test`) remain separate, parallel jobs on Windows runners for both architectures (x86 and x64). This guarantees environment isolation and immediate disambiguation between build failures and test failures.
-- **Rigorous quality gates**: Vector CANoe verification is formalized as a conscious Human Gate (pre-push or during PR approval).
-- **Automation of repetitive operations**: Eliminating manual changelog cutting and manual tagging while retaining strict cryptographic build provenance and security guarantees.
+### Stage 0 — baseline
+- Description: confirm that the revert of abf5d6a is complete (13 files in their pre-commit state); remove untracked leftovers in the working tree (`scripts/cut-changelog.ps1`, `scripts/cut-changelog.py`, `scripts/__pycache__/`); report discrepancies between `docs/ci-flow.md` / `docs/ci-optimized-flow.md` and reality (fixes go into the stage that changes the behavior in question).
+- Files: working tree; no changes to tracked logic.
+- Owner: `build-pipeline-engineer` (git operations — human).
+- Verification: `gate-x86` and `gate-x64` green on `main`.
+- Approval: no.
 
-### 2.2 Optimization Pillars
-1. **Accelerated Toolchain Provisioning**:
-   - Replacing `choco install make` with standalone GNU Make (fetching single binary from GitHub Releases or `actions/cache`), dropping setup time from ~60s to <2s.
-   - Native vcpkg binary caching in GitHub Actions: `VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"`. Prebuilt `/MT` static packages (`nlohmann-json`, `openssl`) are restored instantly from GHA cache.
-2. **Automated 12-char Hash Calculation and CHANGELOG Cut (Eliminating HG-4)**:
-   - A `prepare-release-changelog` script automatically retrieves `git rev-parse --short=12 origin/main`, promotes the `[Unreleased]` section to `[vX.Y.Z] - YYYY-MM-DD (hash)`, and updates diff links in `CHANGELOG.md` without manual developer intervention.
-3. **Formalized Vector CANoe Verification Gate (Quality Gate HG-3)**:
-   - Verification of libraries in CANoe remains an engineering responsibility (cannot run on cloud runners due to hardware Vector CANoe licensing).
-   - Occurs at one of two explicit checkpoints:
-     a) **Local pre-push:** developer verifies CAPL script compilation and DLL loading on a CANoe workstation prior to pushing changes touching `exports.cpp`.
-     b) **During PR approval (PR Approval Gate):** reviewer/maintainer verifies downloaded DLLs in CANoe before formal approval of the PR.
-4. **Automated Post-Merge Tagging and Zero-Touch Release in `release.yml` (Eliminating HG-6 & HG-7)**:
-   - Helper workflow or release-driven tagging upon squash-merge into `main`.
-   - Tag push triggers `release.yml`, executing validation, parallel versioned compilation (with separate build and test), export table generation, Sigstore OIDC provenance attestation, and direct release publication.
+### Stage 1 — persist the plan
+- Description: plan-writer saves this plan verbatim to `docs/work/github-actions-optimization/plans/plan.md`; a plan-only PR.
+- Owners: plan-writer; branch cut by `build-pipeline-engineer`.
+- Verification: CI green (x86 and x64).
+- Approval: yes (plan approval).
 
----
+### Stage 2 — checklist in `auto-pr.yml`
+- Description: the "HG-3 Quality Gate" line is replaced by `- [ ] CANoe check: the CAPL nodes in capl/ compile in CANoe against the DLL from this PR's CI artifact (author before Ready for review, or reviewer before approval)`; the sentence in the `exports.cpp` warning block that duplicates verification against the artifact is removed; the general human-gate line is unchanged.
+- Files: `.github/workflows/auto-pr.yml`, `CHANGELOG.md` (`### Development`).
+- Owners: `build-pipeline-engineer` → `code-reviewer`.
+- Verification: CI green on x86 and x64; review of the generated text.
+- Approval: no.
 
-## 3. Syntactically Valid Mermaid Diagrams
+### Stage 3 — `scripts/ci/` and a single CHANGELOG parser
+- Description: a new `scripts/ci/changelog.ps1` (the first file in `scripts/ci/`) with `notes` and `check` subcommands, replacing the inline Python in the `validate` job of `release.yml` with identical behavior (same conditions, messages and notes output). Fixtures in `tests/changelog/` (modeled on `tests/export-table/`), including the real v0.1.0 cut; run in CI, and `release.yml` runs them before parsing. The one-line `python3` that counts the notes' characters is replaced by a Python-free solution. The R7 entry in `CLAUDE.md` and in the `msvc-build-conventions` skill lands in the same PR. The `build-pipeline-engineer` agent already owns `scripts/`; its file changes only if `scripts/ci/` would otherwise not be unambiguously in its scope.
+- Files: `scripts/ci/changelog.ps1`, `tests/changelog/`, `.github/workflows/release.yml`, `.github/workflows/ci.yml` (fixtures job, not a required check), `CLAUDE.md`, `.claude/skills/msvc-build-conventions/SKILL.md`, `docs/release-process.md`, `docs/ci-pipeline.md`, `CHANGELOG.md` (`### Development`).
+- Owners: `build-pipeline-engineer` → `code-reviewer`.
+- Verification: fixtures green; side-by-side comparison of the old and new parser's results on the same inputs; `release.yml` dry run on the branch passes with both pipelines (x86 and x64); `gate-x86` and `gate-x64` green.
+- Approval: checkpoint before merge (release path, `CLAUDE.md` and skill).
 
-### Diagram 1: Target End-to-End Architecture
-```mermaid
-flowchart TD
-    classDef human fill:#ffe4e1,stroke:#ff69b4,stroke-width:2px;
-    classDef bot fill:#e6f3ff,stroke:#4a90e2,stroke-width:2px;
-    classDef auto fill:#d4edda,stroke:#28a745,stroke-width:2px;
-    classDef gate fill:#fff3cd,stroke:#ffc107,stroke-width:2px;
+### Stage 4 — cut and version computation
+- Description: `cut` and `next-version` subcommands in `scripts/ci/changelog.ps1`, with fixtures. `cut` is deterministic (same input → identical output). `next-version` rules at 0.x: `### Added` or `### Changed` → minor, anything else → patch, major never automatic; a `bump:*` label overrides the level. A section left with only `### Development` is not a release. No workflow uses these subcommands yet.
+- Files: `scripts/ci/changelog.ps1`, `tests/changelog/`, `CHANGELOG.md` (`### Development`).
+- Owners: `build-pipeline-engineer` → `code-reviewer`.
+- Verification: fixtures green; `gate-x86` and `gate-x64` green.
+- Approval: the computation rules are approved by this plan.
 
-    DEV["Developer: Local development (verify in CANoe pre-push if exports.cpp changed)<br/>Push commits to working branch"]:::human
-    
-    subgraph AutoPR ["auto-pr.yml"]
-        APR_GUARD{"Verify PR preconditions"}:::bot
-        APR_ACTION["Create Draft PR & checklist"]:::bot
-    end
+### Stage 5 — inputs for the automation
+- Description: `ci.yml` gets a `workflow_dispatch` trigger (the bot uses it to produce the required checks on its branch); `release.yml` selects the mode by ref (R3: tag ref → tag mode, branch ref → dry run); the dry run shows the computed version.
+- Files: `.github/workflows/ci.yml`, `.github/workflows/release.yml`, `docs/release-process.md` (new wording of safeguard 4), `docs/ci-pipeline.md`, `CHANGELOG.md` (`### Development`).
+- Owners: `build-pipeline-engineer` → `code-reviewer`.
+- Verification: the dry run on a branch shows the version and does not publish; a manual dispatch of `ci.yml` on a branch produces the `build + test (x86)` and `build + test (x64)` checks attached to the branch tip's SHA.
+- Approval: checkpoint before merge.
 
-    subgraph CI ["ci.yml (Optimized)"]
-        CI_FAST_PROV["Fast Provisioning: GHA vcpkg cache & standalone Make"]:::auto
-        
-        subgraph X86_TRACK ["x86 Track (Independent Jobs)"]
-            X86_BUILD["build-x86: Compile DLL /MT"]:::bot
-            X86_TEST["test-x86: GoogleTest x86"]:::bot
-        end
-        
-        subgraph X64_TRACK ["x64 Track (Independent Jobs)"]
-            X64_BUILD["build-x64: Compile DLL /MT"]:::bot
-            X64_TEST["test-x64: GoogleTest x64"]:::bot
-        end
-        
-        EXP_CHECK["export-table: Verify exports.cpp contract"]:::bot
-        
-        GATES{"Aggregate CI status checks (gate-x86, gate-x64)"}:::gate
-    end
+### Stage 6 — release PR and tag (one PR; the two parts only work together)
+- Description:
+  - `release-pr.yml` (trigger: `push: main` plus `workflow_dispatch`): skips a commit that is itself a merged cut; with no releasable content, closes the release PR and deletes the branch; otherwise builds `release/next` = `main` tip + a commit with the cut (`changelog.ps1 cut`), force-pushing only on change; creates or updates the PR with a description: computed version, notes preview, a checklist (CHANGELOG diff, version, green x86 and x64 checks), a note about R5 and R6; runs `gh workflow run ci.yml --ref release/next`; `concurrency` cancelling older rebuilds.
+  - `tag-release.yml` (trigger: `push: main` plus `workflow_dispatch` with an optional `version` as retry or override): detects a merged, untagged cut (heading = first parent); reads the merged PR's `bump:*` labels (read failure = no tag and a red run); computes the version, creates an annotated tag on `GITHUB_SHA` and runs `gh workflow run release.yml --ref vX.Y.Z`.
+  - Permissions: `contents: write`, `pull-requests: write`, `actions: write`. No secrets.
+- Files: `.github/workflows/release-pr.yml`, `.github/workflows/tag-release.yml`, `docs/release-process.md` (new flow and fallbacks: dispatch with `version`, manual tag push), `docs/ci-pipeline.md`, `docs/ci-flow.md`, `docs/ci-optimized-flow.md`, `.claude/skills/project-docs/SKILL.md` (R1), `CHANGELOG.md` (`### Development`).
+- Owners: `build-pipeline-engineer` → `code-reviewer`.
+- Verification: before merge — scripts on fixtures, review, `gate-x86` and `gate-x64` green. After merge (dispatched workflows must be on `main`) — the first push to `main` with content in `[Unreleased]` creates `release/next` and a PR whose heading hash equals the `main` tip; the x86 and x64 checks appear on the PR and satisfy the ruleset.
+- Approval: checkpoint before merge.
 
-    REVIEW["Human Gate: Code review & Gate HG-3 (CANoe verification if not pre-push)"]:::human
-    AUTO_MERGE["Automated merge to main with 12-char parent hash computation"]:::auto
-    AUTO_TAG["Bot: Automated tag creation vX.Y.Z on main"]:::auto
+### Stage 7 — first automated release (the next version after v0.1.0)
+- Description: a human verifies the release PR and squash-merges it; `build-pipeline-engineer` observes.
+- Verification: tag on the squash-merge commit; `release.yml` in tag mode passed both pipelines (x86 and x64); the release has 3 assets, a correct `SHA256SUMS` and verified attestations.
+- Rollback: draft-first and paths A/B in `docs/release-process.md`.
+- Approval: checkpoint before merging the release PR.
 
-    subgraph ReleasePipeline ["release.yml (Zero-Touch Release)"]
-        REL_VAL["Validate tag & changelog"]:::bot
-        REL_BUILD_X86["Compile release x86 with version (build + test)"]:::bot
-        REL_BUILD_X64["Compile release x64 with version (build + test)"]:::bot
-        REL_TABLE["Generate export table"]:::bot
-        REL_ASM["Assemble release bundle, SHA256SUMS & notes.md"]:::bot
-        REL_ATTEST["Sigstore OIDC build provenance attestation"]:::bot
-        REL_PUB["Automated GitHub Release publication"]:::auto
-    end
+## 5. Risks
+- Required checks from a dispatch: checks from a dispatch on the bot's branch are expected to count as required (attached to the SHA, matched by name). Stage 5 confirms this; if not, the effect is safe — the PR cannot be merged.
+- CI cost: every merge to `main` triggers an additional full CI run on `release/next`.
+- A miscategorized CHANGELOG entry → wrong version. Safety nets: preview in the PR description, `bump:*` labels. A published tag must never be moved; the fix is the next release.
+- Rewriting the parser on the release path (stage 3): identical behavior is required, with a side-by-side comparison of the old and new parser's results.
+- A rebase merge breaks the first-parent rule; recommended repo setting "squash only" (does not block the plan).
+- Manual commits on `release/next` disappear on rebuild (R5); this must be stated in the PR description.
+- Export contract, `/MT`, x86/x64 parity: no impact.
 
-    DEV --> APR_GUARD
-    APR_GUARD -->|Branch ahead of main & no PR| APR_ACTION
-    APR_ACTION --> CI_FAST_PROV
-    DEV --> CI_FAST_PROV
-
-    CI_FAST_PROV --> X86_BUILD
-    CI_FAST_PROV --> X86_TEST
-    CI_FAST_PROV --> X64_BUILD
-    CI_FAST_PROV --> X64_TEST
-    CI_FAST_PROV --> EXP_CHECK
-    
-    X86_BUILD --> GATES
-    X86_TEST --> GATES
-    X64_BUILD --> GATES
-    X64_TEST --> GATES
-    EXP_CHECK --> GATES
-
-    GATES --> REVIEW
-    REVIEW --> AUTO_MERGE
-    AUTO_MERGE --> AUTO_TAG
-    AUTO_TAG --> REL_VAL
-
-    REL_VAL --> REL_BUILD_X86
-    REL_VAL --> REL_BUILD_X64
-    REL_VAL --> REL_TABLE
-    REL_BUILD_X86 --> REL_ASM
-    REL_BUILD_X64 --> REL_ASM
-    REL_TABLE --> REL_ASM
-    REL_ASM --> REL_ATTEST
-    REL_ATTEST --> REL_PUB
-```
-
-### Diagram 2: Optimized `arch-pipeline.yml` (Decoupled Build & Test)
-```mermaid
-flowchart TD
-    classDef bot fill:#e6f3ff,stroke:#4a90e2,stroke-width:2px;
-    classDef opt fill:#d4edda,stroke:#28a745,stroke-width:2px;
-    classDef gate fill:#fff3cd,stroke:#ffc107,stroke-width:2px;
-
-    TRIG(["Trigger: push or pull_request"]):::bot --> FORK{"Task Fork"}:::bot
-
-    subgraph FastProvisioning ["Fast Provisioning Model"]
-        CACHE_VCPKG["vcpkg Binary Caching: x-gha backend"]:::opt
-        FAST_MAKE["Standalone GNU Make (eliminates Chocolatey overhead)"]:::opt
-    end
-
-    FORK --> FastProvisioning
-
-    subgraph ArchX86 ["arch-pipeline.yml (x86 Architecture)"]
-        X86_B["Job build-x86:<br/>• make build-x86 (/MT)<br/>• dumpbin /directives<br/>• dumpbin /exports (exactly 1 function)<br/>• Upload restifycapl-x86.dll"]:::bot
-        X86_T["Job test-x86:<br/>• make test ARCH=x86 (GoogleTest)<br/>• Isolated windows-latest runner"]:::bot
-    end
-
-    subgraph ArchX64 ["arch-pipeline.yml (x64 Architecture)"]
-        X64_B["Job build-x64:<br/>• make build-x64 (/MT)<br/>• dumpbin /directives<br/>• dumpbin /exports (exactly 1 function)<br/>• Upload restifycapl-x64.dll"]:::bot
-        X64_T["Job test-x64:<br/>• make test ARCH=x64 (GoogleTest)<br/>• Isolated windows-latest runner"]:::bot
-    end
-
-    FastProvisioning --> X86_B
-    FastProvisioning --> X86_T
-    FastProvisioning --> X64_B
-    FastProvisioning --> X64_T
-
-    subgraph ExpCheck ["Contract Verification"]
-        EXP_TAB["export-table (ubuntu-latest):<br/>list-export-table.ps1"]:::bot
-    end
-
-    FORK --> EXP_TAB
-
-    X86_B --> GATE_X86{"gate-x86"}:::gate
-    X86_T --> GATE_X86
-    X64_B --> GATE_X64{"gate-x64"}:::gate
-    X64_T --> GATE_X64
-    EXP_TAB --> GATE_ALL{"Primary CI Gate"}:::gate
-    GATE_X86 --> GATE_ALL
-    GATE_X64 --> GATE_ALL
-```
-
-### Diagram 3: Target `release.yml` (Zero-Touch Release)
-```mermaid
-flowchart TD
-    classDef bot fill:#e6f3ff,stroke:#4a90e2,stroke-width:2px;
-    classDef auto fill:#d4edda,stroke:#28a745,stroke-width:2px;
-    classDef win fill:#e8f5e9,stroke:#4caf50,stroke-width:2px;
-
-    TAG_EVT(["Event detected: push tag vX.Y.Z"]):::auto --> VAL["1. validate (ubuntu-latest):<br/>• Validate 16-bit semver format<br/>• Ancestor check against origin/main<br/>• First-parent verification GITHUB_SHA^<br/>• Extract CHANGELOG.md section"]:::bot
-
-    VAL --> RX86["2a. pipeline-x86 (arch-pipeline.yml):<br/>• build: /MT compilation, version in .rc resource<br/>• test: GoogleTest x86<br/>• Upload restifycapl-x86.dll"]:::win
-    VAL --> RX64["2b. pipeline-x64 (arch-pipeline.yml):<br/>• build: /MT compilation, version in .rc resource<br/>• test: GoogleTest x64<br/>• Upload restifycapl-x64.dll"]:::win
-    VAL --> REXP["2c. export-table (ubuntu-latest):<br/>• CAPL function table in markdown"]:::bot
-
-    RX86 --> ASM["3. assemble (ubuntu-latest):<br/>• Assemble dist/<br/>• Compute SHA256SUMS checksums<br/>• Validate notes.md length (&le; 125,000 chars)"]:::bot
-    RX64 --> ASM
-    REXP --> ASM
-
-    ASM --> ATT["4. attest (ubuntu-latest):<br/>• Sigstore OIDC build provenance<br/>• gh attestation verify with retry loop"]:::bot
-
-    ATT --> PUB["5. publish (ubuntu-latest):<br/>• Verify no existing release<br/>• Create draft & verify sha256sum -c<br/>• Atomic release publication: --draft=false"]:::auto
-```
-
----
-
-## 4. Human Gates Reduction Matrix
-
-| Gate ID | Before Optimization ([docs/ci-flow.md](file:///C:/Workspace/restifycapl/docs/ci-flow.md)) | After Optimization | Reduction Status |
-|---|---|---|---|
-| **HG-1** | Manual branch creation & push | Unchanged (developer decision) | None (Natural start of work) |
-| **HG-2** | Manual checklist review | Automated CI status checks & bot assertions | Partial (Substantive code review) |
-| **HG-3** | **Library verification in CANoe** | **Strict quality gate: local pre-push verification by developer OR verification by maintainer during PR approval (PR Approval Gate)** | **Preserved as a conscious human gate** (cannot be automated on cloud runners due to Vector CANoe hardware licensing) |
-| **HG-4** | **Manual 12-char hash entry & CHANGELOG cut** | **Automated script computing parent commit hash and formatting changelog section** | **Fully Automated (Eliminated)** |
-| **HG-5** | Manual squash-merge | Bot auto-merge upon approved review (or single-click maintainer merge) | **Optimized** |
-| **HG-6** | **Manual tag creation & push `vX.Y.Z`** | **Helper workflow or release-driven tag automation** | **Optimized** |
-| **HG-7** | Manual release verification & publishing | Automated Sigstore attestation & 7-step atomic publish workflow | **Fully Automated (Zero-Touch)** |
-
----
-
-## 5. Role Allocation and Implementation Stages
-
-- **Stage 1**: Standardization & synchronization of process documentation (`ci-flow.md` and `ci-optimized-flow.md`) -> `plan-writer` / `build-pipeline-engineer`.
-- **Stage 2**: CI provisioning optimization (standalone GNU make, vcpkg `x-gha` cache) strictly preserving parallel `build` and `test` jobs and `/MT` flags -> `build-pipeline-engineer`. Checkpoint: verify no `/MT` regressions.
-- **Stage 3**: Automated 12-char hash calculation and `CHANGELOG.md` header formatting on `chore/` branches -> `build-pipeline-engineer` + `test-engineer`.
-- **Stage 4**: Release automation and publication hardening (Zero-Touch Release) preserving all 7 atomic publishing safeguards in `publish` -> `build-pipeline-engineer`. Checkpoint: verify test release on staging environment.
+## 6. Open questions
+None. Non-blocking repo settings to consider: "squash only", number of required PR approvals.
