@@ -13,6 +13,7 @@ repository; there are no version numbers in files.
 The export table contract covers rows 0–29 in [src/module/exports.cpp](https://github.com/can-tools/restifycapl/blob/0d0f52240d4976240efcd619384e770c09abda2c/src/module/exports.cpp).
 
 Verification status:
+
 - Unit tests pass on both architectures (x86 and x64) outside CANoe.
 - Export table checker verifies all 12 structural and semantic checks on [src/module/exports.cpp](https://github.com/can-tools/restifycapl/blob/0d0f52240d4976240efcd619384e770c09abda2c/src/module/exports.cpp).
 - CANoe verification: x64 build compiled and verified in CANoe (rows 1–29 recognized, wrapper libraries and verification nodes compile); x86 has not been loaded by CANoe (covered by CI only); no measurement has ever run, and runtime behavior has not been observed in CANoe.
