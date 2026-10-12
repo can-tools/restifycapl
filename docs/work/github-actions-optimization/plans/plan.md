@@ -47,10 +47,10 @@ Open: none.
 - Approval: yes (plan approval).
 
 ### Stage 2 — checklist in `auto-pr.yml`
-- Description: the "HG-3 Quality Gate" line is replaced by `- [ ] CANoe check: the CAPL nodes in capl/ compile in CANoe against the DLL from this PR's CI artifact (author before Ready for review, or reviewer before approval)`; the sentence in the `exports.cpp` warning block that duplicates verification against the artifact is removed; the general human-gate line is unchanged.
+- Description: below the general line `- [ ] Human gate passed against the PR CI artifact, if this branch has one` (unchanged), add `- [ ] CANoe check: the CAPL nodes in capl/ compile in CANoe against the DLL from this PR's CI artifact (author before Ready for review, or reviewer before approval)`, printed only when the branch touches `src/module/exports.cpp`; remove from the `exports.cpp` warning block the clause that duplicates verification against the CI artifact.
 - Files: `.github/workflows/auto-pr.yml`, `CHANGELOG.md` (`### Development`).
 - Owners: `build-pipeline-engineer` → `code-reviewer`.
-- Verification: CI green on x86 and x64; review of the generated text.
+- Verification: CI green on x86 and x64; the generated PR body is reviewed for both cases — a branch touching `src/module/exports.cpp` (CANoe check line present) and a branch not touching it (line absent).
 - Approval: no.
 
 ### Stage 3 — `scripts/ci/` and a single CHANGELOG parser
@@ -79,7 +79,7 @@ Open: none.
   - `release-pr.yml` (trigger: `push: main` plus `workflow_dispatch`): skips a commit that is itself a merged cut; with no releasable content, closes the release PR and deletes the branch; otherwise builds `release/next` = `main` tip + a commit with the cut (`changelog.ps1 cut`), force-pushing only on change; creates or updates the PR with a description: computed version, notes preview, a checklist (CHANGELOG diff, version, green x86 and x64 checks), a note about R5 and R6; runs `gh workflow run ci.yml --ref release/next`; `concurrency` cancelling older rebuilds.
   - `tag-release.yml` (trigger: `push: main` plus `workflow_dispatch` with an optional `version` as retry or override): detects a merged, untagged cut (heading = first parent); reads the merged PR's `bump:*` labels (read failure = no tag and a red run); computes the version, creates an annotated tag on `GITHUB_SHA` and runs `gh workflow run release.yml --ref vX.Y.Z`.
   - Permissions: `contents: write`, `pull-requests: write`, `actions: write`. No secrets.
-- Files: `.github/workflows/release-pr.yml`, `.github/workflows/tag-release.yml`, `docs/release-process.md` (new flow and fallbacks: dispatch with `version`, manual tag push), `docs/ci-pipeline.md`, `docs/ci-flow.md`, `docs/ci-optimized-flow.md`, `.claude/skills/project-docs/SKILL.md` (R1), `CHANGELOG.md` (`### Development`).
+- Files: `.github/workflows/release-pr.yml`, `.github/workflows/tag-release.yml`, `docs/release-process.md` (new flow and fallbacks: dispatch with `version`, manual tag push), `docs/ci-pipeline.md`, `docs/ci-flow.md`, `docs/ci-optimized-flow.md` (rewritten to this plan's target state; content this plan does not implement — vcpkg `x-gha` caching, standalone GNU Make, bot auto-merge, the earlier script-based CHANGELOG automation — is removed), `.claude/skills/project-docs/SKILL.md` (R1), `CHANGELOG.md` (`### Development`).
 - Owners: `build-pipeline-engineer` → `code-reviewer`.
 - Verification: before merge — scripts on fixtures, review, `gate-x86` and `gate-x64` green. After merge (dispatched workflows must be on `main`) — the first push to `main` with content in `[Unreleased]` creates `release/next` and a PR whose heading hash equals the `main` tip; the x86 and x64 checks appear on the PR and satisfy the ruleset.
 - Approval: checkpoint before merge.

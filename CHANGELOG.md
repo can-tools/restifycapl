@@ -8,6 +8,14 @@ repository; there are no version numbers in files.
 
 ## [Unreleased]
 
+### Development
+
+- [.github/workflows/auto-pr.yml](.github/workflows/auto-pr.yml): the draft PR
+  checklist gains a CANoe check item (the CAPL nodes in `capl/` compile in CANoe
+  against the DLL from the PR's CI artifact), shown when the branch touches
+  `src/module/exports.cpp`, and the `exports.cpp` warning no longer repeats the
+  artifact verification the checklist now states.
+
 ## [0d0f52240d49] - 2026-10-09
 
 The export table contract covers rows 0–29 in [src/module/exports.cpp](https://github.com/can-tools/restifycapl/blob/0d0f52240d4976240efcd619384e770c09abda2c/src/module/exports.cpp).
