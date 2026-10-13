@@ -1,0 +1,40 @@
+{
+  "mode": "dry-run",
+  "eol": "lf",
+  "git": {
+    "sha": "0e362df99ef1f843563e9b30b144eaf48c3f6d72",
+    "commits": [
+      "0e362df99ef1f843563e9b30b144eaf48c3f6d72",
+      "0d0f52240d4976240efcd619384e770c09abda2c",
+      "3b5db8f10db3e805f6e3b05c5e53a3721dd87d75"
+    ],
+    "tip": "0e362df99ef1f843563e9b30b144eaf48c3f6d72",
+    "ancestors": [
+      "0d0f52240d4976240efcd619384e770c09abda2c",
+      "0e362df99ef1f843563e9b30b144eaf48c3f6d72"
+    ],
+    "chain": [
+      "0e362df99ef1f843563e9b30b144eaf48c3f6d72",
+      "0d0f52240d4976240efcd619384e770c09abda2c",
+      "3b5db8f10db3e805f6e3b05c5e53a3721dd87d75"
+    ],
+    "changelogAt": [
+      "0e362df99ef1f843563e9b30b144eaf48c3f6d72"
+    ],
+    "tags": {
+      "0e362df99ef1f843563e9b30b144eaf48c3f6d72": [
+        "v0.1.0"
+      ]
+    }
+  },
+  "expect": {
+    "exit": 0,
+    "output": [
+      "::warning::The newest CHANGELOG section ## [0d0f52240d49] - 2026-10-09 was already released as v0.1.0; this dry run previews its notes again. Add entries to [Unreleased] for the next release."
+    ],
+    "summary": [
+      "The newest CHANGELOG section ## [0d0f52240d49] - 2026-10-09 was already released as v0.1.0; this dry run previews its notes again. Add entries to [Unreleased] for the next release.",
+      "Release notes taken from the CHANGELOG section `## [0d0f52240d49] - 2026-10-09` (dry-run mode)."
+    ]
+  }
+}

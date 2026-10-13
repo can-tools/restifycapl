@@ -26,6 +26,7 @@ flowchart TD
     CI_X86["Bot: pipeline-x86<br/>(arch-pipeline.yml: build + test)"]:::bot
     CI_X64["Bot: pipeline-x64<br/>(arch-pipeline.yml: build + test)"]:::bot
     CI_TABLE["Bot: export-table<br/>(verify exports.cpp)"]:::bot
+    CI_CLFIX["Bot: changelog-fixtures<br/>(CHANGELOG parser fixtures)"]:::bot
     
     GATE_X86{"Gate: gate-x86<br/>Required check"}:::gate
     GATE_X64{"Gate: gate-x64<br/>Required check"}:::gate
@@ -58,6 +59,7 @@ flowchart TD
     CI_TRIGGER --> CI_X86
     CI_TRIGGER --> CI_X64
     CI_TRIGGER --> CI_TABLE
+    CI_TRIGGER --> CI_CLFIX
     CI_X86 --> GATE_X86
     CI_X64 --> GATE_X64
     
@@ -110,7 +112,7 @@ flowchart TD
 
 ## 3. Detailed Flow: `ci.yml` and `arch-pipeline.yml`
 
-CI continuously enforces architecture parity (x86 and x64) as well as compliance with the Vector CANoe export contract. The `build` and `test` jobs are **strictly separated and executed in parallel** on dedicated `windows-latest` runners.
+CI continuously enforces architecture parity (x86 and x64) as well as compliance with the Vector CANoe export contract. The `build` and `test` jobs are **strictly separated and executed in parallel** on dedicated `windows-latest` runners. The `export-table` and `changelog-fixtures` jobs run on `ubuntu-latest`; neither is a gate or a required check.
 
 ```mermaid
 flowchart TD
@@ -158,6 +160,9 @@ flowchart TD
 
     %% export-table check
     FORK --> EXP_JOB["export-table (ubuntu-latest)<br/>list-export-table.ps1 on exports.cpp<br/>and tests/export-table/ fixtures"]:::bot
+
+    %% changelog-fixtures check
+    FORK --> CLFIX_JOB["changelog-fixtures (ubuntu-latest)<br/>changelog.ps1 fixtures on tests/changelog/"]:::bot
 
     %% Gates
     ArchPipelineX86 --> GATE_X86{"gate-x86 (ubuntu-latest)<br/>if: always()<br/>Requires pipeline-x86 == success"}:::gate
@@ -266,7 +271,7 @@ flowchart TD
 
 | Job | Environment (`runs-on`) | Permissions (`permissions`) | Key Tasks & Assertions | Generated / Consumed Artifacts |
 |---|---|---|---|---|
-| `validate` | `ubuntu-latest` | `contents: read` | <ul><li>Full repository checkout (`fetch-depth: 0` – required for ancestor relationship check against `origin/main`).</li><li>Mode detection: tag `push` vs `dry-run` (`workflow_dispatch`).</li><li>For tag mode: validate semver regex format `vX.Y.Z` (no leading zeroes, each field $\le 65535$).</li><li>Assert `git merge-base --is-ancestor $GITHUB_SHA origin/main` (tag commit must be integrated into `main`).</li><li>Verify first parent (`GITHUB_SHA^` – squash-merge of the cut).</li><li>Check no existing release in GitHub API (must return 404).</li><li>Extract section from `CHANGELOG.md` (inline Python script), strip `### Development` header, and assert non-empty.</li></ul> | **Produces:** `release-notes-body` (`notes-body.md`).<br/>**Outputs:** `tag`, `version`. |
+| `validate` | `ubuntu-latest` | `contents: read` | <ul><li>Full repository checkout (`fetch-depth: 0` – required for ancestor relationship check against `origin/main`).</li><li>Mode detection: tag `push` vs `dry-run` (`workflow_dispatch`).</li><li>For tag mode: validate semver regex format `vX.Y.Z` (no leading zeroes, each field $\le 65535$).</li><li>Assert `git merge-base --is-ancestor $GITHUB_SHA origin/main` (tag commit must be integrated into `main`).</li><li>Verify first parent (`GITHUB_SHA^` – squash-merge of the cut).</li><li>Check no existing release in GitHub API (must return 404).</li><li>Run the fixtures in `tests/changelog/` first, then extract the section from `CHANGELOG.md` with `scripts/ci/changelog.ps1 notes`, strip the `### Development` block, and assert non-empty.</li></ul> | **Produces:** `release-notes-body` (`notes-body.md`).<br/>**Outputs:** `tag`, `version`. |
 | `pipeline-x86` | Reusable workflow: `arch-pipeline.yml` (`windows-latest`) | `contents: read` | <ul><li>Runs two parallel jobs: `build` and `test` on independent Windows runners.</li><li>In `build`: MSVC `/MT` compilation (static CRT), inject version from tag into `restifycapl.rc`, verify directive flags, inspect export table (`dumpbin /exports` – exactly 1 symbol: `caplDllGetTable4`).</li><li>In `test`: provision test environment and execute full GoogleTest suite for x86.</li></ul> | **Produces:** `restifycapl-x86` (`restifycapl-x86.dll`). |
 | `pipeline-x64` | Reusable workflow: `arch-pipeline.yml` (`windows-latest`) | `contents: read` | <ul><li>Identical scope to x86, but compiled and tested natively for 64-bit architecture (`x64`).</li><li>Guarantees strict binary and functional parity across architectures.</li></ul> | **Produces:** `restifycapl-x64` (`restifycapl-x64.dll`). |
 | `export-table` | `ubuntu-latest` | `contents: read` | <ul><li>Runs composite action `.github/actions/export-table`.</li><li>Parses `src/exports.cpp` and runs regression tests against `tests/export-table/` fixtures.</li><li>Generates formatted Markdown table containing CAPL function names, return types, and parameter signatures.</li></ul> | **Produces:** `export-table-markdown` (`export-table.md`). |

@@ -12,7 +12,7 @@ The current goal is CI/CD consistency: one CHANGELOG parser in PowerShell instea
 - `scripts/ci/` contains only scripts used solely by CI. Scripts that are local, or used both locally and in CI (`setup-dev-env.ps1`, `list-export-table.ps1`), stay in `scripts/`. Neither directory is a second build system.
 - x86 and x64: every verification reports both architectures.
 - Export contract (`CAPL_DLL_INFO_LIST4`, `exports.def`) and `/MT`: no stage touches them.
-- Each stage = a separate branch from `main`, cut by `build-pipeline-engineer`; the push is done by a human. Documentation changes in the same PR as the behavior it describes. No plan identifiers (e.g. HG-x, R1, stage numbers) in tracked files outside plan documents. Code comments follow the comment discipline in `project-docs`; the plan does not dictate their content.
+- Each stage = a separate branch from `main`, cut by `build-pipeline-engineer`; the push is done by a human. Documentation changes in the same PR as the behavior it describes. No plan identifiers (e.g. HG-x, R1, stage numbers) in tracked files outside plan documents, except the one-line section breadcrumbs in `docs/<topic>.md` that `project-docs` requires, written as `(decided during github-actions-optimization Stage N)`. Code comments follow the comment discipline in `project-docs`; the plan does not dictate their content.
 
 ## 3. Rule changes
 

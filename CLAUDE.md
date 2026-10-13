@@ -86,6 +86,8 @@ capl/                   CAPL framework (preliminary): *.can verification nodes,
                           committed (.gitkeep only)
 scripts/                environment setup and small repo helpers
                           (e.g. list-export-table.ps1); never a second build system
+scripts/ci/             scripts invoked only by GitHub Actions workflows;
+                          never a second build system
 docs/                   project documentation
 ```
 
