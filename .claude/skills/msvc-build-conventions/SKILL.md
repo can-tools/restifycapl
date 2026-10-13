@@ -46,6 +46,8 @@ include/vendor/          third-party headers (json.hpp, capl-dll-sdk/,
 scripts/                 environment setup and small repo helpers
                          (e.g. list-export-table.ps1); never a second
                          build system
+scripts/ci/              scripts invoked only by GitHub Actions workflows;
+                         never a second build system
 ```
 
 **`.gitkeep` lifecycle.** A `.gitkeep` is removed in the same change that

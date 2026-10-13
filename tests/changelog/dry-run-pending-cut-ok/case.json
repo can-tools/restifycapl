@@ -1,0 +1,29 @@
+{
+  "mode": "dry-run",
+  "eol": "lf",
+  "git": {
+    "sha": "0123456789abcdef0123456789abcdef01234567",
+    "ancestors": [
+      "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+      "0123456789abcdef0123456789abcdef01234567",
+      "fedcba9876543210fedcba9876543210fedcba98"
+    ],
+    "tip": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+    "commits": [
+      "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+      "0123456789abcdef0123456789abcdef01234567",
+      "fedcba9876543210fedcba9876543210fedcba98"
+    ],
+    "chain": [
+      "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+      "fedcba9876543210fedcba9876543210fedcba98"
+    ]
+  },
+  "expect": {
+    "exit": 0,
+    "output": [],
+    "summary": [
+      "Release notes taken from the CHANGELOG section `## [a1b2c3d4e5f6] - 2026-02-02` (dry-run mode)."
+    ]
+  }
+}

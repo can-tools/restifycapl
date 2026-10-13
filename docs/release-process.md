@@ -86,7 +86,7 @@ ways:
 
 | Job | Runs on | Purpose |
 |---|---|---|
-| `validate` | Linux | Tag mode: tag format `vX.Y.Z`, each field at most 65535, tagged commit is an ancestor of `origin/main`, no published release for the tag, the tagged commit has a parent, exactly one CHANGELOG hash heading matches that first parent, with non-empty notes. Dry run: the heading check against `origin/main` described under Dry run. Both modes: extract the notes body. |
+| `validate` | Linux | Tag mode: tag format `vX.Y.Z`, each field at most 65535, tagged commit is an ancestor of `origin/main`, no published release for the tag, the tagged commit has a parent, exactly one CHANGELOG hash heading matches that first parent, with non-empty notes. Dry run: the heading check against `origin/main` described under Dry run. Both modes (tag and dry run): run the CHANGELOG fixtures first, where a red fixture fails `validate` and so blocks the release, then extract the notes body with `scripts/ci/changelog.ps1 notes`. |
 | `pipeline-x86`, `pipeline-x64` | Windows | `arch-pipeline.yml` with `release-version` set to `X.Y.Z` in tag mode, empty in a dry run. |
 | `export-table` | Linux | The same composite action `ci.yml` uses; uploads the generated markdown. |
 | `assemble` | Linux | `SHA256SUMS`, `notes.md` (at most 125,000 characters), both written to the job summary. No rebuild after this point. |
@@ -100,6 +100,9 @@ attestations.
 Every job that runs `make` and `validate` check out with `fetch-depth: 0`:
 the Makefile runs `git` on every call and the ancestor check needs
 `origin/main`. The other jobs download artifacts and need no checkout.
+
+The section selection, the hash-heading checks and the notes body come from
+`scripts/ci/changelog.ps1` (`pwsh` 7); `tests/changelog/` holds its fixtures.
 
 A hash heading has the form `## [<12 hex characters>] - YYYY-MM-DD`; the
 parent of a tagged merge commit is its first parent. CHANGELOG matching is

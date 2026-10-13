@@ -71,3 +71,15 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/export-table
+
+  # Not a gate and not a required check: no gate waits for it. See the
+  # changelog-fixtures section of docs/ci-pipeline.md.
+  changelog-fixtures:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Run the CHANGELOG fixtures
+        shell: bash
+        run: pwsh -NoProfile -File scripts/ci/changelog.ps1 fixtures -FixtureDir tests/changelog

@@ -1,0 +1,20 @@
+{
+  "mode": "tag",
+  "eol": "lf",
+  "git": {
+    "sha": "0123456789abcdef0123456789abcdef01234567",
+    "failures": {
+      "rev-parse 0123456789abcdef0123456789abcdef01234567^": {
+        "code": 128,
+        "stderr": "fatal: ambiguous argument '0123456789abcdef0123456789abcdef01234567^': unknown revision or path not in the working tree."
+      }
+    }
+  },
+  "expect": {
+    "exit": 1,
+    "output": [
+      "::error::git rev-parse 0123456789abcdef0123456789abcdef01234567^ failed: fatal: ambiguous argument '0123456789abcdef0123456789abcdef01234567^': unknown revision or path not in the working tree."
+    ],
+    "summary": []
+  }
+}

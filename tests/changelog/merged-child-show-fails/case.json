@@ -1,0 +1,31 @@
+{
+  "mode": "dry-run",
+  "eol": "lf",
+  "git": {
+    "sha": "0123456789abcdef0123456789abcdef01234567",
+    "tip": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+    "commits": [
+      "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+      "0123456789abcdef0123456789abcdef01234567",
+      "fedcba9876543210fedcba9876543210fedcba98"
+    ],
+    "ancestors": [
+      "0123456789abcdef0123456789abcdef01234567",
+      "fedcba9876543210fedcba9876543210fedcba98"
+    ],
+    "chain": [
+      "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+      "fedcba9876543210fedcba9876543210fedcba98"
+    ],
+    "changelogAt": [],
+    "tags": {}
+  },
+  "expect": {
+    "exit": 1,
+    "output": [
+      "::error::the heading ## [fedcba987654] - 2026-02-02 names fedcba987654, but the origin/main tip is a1b2c3d4e5f6; main has moved: merge main into the cut branch, then rewrite the heading hash and the links to a1b2c3d4e5f6",
+      "::error::the cut branch does not contain the origin/main tip a1b2c3d4e5f6; merge main into the branch so the dry run builds what the squash merge will produce"
+    ],
+    "summary": []
+  }
+}

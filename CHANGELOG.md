@@ -15,6 +15,14 @@ repository; there are no version numbers in files.
   against the DLL from the PR's CI artifact), shown when the branch touches
   `src/module/exports.cpp`, and the `exports.cpp` warning no longer repeats the
   artifact verification the checklist now states.
+- [scripts/ci/changelog.ps1](scripts/ci/changelog.ps1): the CHANGELOG section
+  selection and cut checks of the `Release` workflow's `validate` job now run
+  from this PowerShell 7 script instead of inline Python, with the same
+  conditions, messages and notes output; `scripts/ci/` is the home for scripts
+  that only workflows invoke. The release notes' character count no longer uses
+  Python either. Fixtures in [tests/changelog](tests/changelog), including the
+  first release's cut, run in the `changelog-fixtures` job of `ci.yml` (not a
+  required check) and before the notes are extracted in `release.yml`.
 
 ## [0d0f52240d49] - 2026-10-09
 

@@ -173,6 +173,23 @@ fixture. The script exits 0 when everything passed, 1 when a check or fixture
 failed, and 2 on a usage or I/O error. It needs only text processing, which is
 why the job runs on Linux.
 
+## The changelog-fixtures job (decided during github-actions-optimization Stage 3)
+
+`ci.yml` has a `changelog-fixtures` job on `ubuntu-latest` (`pwsh` 7, default
+shallow checkout, `permissions: contents: read`) that runs
+`scripts/ci/changelog.ps1 fixtures -FixtureDir tests/changelog`. The release
+workflow's `validate` job runs the same command before it parses
+`CHANGELOG.md`. Each `tests/changelog/<case>/` directory holds `CHANGELOG.md`,
+`case.json` (mode, line endings, the simulated git history, the expected exit
+code, `::` output lines and summary lines) and, for a successful case,
+`expected-notes.md`. The runner replaces git with the case's simulated history,
+so the cases need no repository; line endings are applied in memory, so the
+result does not depend on the checkout's `eol` setting. Only the real git
+calls are not covered by the fixtures; the release workflow's dry run covers
+them. The job is not a gate and not a required check, and no gate waits for
+it. The script exits 0 when every case matched, 1 when one did not, and 2 on a
+usage error.
+
 ## `ci.yml` never calls `scripts/setup-dev-env.ps1` (found during Stage 6/7, BPE-24)
 
 That script provisions a local development machine: installing MSVC Build
