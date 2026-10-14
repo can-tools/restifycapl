@@ -10,6 +10,15 @@ repository; there are no version numbers in files.
 
 ### Development
 
+- [.github/workflows/ci.yml](.github/workflows/ci.yml) can now be started with
+  `workflow_dispatch`, which attaches the `build + test (x86)` and
+  `build + test (x64)` checks to the dispatched branch's tip.
+  [.github/workflows/release.yml](.github/workflows/release.yml) now picks its
+  mode from the ref instead of the event: a tag ref publishes (a tag push, or a
+  dispatch on the tag) and a branch ref is a dry run that never publishes. The
+  dry run's `validate` summary shows the version that
+  [scripts/ci/changelog.ps1](scripts/ci/changelog.ps1) `next-version` computes
+  from `[Unreleased]`. See [docs/release-process.md](docs/release-process.md).
 - [.github/workflows/auto-pr.yml](.github/workflows/auto-pr.yml): the draft PR
   checklist gains a CANoe check item (the CAPL nodes in `capl/` compile in CANoe
   against the DLL from the PR's CI artifact), shown when the branch touches

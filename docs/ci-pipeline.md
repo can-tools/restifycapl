@@ -104,6 +104,17 @@ race `release.yml`. A branch filter means tag pushes no longer match `push`
 at all. The four prefixes here must stay in sync with `auto-pr.yml`'s
 trigger filter and the `stage-branch` skill's naming convention.
 
+## `ci.yml` can be dispatched (decided during github-actions-optimization Stage 5)
+
+`ci.yml` also has a `workflow_dispatch` trigger without inputs. A dispatch on
+a branch runs the same jobs as a push and attaches `build + test (x86)` and
+`build + test (x64)` to that branch's tip commit, so a branch that no `push`
+filter covers can still get the required checks. Events created with
+`GITHUB_TOKEN` start no new runs except `workflow_dispatch` and
+`repository_dispatch`, and dispatching needs `actions: write`. A check from a
+dispatch is expected to satisfy the branch ruleset, which matches by name;
+this is to be confirmed on the first branch that relies on it.
+
 ## No concurrency block: every run completes (decided during Stage 14, OQ13)
 
 `ci.yml` has no `concurrency` block, so a later push never cancels an

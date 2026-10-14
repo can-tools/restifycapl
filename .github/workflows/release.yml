@@ -1,5 +1,6 @@
-# release.yml -- tag-driven release of the two DLLs; workflow_dispatch is a dry
-# run that never publishes. See docs/release-process.md.
+# release.yml -- release of the two DLLs. The mode follows the ref: a tag ref
+# (pushed or dispatched) publishes, a branch ref is a dry run that never does.
+# See docs/release-process.md.
 
 name: Release
 
@@ -34,7 +35,7 @@ jobs:
         id: mode
         shell: bash
         run: |
-          if [ "$GITHUB_EVENT_NAME" = "push" ]; then mode=tag; else mode=dry-run; fi
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then mode=tag; else mode=dry-run; fi
           echo "mode=$mode" >> "$GITHUB_OUTPUT"
 
       - name: Validate the tag
@@ -91,6 +92,31 @@ jobs:
         env:
           MODE: ${{ steps.mode.outputs.mode }}
         run: pwsh -NoProfile -File scripts/ci/changelog.ps1 notes -Mode "$MODE" -Sha "$GITHUB_SHA" -Output "$RUNNER_TEMP/notes-body.md"
+
+      - name: Show the version
+        shell: bash
+        env:
+          MODE: ${{ steps.mode.outputs.mode }}
+          TAG_VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          # No -e on purpose: the step only informs, and the exit status of next-version is handled explicitly.
+          set -uo pipefail
+          if [ "$MODE" = "tag" ]; then
+            printf "%s\n\n" "Version $TAG_VERSION, taken from the tag." >> "$GITHUB_STEP_SUMMARY"
+          else
+            next=$(pwsh -NoProfile -File scripts/ci/changelog.ps1 next-version)
+            code=$?
+            if [ "$code" -eq 0 ]; then
+              printf "%s\n\n" "Next version computed from [Unreleased], with no bump label: $next. A dry run publishes nothing." >> "$GITHUB_STEP_SUMMARY"
+            elif [ "$code" -eq 1 ]; then
+              reason=$(printf '%s\n' "$next" | sed 's/^::error:://')
+              printf "%s\n\n" "No next version can be computed from [Unreleased]: $reason" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "::warning::next-version failed with exit code $code"
+              printf "%s\n\n" "next-version failed with exit code $code; see the log of this step." >> "$GITHUB_STEP_SUMMARY"
+            fi
+          fi
+          exit 0
 
       - name: Upload the notes body
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
@@ -266,7 +292,7 @@ jobs:
 
   publish:
     needs: [validate, export-table, assemble, attest]
-    if: github.event_name == 'push' && github.ref_type == 'tag'
+    if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     permissions:
       contents: write
