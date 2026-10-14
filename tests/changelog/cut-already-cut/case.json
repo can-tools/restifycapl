@@ -1,0 +1,14 @@
+{
+  "command": "cut",
+  "eol": "lf",
+  "params": {
+    "base": "1234567890abcdef1234567890abcdef12345678",
+    "date": "2026-11-01"
+  },
+  "expect": {
+    "exit": 1,
+    "output": [
+      "::error::\"## [Unreleased]\" has nothing to release once \"### Development\" is removed (an already cut file looks the same)"
+    ]
+  }
+}

@@ -23,6 +23,22 @@ repository; there are no version numbers in files.
   Python either. Fixtures in [tests/changelog](tests/changelog), including the
   first release's cut, run in the `changelog-fixtures` job of `ci.yml` (not a
   required check) and before the notes are extracted in `release.yml`.
+- [scripts/ci/changelog.ps1](scripts/ci/changelog.ps1): new `cut` and
+  `next-version` subcommands. `cut` turns `[Unreleased]` into the hash-headed
+  release section the way the hand-made cut does: a fresh empty `[Unreleased]`
+  above it, relative inline links pinned to the full hash (code spans and
+  fenced code blocks are left alone; reference-style links are refused, as is
+  a fenced block with a line that `notes` would read as the end of the section
+  or the start or end of the `### Development` block), and the heading's link
+  definition added above the existing ones at the end of the file. It refuses
+  a section with nothing but `### Development`.
+  `next-version` prints the next `X.Y.Z` from the highest `vX.Y.Z` tag and the
+  categories in `[Unreleased]`: `### Added`, `### Changed` or `### Deprecated`
+  give a minor version, anything else a patch version, `### Removed` needs a
+  `bump:*` label to decide, and a label overrides the level. Tags that look
+  like a version but cannot be a release tag are skipped with a warning on
+  stderr. Nothing calls them yet; their cases are in
+  [tests/changelog](tests/changelog).
 
 ## [0d0f52240d49] - 2026-10-09
 

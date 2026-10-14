@@ -1,0 +1,16 @@
+{
+  "command": "next-version",
+  "eol": "lf",
+  "params": {
+    "label": "bump:minor"
+  },
+  "git": {
+    "allTags": ["v0.1.0"]
+  },
+  "expect": {
+    "exit": 1,
+    "output": [
+      "::error::\"## [Unreleased]\" has nothing to release once \"### Development\" is removed (an already cut file looks the same)"
+    ]
+  }
+}

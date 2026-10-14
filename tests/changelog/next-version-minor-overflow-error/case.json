@@ -1,0 +1,13 @@
+{
+  "command": "next-version",
+  "eol": "lf",
+  "git": {
+    "allTags": ["v0.65535.3"]
+  },
+  "expect": {
+    "exit": 1,
+    "output": [
+      "::error::the next version 0.65536.0 has a field above 65535 (version resource fields are 16-bit)"
+    ]
+  }
+}

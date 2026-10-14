@@ -1,0 +1,13 @@
+{
+  "command": "next-version",
+  "eol": "lf",
+  "git": {
+    "allTags": ["v0.9.9"]
+  },
+  "expect": {
+    "exit": 0,
+    "output": [
+      "0.10.0"
+    ]
+  }
+}

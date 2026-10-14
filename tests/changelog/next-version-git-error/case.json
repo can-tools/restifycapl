@@ -1,0 +1,18 @@
+{
+  "command": "next-version",
+  "eol": "lf",
+  "git": {
+    "failures": {
+      "tag --list": {
+        "code": 128,
+        "stderr": "fatal: not a git repository"
+      }
+    }
+  },
+  "expect": {
+    "exit": 1,
+    "output": [
+      "::error::git tag --list failed: fatal: not a git repository"
+    ]
+  }
+}

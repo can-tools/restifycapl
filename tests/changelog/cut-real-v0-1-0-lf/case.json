@@ -1,0 +1,13 @@
+{
+  "command": "cut",
+  "eol": "lf",
+  "params": {
+    "base": "0d0f52240d4976240efcd619384e770c09abda2c",
+    "date": "2026-10-09",
+    "repoUrl": "https://github.com/can-tools/restifycapl"
+  },
+  "expect": {
+    "exit": 0,
+    "output": []
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "command": "next-version",
+  "eol": "lf",
+  "git": {
+    "allTags": ["v1.2", "release-1", "V0.1.0"]
+  },
+  "expect": {
+    "exit": 1,
+    "output": [
+      "::error::no tag of the form vX.Y.Z found; fetch the tags (a shallow checkout has none) or tag the first release by hand"
+    ]
+  }
+}

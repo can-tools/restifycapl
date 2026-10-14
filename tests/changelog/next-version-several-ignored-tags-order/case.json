@@ -1,0 +1,19 @@
+{
+  "command": "next-version",
+  "eol": "lf",
+  "git": {
+    "allTags": ["v0.1.0", "v0.70000.0", "v007.0.0", "v01.2.3", "v99999999999999999999.0.0"]
+  },
+  "expect": {
+    "exit": 0,
+    "output": [
+      "0.1.1"
+    ],
+    "stderr": [
+      "ignored tag v0.70000.0: a field is above 65535",
+      "ignored tag v007.0.0: a field has a leading zero",
+      "ignored tag v01.2.3: a field has a leading zero",
+      "ignored tag v99999999999999999999.0.0: a field is above 65535"
+    ]
+  }
+}

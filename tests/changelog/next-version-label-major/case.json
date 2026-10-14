@@ -1,0 +1,16 @@
+{
+  "command": "next-version",
+  "eol": "lf",
+  "params": {
+    "label": "bump:major"
+  },
+  "git": {
+    "allTags": ["v0.1.0"]
+  },
+  "expect": {
+    "exit": 0,
+    "output": [
+      "1.0.0"
+    ]
+  }
+}

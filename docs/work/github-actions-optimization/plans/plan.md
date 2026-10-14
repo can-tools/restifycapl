@@ -61,7 +61,7 @@ Open: none.
 - Approval: checkpoint before merge (release path, `CLAUDE.md` and skill).
 
 ### Stage 4 — cut and version computation
-- Description: `cut` and `next-version` subcommands in `scripts/ci/changelog.ps1`, with fixtures. `cut` is deterministic (same input → identical output). `next-version` rules at 0.x: `### Added` or `### Changed` → minor, anything else → patch, major never automatic; a `bump:*` label overrides the level. A section left with only `### Development` is not a release. No workflow uses these subcommands yet.
+- Description: `cut` and `next-version` subcommands in `scripts/ci/changelog.ps1`, with fixtures. `cut` is deterministic (same input → identical output). `next-version` rules (the same at 0.x and from 1.0.0): `### Added`, `### Changed` or `### Deprecated` → minor; `### Removed` without a `bump:*` label → error; anything else → patch; major never automatic; a `bump:*` label overrides the level. A section left with only `### Development` is not a release. No workflow uses these subcommands yet.
 - Files: `scripts/ci/changelog.ps1`, `tests/changelog/`, `CHANGELOG.md` (`### Development`).
 - Owners: `build-pipeline-engineer` → `code-reviewer`.
 - Verification: fixtures green; `gate-x86` and `gate-x64` green.
