@@ -115,6 +115,17 @@ filter covers can still get the required checks. Events created with
 dispatch is expected to satisfy the branch ruleset, which matches by name;
 this is to be confirmed on the first branch that relies on it.
 
+## `bash` steps run with `-e -o pipefail` (found during github-actions-optimization Stage 5)
+
+GitHub runs a `shell: bash` step as `bash --noprofile --norc -e -o pipefail`.
+`set -uo pipefail` at the top of a step does not turn `-e` off, so a command
+substitution that exits non-zero, as in `next=$(cmd)`, ends the step before a
+following `code=$?` runs. A status the step means to handle is captured on
+the same line with `|| code=$?` (after `code=0`) or tested in an `if`. The
+"Show the version" step in `release.yml` does this for `next-version`, whose
+exit status 1 (no version computable from `[Unreleased]`) is an expected
+case.
+
 ## No concurrency block: every run completes (decided during Stage 14, OQ13)
 
 `ci.yml` has no `concurrency` block, so a later push never cancels an

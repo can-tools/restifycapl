@@ -18,7 +18,7 @@ repository; there are no version numbers in files.
   dispatch on the tag) and a branch ref is a dry run that never publishes. The
   dry run's `validate` summary shows the version that
   [scripts/ci/changelog.ps1](scripts/ci/changelog.ps1) `next-version` computes
-  from `[Unreleased]`. See [docs/release-process.md](docs/release-process.md).
+  from `[Unreleased]`, or the reason it computes none. See [docs/release-process.md](docs/release-process.md).
 - [.github/workflows/auto-pr.yml](.github/workflows/auto-pr.yml): the draft PR
   checklist gains a CANoe check item (the CAPL nodes in `capl/` compile in CANoe
   against the DLL from the PR's CI artifact), shown when the branch touches
