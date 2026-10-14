@@ -99,13 +99,13 @@ jobs:
           MODE: ${{ steps.mode.outputs.mode }}
           TAG_VERSION: ${{ steps.tag.outputs.version }}
         run: |
-          # No -e on purpose: the step only informs, and the exit status of next-version is handled explicitly.
-          set -uo pipefail
+          # bash runs with -e: capture next-version's status on the same line or the step ends early.
+          set -euo pipefail
           if [ "$MODE" = "tag" ]; then
             printf "%s\n\n" "Version $TAG_VERSION, taken from the tag." >> "$GITHUB_STEP_SUMMARY"
           else
-            next=$(pwsh -NoProfile -File scripts/ci/changelog.ps1 next-version)
-            code=$?
+            code=0
+            next=$(pwsh -NoProfile -File scripts/ci/changelog.ps1 next-version) || code=$?
             if [ "$code" -eq 0 ]; then
               printf "%s\n\n" "Next version computed from [Unreleased], with no bump label: $next. A dry run publishes nothing." >> "$GITHUB_STEP_SUMMARY"
             elif [ "$code" -eq 1 ]; then
