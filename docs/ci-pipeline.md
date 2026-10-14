@@ -182,7 +182,11 @@ workflow's `validate` job runs the same command before it parses
 `CHANGELOG.md`. Each `tests/changelog/<case>/` directory holds `CHANGELOG.md`,
 `case.json` (mode, line endings, the simulated git history, the expected exit
 code, `::` output lines and summary lines) and, for a successful case,
-`expected-notes.md`. The runner replaces git with the case's simulated history,
+`expected-notes.md`. A case for `cut` or `next-version` runs that subcommand
+instead; a successful cut is compared with `expected-CHANGELOG.md` and run
+twice to prove its output is deterministic. The `case.json` format is
+described in the script's help (`Get-Help scripts/ci/changelog.ps1 -Full`).
+The runner replaces git with the case's simulated history,
 so the cases need no repository; line endings are applied in memory, so the
 result does not depend on the checkout's `eol` setting. Only the real git
 calls are not covered by the fixtures; the release workflow's dry run covers
