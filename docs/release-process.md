@@ -18,7 +18,8 @@ the `msvc-build-conventions` skill.
 DLL and `capl/` from different versions fail at CAPL compile.
 
 There is no approval gate, no GitHub Environment and no pre-release flag.
-Pushing the tag is the decision to publish.
+Pushing the tag, or dispatching the `Release` workflow on the tag, is the
+decision to publish.
 
 ## Cutting a release
 
@@ -52,15 +53,26 @@ Pushing the tag is the decision to publish.
    in the tag; the repo's CHANGELOG release sections are identified by commit
    hash, and a reader maps a hash to a version through the GitHub release.
 
-Everything after the tag push is automatic.
+The release mode depends on the ref, not on the event: a tag ref publishes,
+whether it came from a tag push or from a `workflow_dispatch` on the tag
+(`gh workflow run release.yml --ref vX.Y.Z`, or the Actions tab with the tag
+chosen as the ref), and a branch ref is a dry run. A tag pushed with
+`GITHUB_TOKEN` starts no workflow run, so the dispatch is how automation
+starts a release.
+
+Everything after the tag push or the dispatch on the tag is automatic.
 
 ## Dry run
 
 Run the `Release` workflow from the Actions tab with `workflow_dispatch` on
-any branch. It never publishes. Because there is no tag, it builds with
-development versions and skips the version-resource check, which therefore
-runs for the first time on a real tag. It still runs both pipelines, the
-export-table check, the notes assembly and the attestation.
+any branch (a branch ref, not a tag). It never publishes. Because there is no
+tag, it builds with development versions and skips the version-resource check,
+which therefore runs for the first time on a real tag. It still runs both
+pipelines, the export-table check, the notes assembly and the attestation. The
+`validate` summary shows the version `scripts/ci/changelog.ps1 next-version`
+computes from `[Unreleased]` (no bump label is considered), or why none can be
+computed, for instance when the cut is already applied and `[Unreleased]` is
+empty.
 
 Read, in the run's summaries: the export table, the `notes.md` preview, the
 `SHA256SUMS`, the `dumpbin /exports` output of both architectures, and the
@@ -91,7 +103,7 @@ ways:
 | `export-table` | Linux | The same composite action `ci.yml` uses; uploads the generated markdown. |
 | `assemble` | Linux | `SHA256SUMS`, `notes.md` (at most 125,000 characters), both written to the job summary. No rebuild after this point. |
 | `attest` | Linux | Build-provenance attestation for the two DLLs, then `gh attestation verify` on each with `--repo` and `--signer-workflow`. Also runs in a dry run. |
-| `publish` | Linux | Tag push only. Needs `validate`, `export-table`, `assemble` and `attest`. |
+| `publish` | Linux | Tag ref only (a tag push or a dispatch on a tag). Needs `validate`, `export-table`, `assemble` and `attest`. |
 
 Only `publish` has `contents: write`; only `attest` has `id-token: write` and
 `attestations: write`. `publish` uses the `gh` CLI only and does not verify
@@ -121,7 +133,9 @@ than one `### Development` block, or an empty section after removing it, fails.
 3. The release is created as a draft, its three assets, their hashes against
    `SHA256SUMS` and the notes length are verified, and only then is it made
    public, with `gh release edit --draft=false` as the single last command.
-4. No `workflow_dispatch` run ever reaches `publish`.
+4. The release mode depends on the ref, not on the event: a `workflow_dispatch`
+   run on a tag ref publishes exactly like a push of that tag, with the same
+   validation and safeguards, and a run on a branch ref never reaches `publish`.
 5. Concurrency is per ref and never cancels a running release.
 6. When the job fails, its summary says which state the release is in.
 
