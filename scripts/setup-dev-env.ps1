@@ -2,7 +2,8 @@
 .SYNOPSIS
     Provisions the local development environment for the CAPL REST DLL
     (restifycapl): MSVC Build Tools, make, vcpkg-built libcurl (both
-    architectures), and the pinned nlohmann/json single header.
+    architectures), the pinned nlohmann/json single header, and the
+    actionlint and shellcheck workflow lint tools.
 
 .DESCRIPTION
     This script provisions the environment ONLY. It never compiles project
@@ -12,7 +13,7 @@
 
     Idempotent and safe to re-run: every step probes for existing state
     before attempting to change anything, and a failure in one step never
-    aborts the rest -- all nine steps always run, and a pass/fail summary is
+    aborts the rest -- every step always runs, and a pass/fail summary is
     printed at the end (mirrors 04-FLOW section 6.9).
 
     Steps performed, in order:
@@ -63,11 +64,19 @@
          directories and write lib/README.
       10. Verify (never fetch) that include/vendor/capl-dll-sdk/ holds the
           three Vector SDK headers.
+      11. Install the pinned Windows builds of actionlint and shellcheck
+          (SHA-256 verified) into %LOCALAPPDATA%\restifycapl\tools\bin and add
+          that folder to the USER PATH once, so `actionlint -color` from the
+          repo root lints the workflows with the same shellcheck-backed checks
+          as CI. No administrator rights. The actionlint pin must equal
+          ACTIONLINT_VERSION in .github/workflows/ci.yml, otherwise this step
+          FAILs. Rationale: docs/development-environment.md#workflow-lint-tools-actionlint-and-shellcheck
 
 .NOTES
     Human approval gate: this script installs software and touches global
-    machine state (VS Build Tools, make, vcpkg packages, and the eight
-    RESTIFY_MSVC_* user environment variables; remove them with the command
+    machine state (VS Build Tools, make, vcpkg packages, the eight
+    RESTIFY_MSVC_* user environment variables, and one entry on the USER PATH
+    for the actionlint/shellcheck folder; remove them as described
     in docs/development-environment.md). Per the project
     plan it must be approved before its first run.
 
@@ -95,6 +104,9 @@
 .PARAMETER SkipJson
     Skip the json.hpp download/verify step (step 7).
 
+.PARAMETER SkipLintTools
+    Skip installing actionlint and shellcheck (step 11).
+
 .PARAMETER VcpkgRoot
     Explicit path to an existing or desired vcpkg checkout. Defaults to
     $env:VCPKG_ROOT if set, otherwise "$env:LOCALAPPDATA\vcpkg" (a per-user
@@ -112,6 +124,7 @@ param(
     [switch]$SkipVcpkg,
     [switch]$SkipGTest,
     [switch]$SkipJson,
+    [switch]$SkipLintTools,
     [string]$VcpkgRoot,
     [switch]$Force
 )
@@ -141,6 +154,19 @@ $JsonHppDst   = Join-Path $VendorDir 'json.hpp'
 $JsonHppVersion = '3.11.3'
 $JsonHppUrl     = 'https://github.com/nlohmann/json/releases/download/v3.11.3/json.hpp'
 $JsonHppSha256  = '9BEA4C8066EF4A1C206B2BE5A36302F8926F7FDC6087AF5D20B417D0CF103EA6'
+
+# Windows amd64 builds of the workflow lint tools. actionlint must equal
+# ACTIONLINT_VERSION in .github/workflows/ci.yml (checked by the lint tools
+# step); SHA-256 values come from the release's own checksums file
+# (actionlint) and the asset digest GitHub publishes (shellcheck).
+# Rationale: see docs/development-environment.md#workflow-lint-tools-actionlint-and-shellcheck
+$LintToolsBinDir   = Join-Path $env:LOCALAPPDATA 'restifycapl\tools\bin'
+$ActionlintVersion = '1.7.12'
+$ActionlintUrl     = "https://github.com/rhysd/actionlint/releases/download/v$ActionlintVersion/actionlint_${ActionlintVersion}_windows_amd64.zip"
+$ActionlintSha256  = '6e7241b51e6817ea6a047693d8e6fed13b31819c9a0dd6c5a726e1592d22f6e9'
+$ShellcheckVersion = '0.11.0'
+$ShellcheckUrl     = "https://github.com/koalaman/shellcheck/releases/download/v$ShellcheckVersion/shellcheck-v$ShellcheckVersion.zip"
+$ShellcheckSha256  = '8a4e35ab0b331c85d73567b12f2a444df187f483e5079ceffa6bda1faa2e740e'
 
 if (-not $VcpkgRoot) {
     if ($env:VCPKG_ROOT) {
@@ -1629,6 +1655,143 @@ from a Vector CANoe/CANalyzer installation. Install Vector CANoe/CANalyzer
 and build the official "Example of a Windows DLL for CAPL" sample to obtain
 them, then place all three at include/vendor/capl-dll-sdk/.
 "@
+}
+
+# ===========================================================================
+# Step 11 -- actionlint + shellcheck (user-level install, user PATH)
+# ===========================================================================
+
+function Get-InstalledToolVersion {
+    param([Parameter(Mandatory)][string]$Exe, [Parameter(Mandatory)][string]$VersionArg)
+    if (-not (Test-Path -LiteralPath $Exe)) { return $null }
+    $out = (@(& $Exe $VersionArg 2>$null) -join "`n")
+    if ($out -match '(\d+\.\d+\.\d+)') { return $Matches[1] }
+    return $null
+}
+
+function Install-PinnedZipTool {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$Version,
+        [Parameter(Mandatory)][string]$Url,
+        [Parameter(Mandatory)][string]$Sha256,
+        [Parameter(Mandatory)][string]$VersionArg
+    )
+
+    $step = "$Name $Version"
+    $exeName = "$Name.exe"
+    $dest = Join-Path $LintToolsBinDir $exeName
+
+    $installed = Get-InstalledToolVersion -Exe $dest -VersionArg $VersionArg
+    if ($installed -eq $Version) {
+        Add-Result -Step $step -Status 'OK' -Message "Already installed at $dest."
+        return $true
+    }
+
+    $workDir = Join-Path $env:TEMP "restifycapl-$Name-$([guid]::NewGuid().ToString('N'))"
+    try {
+        New-Item -ItemType Directory -Force -Path $workDir | Out-Null
+        $archive = Join-Path $workDir "$Name.zip"
+        try {
+            Invoke-WebRequest -Uri $Url -OutFile $archive -UseBasicParsing
+        } catch {
+            Add-Result -Step $step -Status 'FAIL' -Message "Download failed: $($_.Exception.Message)"
+            return $false
+        }
+
+        $actual = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash
+        if ($actual -ne $Sha256) {
+            Add-Result -Step $step -Status 'FAIL' -Message @"
+SHA-256 mismatch for $Url -- refusing to extract or install it.
+  expected: $Sha256
+  actual:   $actual
+"@
+            return $false
+        }
+
+        $extractDir = Join-Path $workDir 'extracted'
+        Expand-Archive -LiteralPath $archive -DestinationPath $extractDir -Force
+        $src = Join-Path $extractDir $exeName
+        if (-not (Test-Path -LiteralPath $src)) {
+            Add-Result -Step $step -Status 'FAIL' -Message "$exeName not found at the root of the verified archive."
+            return $false
+        }
+
+        New-Item -ItemType Directory -Force -Path $LintToolsBinDir | Out-Null
+        try {
+            Copy-Item -LiteralPath $src -Destination $dest -Force -ErrorAction Stop
+        } catch {
+            Add-Result -Step $step -Status 'FAIL' -Message "Could not write $dest (is it running? close it and re-run): $($_.Exception.Message)"
+            return $false
+        }
+    } finally {
+        Remove-Item -LiteralPath $workDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    $after = Get-InstalledToolVersion -Exe $dest -VersionArg $VersionArg
+    if ($after -ne $Version) {
+        $shown = if ($after) { $after } else { '(none)' }
+        Add-Result -Step $step -Status 'FAIL' -Message "$dest reports version $shown after install, expected $Version."
+        return $false
+    }
+
+    $was = if ($installed) { " (was $installed)" } else { '' }
+    Add-Result -Step $step -Status 'OK' -Message "SHA-256 verified, installed to $dest$was."
+    return $true
+}
+
+function Add-UserPathEntry {
+    # Registry edit, not SetEnvironmentVariable (it would flatten REG_EXPAND_SZ to REG_SZ); see docs/development-environment.md.
+    param([Parameter(Mandatory)][string]$Dir)
+
+    $normalize = { param($p) [Environment]::ExpandEnvironmentVariables($p).Trim().TrimEnd('\') }
+    $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true)
+    try {
+        $raw = [string]$key.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+        $entries = @($raw -split ';' | Where-Object { $_ })
+        $target = & $normalize $Dir
+        foreach ($entry in $entries) {
+            if ((& $normalize $entry) -ieq $target) { return $false }
+        }
+        $key.SetValue('Path', (($entries + $Dir) -join ';'), [Microsoft.Win32.RegistryValueKind]::ExpandString)
+        return $true
+    } finally {
+        if ($key) { $key.Close() }
+    }
+}
+
+Invoke-Step -Name 'lint tools' -Body {
+    if ($SkipLintTools) {
+        Add-Result -Step 'lint tools' -Status 'SKIP' -Message 'Skipped by -SkipLintTools.'
+        return
+    }
+
+    $ciYml = Join-Path $RepoRoot '.github\workflows\ci.yml'
+    if (-not (Test-Path -LiteralPath $ciYml)) {
+        Add-Result -Step 'lint tools' -Status 'FAIL' -Message "Cannot verify the actionlint pin: $ciYml not found."
+        return
+    }
+    $ciPin = $null
+    if ((Get-Content -LiteralPath $ciYml -Raw) -match '(?m)^\s*ACTIONLINT_VERSION:\s*(\S+)') { $ciPin = $Matches[1] }
+    if ($ciPin -ne $ActionlintVersion) {
+        $shown = if ($ciPin) { $ciPin } else { '(not found)' }
+        Add-Result -Step 'lint tools' -Status 'FAIL' -Message "ACTIONLINT_VERSION in ci.yml is $shown but this script pins $ActionlintVersion; update ActionlintVersion/ActionlintSha256 here (Windows amd64 line of the release's checksums file) so local lint matches CI. Nothing installed."
+        return
+    }
+
+    $okAl = Install-PinnedZipTool -Name 'actionlint' -Version $ActionlintVersion -Url $ActionlintUrl -Sha256 $ActionlintSha256 -VersionArg '-version'
+    $okSc = Install-PinnedZipTool -Name 'shellcheck' -Version $ShellcheckVersion -Url $ShellcheckUrl -Sha256 $ShellcheckSha256 -VersionArg '--version'
+    if (-not ($okAl -or $okSc)) { return }
+
+    if (Add-UserPathEntry -Dir $LintToolsBinDir) {
+        Add-Result -Step 'lint tools PATH' -Status 'OK' -Message "Added $LintToolsBinDir to the user PATH."
+    } else {
+        Add-Result -Step 'lint tools PATH' -Status 'OK' -Message "$LintToolsBinDir already on the user PATH."
+    }
+
+    if ($okAl -and $okSc) {
+        Add-Result -Step 'lint tools' -Status 'OK' -Message 'Open a new terminal window, then lint the workflows from the repo root with: actionlint -color'
+    }
 }
 
 # ===========================================================================
