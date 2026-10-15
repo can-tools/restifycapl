@@ -1,18 +1,21 @@
 # Plan: release automation and CI consistency
 
 ## 1. Goal
-The current goal is CI/CD consistency: one CHANGELOG parser in PowerShell instead of inline logic in YAML, scripts used only by CI in `scripts/ci/`, zero Python in the local toolchain, zero secrets and PATs. The direction is a zero-touch release: a bot maintains a release PR with a ready cut and a computed version, a human only verifies and merges (merge = release decision), and the tag and publication happen automatically.
+The current goal is CI/CD consistency: one CHANGELOG generator and parser in PowerShell instead of inline logic in YAML, scripts used only by CI in `scripts/ci/`, zero Python in the local toolchain, zero secrets and PATs. The target is a zero-touch release: a bot maintains a release PR with a generated CHANGELOG section, the computed version and exactly one `bump:*` label; a human only reviews and squash-merges it (merge = release decision); the tag and the publication happen automatically. Nobody writes release notes by hand: they are generated from commit messages.
 
 ## 2. Constraints that apply to every stage
-- Version: the only source of the product version is the tag `vX.Y.Z`; no tracked file contains a version number; version fields ≤ 65535.
-- CHANGELOG: a release section has the heading `## [<12-char hash of the cut's base>] - YYYY-MM-DD`; the tag sits on the cut's squash-merge commit, whose first parent is the base named in the heading; links in the section are pinned to the full 40-character hash, with the heading's link definition at the bottom of the file; `### Development` stays in the file but does not go into the release notes. Every stage adds its internal changes (CI, tooling, repo) under `### Development` in `[Unreleased]`. This plan does not change that format.
-- `main` is protected by a ruleset: pull request required, required checks `build + test (x64)` and `build + test (x86)`, branch up to date before merging, force pushes blocked, deletions restricted. There is no ruleset on tags; there are no organization rulesets.
-- Facts from the GitHub documentation: events triggered by `GITHUB_TOKEN` do not create new workflow runs, except `workflow_dispatch` and `repository_dispatch`; a dispatch requires the Actions: write permission, granted by an explicit `permissions:` block; a dispatch `ref` may be a branch or a tag. An explicit `permissions:` block works regardless of the default "Workflow permissions" setting (confirmed by this repo's practice: `contents: write` in `release.yml`, `pull-requests: write` in `auto-pr.yml`).
+- Version: the only source of the product version is the tag `vX.Y.Z`; no tracked file contains a version number; version fields ≤ 65535. The next version is the highest `vX.Y.Z` tag plus the bump level of the single `bump:*` label on the merged release PR.
+- CHANGELOG: the bot generates each release section in the release PR's cut commit. A release section has the heading `## [<12-char hash of the cut's base>] - YYYY-MM-DD`; the tag sits on the cut's squash-merge commit, whose first parent is the base named in the heading; the heading's link definition is at the bottom of the file. Section order: "Breaking changes", `### Added`, `### Fixed`, `### Development` (stays in the file, excluded from the release notes). There is no `## [Unreleased]`; no stage writes CHANGELOG entries by hand.
+- Change type: taken from the squash-merge commit subject, which is the PR title plus "(#N)"; the PR title is the branch name set by `auto-pr.yml` and nobody edits it. Branch prefix → level: `feat/` and `stage/` minor, `fix/` patch, `chore/` and `docs/` no release; the bot's `release/next` PR no release.
+- Breaking change: marked in the commit messages of the PR (`type!:` or a `BREAKING CHANGE:` footer), on any branch type; read through the API from the PR named by "(#N)". A breaking change gives minor while the major version is 0 and major from 1.0.0; 1.0.0 is reached by a deliberate `bump:major` label.
+- Repository settings confirmed by the user: required checks `build + test (x64)` and `build + test (x86)` on `main`; "Default commit message for squash merging" = "Pull request title"; labels `bump:major`, `bump:minor`, `bump:patch` exist. Not confirmed, to be confirmed before stage 6c: pull request required on `main`, branch up to date before merging, force pushes blocked, deletions restricted, required approving reviews, rulesets or protection on `v*.*.*` tags, organization rulesets, squash merge only, "Allow GitHub Actions to create and approve pull requests", automatic deletion of head branches. The user adds the `bump label` check to the required checks after stage 6c.
+- Facts from the GitHub documentation: events triggered by `GITHUB_TOKEN` do not create new workflow runs, except `workflow_dispatch` and `repository_dispatch`; a dispatch requires the Actions: write permission, granted by an explicit `permissions:` block; a dispatch `ref` may be a branch or a tag. An explicit `permissions:` block works regardless of the default "Workflow permissions" setting (confirmed by this repo's practice: `contents: write` in `release.yml`, `pull-requests: write` in `auto-pr.yml`). Label changes, pushes and tags made by the bot therefore start no workflow run.
 - No secrets, no PAT. No Python in the local toolchain; the parser is in PowerShell 7 (`pwsh`), available locally and on runners.
 - `scripts/ci/` contains only scripts used solely by CI. Scripts that are local, or used both locally and in CI (`setup-dev-env.ps1`, `list-export-table.ps1`), stay in `scripts/`. Neither directory is a second build system.
 - x86 and x64: every verification reports both architectures.
 - Export contract (`CAPL_DLL_INFO_LIST4`, `exports.def`) and `/MT`: no stage touches them.
 - Each stage = a separate branch from `main`, cut by `build-pipeline-engineer`; the push is done by a human. Documentation changes in the same PR as the behavior it describes. No plan identifiers (e.g. HG-x, R1, stage numbers) in tracked files outside plan documents, except the one-line section breadcrumbs in `docs/<topic>.md` that `project-docs` requires, written as `(decided during github-actions-optimization Stage N)`. Code comments follow the comment discipline in `project-docs`; the plan does not dictate their content.
+- Commits only on the user's instruction; the user pushes and merges.
 
 ## 3. Rule changes
 
@@ -20,18 +23,34 @@ Approved:
 - R1. The cut mechanics are performed by a bot; `build-pipeline-engineer` owns the bot (changes the "Who writes what" line in `project-docs`).
 - R2. The manual dry run before merge is replaced by the preview in the release PR description plus CI on the same SHA; the manual dry run remains available.
 - R3. The release mode depends on the ref, not on the event: a dispatch on a tag publishes just like a tag push; a dispatch on a branch never publishes (new wording of safeguard 4 in `docs/release-process.md`).
-- R4. The labels `bump:major` / `bump:minor` / `bump:patch` on the release PR override the computed bump level (a level, not a version number).
+- R4. Replaced by R13.
 - R5. The branch `release/next` is reserved for the bot; manual commits on it are overwritten on rebuild.
-- R6. `[Unreleased]` on `main` is the only place where release content is edited.
+- R6. Withdrawn: release content is generated from commit messages.
 - R7. An entry in the Directory layout section of `CLAUDE.md` and in the directory conventions of the `msvc-build-conventions` skill, worded: "`scripts/ci/` — scripts invoked only by GitHub Actions workflows; never a second build system". The existing `scripts/` entry (with the `list-export-table.ps1` example) stays unchanged.
 - R8. `scripts/list-export-table.ps1` stays in `scripts/` (also used locally); its path and references do not change.
-- Release PR rebuild trigger: every push to `main`, plus `workflow_dispatch`.
-- Parser language: PowerShell.
+- R9. Change type and level come from the squash-merge commit subject (branch prefix), as in §2; `feat/` is a new branch prefix.
+- R10. Breaking changes are marked in commit messages and read through the API, as in §2; the release PR shows a `> [!CAUTION]` "Breaking Change" block listing them, plus an informational reviewer checklist item.
+- R11. Release notes are generated: one entry per commit of type `feat`, `stage` or `fix`, or with a breaking marker, with a link to the PR (#N); a releasing PR without such a commit gets one fallback entry (branch name and #N) and a warning. `feat` and `stage` → `### Added`, `fix` → `### Fixed`, breaking → "Breaking changes"; `chore/` and `docs/` PRs → `### Development`. Commits up to a one-time cut-off SHA in the script count as `### Development` and raise no level.
+- R12. A new skill holds the Conventional Commits rules for this repo: the commit type matches the branch prefix (`feat:`, `stage:`, `fix:`, `chore:`, `docs:`); `stage:` has the meaning of `feat:` and is used only for user-visible changes, internal changes on a `stage/` branch use `chore:`; the breaking marker is `type!:` or a `BREAKING CHANGE:` footer; subjects of `feat:`, `stage:` and `fix:` commits are written for DLL and CAPL users, because they become release-note entries. `CLAUDE.md` does not change for this. Git hooks for commit messages are a later topic, not decided.
+- R13. Labels `bump:major`, `bump:minor`, `bump:patch` exist (created by the user); the bot never creates labels; `release-pr.yml` has `pull-requests: write`, no `issues: write`. On every push to `main` the bot computes the level from the commits: with exactly one `bump:*` label that differs from it, the bot replaces it and comments on the change; with no `bump:*` label, it adds the computed one; with two or more, it changes nothing. The bot keeps no state. A human may change the label before merging (as the last step: the next push to `main` resets it). Exactly one `bump:*` label is required; zero or two or more fail.
+- R14. `tag-release.yml` takes the level from the single label of the merged release PR; any other number of labels ends the run red without a tag. The release PR checklist has an informational reviewer item: the label matches the intended version (preview = last tag + level).
+- R15. A separate lightweight workflow with one job, `bump label`, is a required check: green outside `release/next`, green on `release/next` only with exactly one `bump:*` label; the result comes from the exit code, never from a job-level `if:`; no path filter. The user adds it to the ruleset once it is on `main`.
+- R16. `release-pr.yml`: triggers push to `main`, `workflow_dispatch`, and `pull_request` `labeled`/`unlabeled` limited to head `release/next`, same repository, labels starting with `bump:`. Level "no release" closes the release PR and deletes `release/next` without an error; otherwise the bot generates the section and opens or updates the PR as ready for review (not a draft). An empty generated section ends the run red and leaves the PR unchanged. Non-blocking warnings in the description: a releasing PR without a typed commit, a subject without "(#N)", a `fix/` PR that changed `src/module/exports.cpp`. After every rebuild, and always on `workflow_dispatch`, the bot dispatches `ci.yml` and the `bump label` workflow on `release/next`. Push runs: a newer run cancels an older one; label-event runs have their own group and never change labels. Review applies to the head SHA at merge time; the checklist resets on every rebuild. A release PR closed without merging is replaced on the next push to `main` or manual dispatch.
+- R17. Tagging: `tag-release.yml` runs only on push to `main`, without dispatch inputs. A merge not from `release/next` ends green without a tag, with one summary line. If a merged cut stays untagged, the bot never cuts a second time: when the cut is the `main` tip this is the normal moment after the merge; when it is deeper, `release-pr.yml` reports "waiting for the tag: re-run the failed `tag-release.yml` run". The repair is "Re-run jobs" of the failed run. When the defect is in `tag-release.yml` itself and a re-run cannot repair it, an ordinary PR fixes the workflow and also removes the generated, untagged section from `CHANGELOG.md`; the bot then generates a new section from the full range since the last tag. The only manual escape hatch is a dispatch of `Release` on an existing tag; a manual tag push is not a documented path. There is no manual cut procedure.
+- R18. A defect found before publication is handled like a defect after publication: the tag and the generated section stay, no `[YANKED]` marking, the draft release may be deleted (optional), the fix goes through an ordinary `fix/` PR and the bot releases the next version; a tag name is never reused. The notes of the next version cover only the range from the burned tag.
+- R19. The version exists only in the Git tag; the `CLAUDE.md` versioning rule does not change. No exact version can be requested through a PR; 1.0.0 is reached with `bump:major`.
+- R20. A release PR is not merged before `tag-release.yml` is on `main`.
+- R21. The export table in the release notes (job `assemble`) stays as it is.
+- R22. Post-release inspection is optional, not a gate.
 - Plan slug: `github-actions-optimization`; this plan replaces the previous content of `docs/work/github-actions-optimization/plans/plan.md`.
+
+Superseded by the above: the stage 4 level rules taken from CHANGELOG headings ("`### Removed` without a label is an error", "major never automatic"); the dispatch of `tag-release.yml` with an optional `version`; "dispatch only when the parent or the tree changed, one concurrency group"; "the release PR skips a merged cut"; the manual cut and manual tag in `docs/release-process.md`; the defect-before-publication case that deleted the tag and cut again.
 
 Open: none.
 
 ## 4. Stages
+
+Stages 0–5 are done and merged on `main`; their text is kept as the record.
 
 ### Stage 0 — baseline
 - Description: confirm that the revert of abf5d6a is complete (13 files in their pre-commit state); remove untracked leftovers in the working tree (`scripts/cut-changelog.ps1`, `scripts/cut-changelog.py`, `scripts/__pycache__/`); report discrepancies between `docs/ci-flow.md` / `docs/ci-optimized-flow.md` and reality (fixes go into the stage that changes the behavior in question).
@@ -74,30 +93,73 @@ Open: none.
 - Verification: the dry run on a branch shows the version and does not publish; a manual dispatch of `ci.yml` on a branch produces the `build + test (x86)` and `build + test (x64)` checks attached to the branch tip's SHA.
 - Approval: checkpoint before merge.
 
-### Stage 6 — release PR and tag (one PR; the two parts only work together)
-- Description:
-  - `release-pr.yml` (trigger: `push: main` plus `workflow_dispatch`): skips a commit that is itself a merged cut; with no releasable content, closes the release PR and deletes the branch; otherwise builds `release/next` = `main` tip + a commit with the cut (`changelog.ps1 cut`), force-pushing only on change; creates or updates the PR with a description: computed version, notes preview, a checklist (CHANGELOG diff, version, green x86 and x64 checks), a note about R5 and R6; runs `gh workflow run ci.yml --ref release/next`; `concurrency` cancelling older rebuilds.
-  - `tag-release.yml` (trigger: `push: main` plus `workflow_dispatch` with an optional `version` as retry or override): detects a merged, untagged cut (heading = first parent); reads the merged PR's `bump:*` labels (read failure = no tag and a red run); computes the version, creates an annotated tag on `GITHUB_SHA` and runs `gh workflow run release.yml --ref vX.Y.Z`.
-  - Permissions: `contents: write`, `pull-requests: write`, `actions: write`. No secrets.
-- Files: `.github/workflows/release-pr.yml`, `.github/workflows/tag-release.yml`, `docs/release-process.md` (new flow and fallbacks: dispatch with `version`, manual tag push), `docs/ci-pipeline.md`, `docs/ci-flow.md`, `docs/ci-optimized-flow.md` (rewritten to this plan's target state; content this plan does not implement — vcpkg `x-gha` caching, standalone GNU Make, bot auto-merge, the earlier script-based CHANGELOG automation — is removed), `.claude/skills/project-docs/SKILL.md` (R1), `CHANGELOG.md` (`### Development`).
+### Stage 5a — actionlint
+- Description: an `actionlint` job in `ci.yml`: no path filter, `if: github.event_name != 'workflow_dispatch'`, not a required check, pinned version with the download verified by SHA-256, `contents: read`. In that form it must never become a required check (a skipped required check counts as passed). No CHANGELOG entry (commits before the cut-off of stage 6a count as `### Development`).
+- Files: `.github/workflows/ci.yml`, `docs/ci-pipeline.md`.
 - Owners: `build-pipeline-engineer` → `code-reviewer`.
-- Verification: before merge — scripts on fixtures, review, `gate-x86` and `gate-x64` green. After merge (dispatched workflows must be on `main`) — the first push to `main` with content in `[Unreleased]` creates `release/next` and a PR whose heading hash equals the `main` tip; the x86 and x64 checks appear on the PR and satisfy the ruleset.
+- Verification: `actionlint` green on all workflows; `gate-x86` and `gate-x64` green.
+- Approval: no.
+
+### Stage 6a — generated CHANGELOG
+- Description: in `scripts/ci/changelog.ps1`: `level` (level from the subjects of `git log <last tag>..<sha>` and from a file of PR commit messages fetched by the workflow; the script stays offline), `generate` (section per R11, heading per §2, link definition), `next-version` taking a level or a label, `cut` removed, `notes` and `check` unchanged, the one-time cut-off SHA (R11; set to the `main` tip the last version of this PR is based on), and the dry-run notice "re-run the failed `tag-release.yml` run" instead of "push the tag". Fixtures: `cut` cases removed and replaced by `generate` cases; `next-version` cases built on headings removed, tag/label/overflow cases adapted; dry-run cases using `[Unreleased]` adapted. `CHANGELOG.md`: remove `## [Unreleased]` with its hand-written `### Development` block and update the introduction; the v0.1.0 section stays. `release.yml`: the dry run computes the level from the commit range and previews the generated section without changing files; the `validate` job gets `pull-requests: read`; tag mode unchanged; the failure message of `publish` no longer says "delete the draft and the tag" (R17, R18). New Conventional Commits skill (R12). `project-docs` CHANGELOG section, `.claude/agents/cpp-implementer.md` (the `[Unreleased]` bullet duty) and `.claude/agents/build-pipeline-engineer.md` (the `[Unreleased]` rename duty) updated to generated sections. `docs/release-process.md` (cutting a release, dry run, failure cases per R17 and R18) and `docs/ci-pipeline.md`.
+- Files: `scripts/ci/changelog.ps1`, `tests/changelog/`, `CHANGELOG.md`, `.github/workflows/release.yml`, `.claude/skills/<new conventional-commits skill>/SKILL.md`, `.claude/skills/project-docs/SKILL.md`, `.claude/agents/cpp-implementer.md`, `.claude/agents/build-pipeline-engineer.md`, `docs/release-process.md`, `docs/ci-pipeline.md`.
+- Owners: `build-pipeline-engineer` → `code-reviewer`.
+- Verification: fixtures green; a dry run on the branch shows the computed level and the generated section and publishes nothing; `gate-x86` and `gate-x64` green.
+- Approval: checkpoint before merge; the user approves the texts of the new skill, the `project-docs` change and the agent files item by item.
+
+### Stage 6b — `feat/` branch prefix
+- Description: add `feat/` to the push filters of `auto-pr.yml` and `ci.yml`, and to the `stage-branch` skill (naming table; the "do not invent a fifth" sentence; the line saying `release/*` is absent now names the bot's `release/next`). In `auto-pr.yml` also: remove the checklist item "`CHANGELOG.md` `[Unreleased]` entry present", adjust the plan-only note, add an informational item that commit messages follow the Conventional Commits skill. The `.claude/settings.json` allowlist for `feat/` is changed by the user.
+- Files: `.github/workflows/auto-pr.yml`, `.github/workflows/ci.yml`, `.claude/skills/stage-branch/SKILL.md`; `.claude/settings.json` (user).
+- Owners: `build-pipeline-engineer` → `code-reviewer`; user for `.claude/settings.json`.
+- Verification: a pushed `feat/` branch gets a draft PR and both gates; `gate-x86` and `gate-x64` green.
 - Approval: checkpoint before merge.
 
+### Stage 6c — release PR bot and the `bump label` check
+- Description: `release-pr.yml` per R13, R16 and R17 (its part), with the version preview, the generated notes preview, the `> [!CAUTION]` block (R10), the checklist with the reviewer items (R14, R10) and the comment on label changes; permissions `contents: write`, `pull-requests: write`, `actions: write`. The `bump label` workflow per R15, permissions `contents: read`, `pull-requests: read`. The release PR must not be merged before stage 6d is on `main` (R20).
+- Files: `.github/workflows/release-pr.yml`, `.github/workflows/<bump label workflow>.yml`, `docs/release-process.md`, `docs/ci-pipeline.md`.
+- Owners: `build-pipeline-engineer` → `code-reviewer`; the user adds `bump label` to the `main` ruleset after the merge.
+- Verification: before merge — review, fixtures, `gate-x86` and `gate-x64` green. After merge — the first push to `main` with releasing commits creates `release/next` and a ready release PR with exactly one `bump:*` label; `build + test (x86)`, `build + test (x64)` and `bump label` appear on its head and satisfy the ruleset; changing the label to two labels turns `bump label` red, back to one turns it green.
+- Approval: checkpoint before merge.
+
+### Stage 6d — tagging bot
+- Description: `tag-release.yml` per R14 and R17: trigger push to `main` only; acts only for a merged PR with head `release/next` from this repository; reads the single `bump:*` label; computes the version; validates with `changelog.ps1 check -Mode tag`; creates an annotated tag on `GITHUB_SHA`; dispatches `release.yml` on the tag; concurrency never cancels; permissions `contents: write`, `pull-requests: read`, `actions: write`. `docs/release-process.md` (re-run of a failed tagging run; the repair when the defect is in `tag-release.yml` itself, per R17), `msvc-build-conventions` ("triggered by pushing a tag" becomes a tag ref from a push or a dispatch), `docs/ci-pipeline.md`.
+- Files: `.github/workflows/tag-release.yml`, `.claude/skills/msvc-build-conventions/SKILL.md`, `docs/release-process.md`, `docs/ci-pipeline.md`.
+- Owners: `build-pipeline-engineer` → `code-reviewer`.
+- Verification: before merge — review, `gate-x86` and `gate-x64` green; after merge — stage 7.
+- Approval: checkpoint before merge.
+
+### Stage 6e — user-facing documentation fixes (first releasable content)
+- Description: README wording on how CHANGELOG sections are identified (commit hashes, not tags); `docs/capl-framework.md` setup steps name the GitHub release assets. On `fix/` branches with `fix:` commits, merged after stage 6a so they count past the cut-off.
+- Files: `README.md`, `docs/capl-framework.md`.
+- Owners: `docs-writer` (wording approved by the user) → `code-reviewer`.
+- Verification: `gate-x86` and `gate-x64` green.
+- Approval: the user approves the wording.
+
+### Stage 6f — flow documents
+- Description: a new revision of `docs/ci-optimized-flow.md` (base: the committed version) and an update of `docs/ci-flow.md` to the implemented flow.
+- Files: `docs/ci-optimized-flow.md`, `docs/ci-flow.md`.
+- Owners: `build-pipeline-engineer` → `code-reviewer`.
+- Verification: every claim about existing behavior matches the workflows on `main`; `gate-x86` and `gate-x64` green.
+- Approval: the user approves the text.
+
 ### Stage 7 — first automated release (the next version after v0.1.0)
-- Description: a human verifies the release PR and squash-merges it; `build-pipeline-engineer` observes.
-- Verification: tag on the squash-merge commit; `release.yml` in tag mode passed both pipelines (x86 and x64); the release has 3 assets, a correct `SHA256SUMS` and verified attestations.
-- Rollback: draft-first and paths A/B in `docs/release-process.md`.
+- Description: a human reviews the release PR (one label, version preview, generated notes, CAUTION block if any) and squash-merges it; `build-pipeline-engineer` observes.
+- Verification: tag on the squash-merge commit; `release.yml` in tag mode passed both pipelines (x86 and x64); the release has 3 assets, a correct `SHA256SUMS` and verified attestations. First-run facts to confirm: `pull-requests: write` adds and removes an existing label and posts a comment; `pulls/N/commits` works with pull-request read; the squash subject contains "(#N)"; dispatched checks on the bot PR satisfy the ruleset; a `pull_request` check lands on the head SHA; the newest run of a same-named check counts; which workflow file version "Re-run jobs" uses.
+- Rollback: re-run (R17); a defect is handled per R18.
 - Approval: checkpoint before merging the release PR.
 
 ## 5. Risks
-- Required checks from a dispatch: checks from a dispatch on the bot's branch are expected to count as required (attached to the SHA, matched by name). Stage 5 confirms this; if not, the effect is safe — the PR cannot be merged.
-- CI cost: every merge to `main` triggers an additional full CI run on `release/next`.
-- A miscategorized CHANGELOG entry → wrong version. Safety nets: preview in the PR description, `bump:*` labels. A published tag must never be moved; the fix is the next release.
-- Rewriting the parser on the release path (stage 3): identical behavior is required, with a side-by-side comparison of the old and new parser's results.
+- Required checks from a dispatch on the bot's branch: confirmed on an ordinary branch; on the release PR only after stage 6c. If not accepted, the PR cannot be merged (safe).
+- A skipped required check counts as passed: `actionlint` is never required; `bump label` decides by exit code, never by `if:`.
+- Label override: every push to `main` resets a human-changed label to the computed level; the change is visible in a comment; the label is set as the last step before merging.
+- Notes quality depends on commit messages; the skill and the warnings mitigate; the export table in the notes lists the CAPL functions.
+- "(#N)" missing from a subject: the type still comes from the branch prefix, the breaking marker is not read; a warning shows it.
+- Re-run may use the original workflow file (unverified until stage 7): a defect in `tag-release.yml` itself is then repaired per R17.
+- A burned version leaves a gap in the numbering, and its changes appear in no public release notes (R18).
+- CI cost: every rebuild of `release/next` runs CI on x86 and x64.
 - A rebase merge breaks the first-parent rule; recommended repo setting "squash only" (does not block the plan).
-- Manual commits on `release/next` disappear on rebuild (R5); this must be stated in the PR description.
+- Manual commits on `release/next` disappear on rebuild (R5); the PR description says so.
 - Export contract, `/MT`, x86/x64 parity: no impact.
 
 ## 6. Open questions
-None. Non-blocking repo settings to consider: "squash only", number of required PR approvals.
+None. Repository settings not yet confirmed are listed in §2 and are confirmed before stage 6c.
