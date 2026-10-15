@@ -216,6 +216,35 @@ them. The job is not a gate and not a required check, and no gate waits for
 it. The script exits 0 when every case matched, 1 when one did not, and 2 on a
 usage error.
 
+## The actionlint job (decided during github-actions-optimization Stage 5a)
+
+`ci.yml` has an `actionlint` job on `ubuntu-latest` (default shallow checkout,
+`permissions: contents: read`) that lints every file in `.github/workflows/`.
+It has no path filter, so a change to anything lints all workflows. Its `if:`
+is `github.event_name != 'workflow_dispatch'`: a dispatch exists only to attach
+the gate checks to a branch, and the job is not needed for that.
+
+The job is not a gate and not a required check, and no gate waits for it. In
+this form it must never become a required check: a job skipped by its `if:`
+reports as skipped, and a skipped required check counts as passing, so the
+dispatch runs would satisfy the requirement without linting anything.
+
+The version and its SHA-256 are job-level `env:` values
+(`ACTIONLINT_VERSION`, `ACTIONLINT_SHA256`) and are pinned together. The
+checksum is the `linux_amd64` line of the release's own
+`actionlint_<version>_checksums.txt` (the same value GitHub shows as the
+asset's digest), not a value computed from a download. The first step
+downloads `actionlint_<version>_linux_amd64.tar.gz`, runs `sha256sum --check`
+against the pin and extracts the binary only if it matches. Updating means
+changing both values from the new release's checksums file. Every `run:` step
+captures the status of a failing command with `code=0; out=$(cmd) || code=$?`
+because the runner's `bash -e -o pipefail` would otherwise end the step before
+the error message is printed (see the `bash` steps section above).
+
+`actionlint` runs `shellcheck` on `run:` scripts when it finds one on `PATH`.
+`ubuntu-latest` has it installed, so the job can report shell findings that a
+local run without `shellcheck` does not.
+
 ## `ci.yml` never calls `scripts/setup-dev-env.ps1` (found during Stage 6/7, BPE-24)
 
 That script provisions a local development machine: installing MSVC Build
