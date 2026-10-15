@@ -51,7 +51,7 @@ restifycapl gives CAPL scripts direct REST/HTTP access: blocking calls for Measu
 
 - Windows.
 - A CANoe installation whose bitness matches the DLL you load: 32-bit CANoe needs the x86 build, 64-bit CANoe needs the x64 build. CANoe refuses to load a DLL of the wrong bitness.
-- To build it yourself: whatever [`scripts/setup-dev-env.ps1`](scripts/setup-dev-env.ps1) provisions — MSVC Build Tools, `make`, vcpkg-built libcurl for both architectures, and the pinned `json.hpp`.
+- To build it yourself: whatever [`scripts/setup-dev-env.ps1`](scripts/setup-dev-env.ps1) provisions — MSVC Build Tools, `make`, vcpkg-built libcurl for both architectures, the pinned `json.hpp`, and the `actionlint` and `shellcheck` workflow lint tools (see [Linting the workflows](#linting-the-workflows)).
 
 ## Building the DLL
 
@@ -311,6 +311,74 @@ See [`docs/capl-framework.md`](docs/capl-framework.md) for the layout, setup ste
 ## Development and testing
 
 `make test` builds and runs the GoogleTest suite outside CANoe (defaults to the x64 architecture). CI builds and tests both x86 and x64 on every push.
+
+### Linting the workflows
+
+[`scripts/setup-dev-env.ps1`](scripts/setup-dev-env.ps1) installs `actionlint` and `shellcheck` (Windows amd64, SHA-256 verified) into `%LOCALAPPDATA%\restifycapl\tools\bin` and adds that folder to your user `PATH`. No administrator rights are needed. After running the script, open a new terminal window and check that both tools are found:
+
+```powershell
+actionlint -version
+shellcheck --version
+```
+
+To set up the build environment without the lint tools, skip them:
+
+```powershell
+.\scripts\setup-dev-env.ps1 -SkipLintTools
+```
+
+Re-running the script is safe: it installs again only when a pinned version has changed.
+
+#### actionlint
+
+`actionlint` checks the workflow files in `.github/workflows`. It needs `shellcheck` on `PATH` to also check the shell code in the `run:` blocks. Run it from the repository root:
+
+```powershell
+actionlint -color
+actionlint .github/workflows/ci.yml
+```
+
+The first command lints every workflow, the second a single file. The exit code is 0 when clean and 1 when there are findings, including info-level `shellcheck` findings. This is the same `actionlint` check CI's job runs; the `shellcheck` version may differ from CI's, so results can differ slightly.
+
+A finding is printed as `file:line:col: message [rule]` followed by a source excerpt:
+
+```text
+.github\workflows\auto-pr.yml:73:9: shellcheck reported issue in this script: SC2016:info:39:10: Expressions don't expand in single quotes, use double quotes for that [shellcheck]
+   |
+73 |         run: |
+   |         ^~~~
+```
+
+For shell findings, the reported `file:line:col` is the position of the `run:` key, not of the offending line. The position of the problem is inside the message, after the rule number: `SC2016:info:39:10` means line 39, column 10 of the script, where the first content line of the `run:` block is line 1. Rule explanations are at `https://www.shellcheck.net/wiki/SCxxxx`, for example [SC2016](https://www.shellcheck.net/wiki/SC2016).
+
+To silence a finding that is intentional, put `# shellcheck disable=SCxxxx` on its own line directly before the offending line inside the `run:` block, at the same indentation, and add a comment with the reason. Placing the directive earlier in the block, such as before `set -euo pipefail`, does not silence a finding a few lines below it.
+
+```yaml
+run: |
+  # Single quotes are intentional: the variable must expand in the called program.
+  # shellcheck disable=SC2016
+  some-command 'literal $VALUE'
+```
+
+`actionlint -ignore 'SC2016'` also works, but it is a regular expression on the message: it applies to the whole invocation and hides every match. Prefer the inline directive.
+
+#### shellcheck
+
+`shellcheck` also runs on its own against a shell script file. The repository has no tracked `.sh` files, since its shell code lives in workflow `run:` blocks, so this is for checking a script you are writing:
+
+```powershell
+shellcheck script.sh
+shellcheck -S warning script.sh
+shellcheck -e SC2086 script.sh
+shellcheck --format=gcc script.sh
+```
+
+- `shellcheck script.sh` prints each finding as `In script.sh line 3:`, the source line, then `^-- SC2086 (info): Double quote to prevent globbing and word splitting.` and a suggested fix. The exit code is 1 on findings and 0 when clean.
+- `-S warning` shows only warnings and above.
+- `-e SC2086` excludes one rule.
+- `--format=gcc` prints one `file:line:col: note: message [SC2086]` line per finding.
+
+See [`docs/development-environment.md`](docs/development-environment.md) ("Workflow lint tools") for the install details and how to remove the tools, and [`docs/ci-pipeline.md`](docs/ci-pipeline.md) for the CI job.
 
 See [`CLAUDE.md`](CLAUDE.md) for the full directory layout and project conventions.
 

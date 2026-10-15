@@ -236,7 +236,9 @@ checksum is the `linux_amd64` line of the release's own
 asset's digest), not a value computed from a download. The first step
 downloads `actionlint_<version>_linux_amd64.tar.gz`, runs `sha256sum --check`
 against the pin and extracts the binary only if it matches. Updating means
-changing both values from the new release's checksums file. Every `run:` step
+changing both values from the new release's checksums file, and the version and
+Windows checksum in `scripts/setup-dev-env.ps1`, which fails when its pin
+differs from `ACTIONLINT_VERSION`. Every `run:` step
 captures the status of a failing command with `code=0; out=$(cmd) || code=$?`
 because the runner's `bash -e -o pipefail` would otherwise end the step before
 the error message is printed (see the `bash` steps section above).
@@ -244,6 +246,10 @@ the error message is printed (see the `bash` steps section above).
 `actionlint` runs `shellcheck` on `run:` scripts when it finds one on `PATH`.
 `ubuntu-latest` has it installed, so the job can report shell findings that a
 local run without `shellcheck` does not.
+
+`scripts/setup-dev-env.ps1` installs `actionlint` and `shellcheck` for Windows
+(see `docs/development-environment.md`). After running it and opening a new
+window, lint locally from the repository root with `actionlint -color`.
 
 ## `ci.yml` never calls `scripts/setup-dev-env.ps1` (found during Stage 6/7, BPE-24)
 

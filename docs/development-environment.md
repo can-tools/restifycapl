@@ -46,6 +46,7 @@ The script is idempotent — safe to re-run. Switches for partial/repeat runs:
 | `-SkipMake` | Skip probing/installing `make` |
 | `-SkipVcpkg` | Skip vcpkg bootstrap / curl install / `.lib` copy |
 | `-SkipJson` | Skip the `json.hpp` download/verify step |
+| `-SkipLintTools` | Skip installing actionlint and shellcheck |
 | `-VcpkgRoot <path>` | Use an explicit vcpkg checkout instead of the default (`$env:VCPKG_ROOT`, or `%LOCALAPPDATA%\vcpkg`) |
 | `-Force` | Re-download `json.hpp` even if a verified copy is already present |
 
@@ -470,6 +471,49 @@ foreach ($a in 'X64','X86') { foreach ($n in 'PATH','INCLUDE','LIB','LIBPATH') {
 
 (found during Stage 12, D23)
 
+## Workflow lint tools (actionlint and shellcheck)
+
+The script installs the Windows amd64 builds of `actionlint` and `shellcheck`
+so the workflows can be linted locally with the checks CI runs: `actionlint`
+runs `shellcheck` on every `run:` block when it finds `shellcheck` on `PATH`.
+From the repository root, in a new window:
+
+```powershell
+actionlint -color
+```
+
+- Install folder: `%LOCALAPPDATA%\restifycapl\tools\bin`, a per-user location
+  that needs no elevation (the same reasoning as the default vcpkg checkout
+  under `%LOCALAPPDATA%`). Both executables sit in that one folder.
+- `PATH`: that folder is appended once to the **user** `PATH`, compared after
+  expanding `%VAR%` entries and ignoring a trailing `\`, so re-running never
+  duplicates it. The value is edited in `HKCU\Environment` as `REG_EXPAND_SZ`;
+  `[Environment]::SetEnvironmentVariable` would rewrite it as `REG_SZ` and
+  freeze any `%VAR%` entry already in the user `PATH`. Open a new terminal
+  window afterwards; if a window started from the Start menu still misses it,
+  sign out and in.
+- Pins and checksums are constants in the script. The `actionlint` SHA-256 is
+  the `windows_amd64.zip` line of the release's
+  `actionlint_<version>_checksums.txt`. `shellcheck` publishes no checksums
+  file; its SHA-256 is the asset digest GitHub shows for `shellcheck-v<version>.zip`
+  (the only Windows asset). The archive is verified before anything is
+  extracted; a mismatch is a FAIL and nothing is installed.
+- Re-running compares the installed version (`actionlint -version`,
+  `shellcheck --version`) with the pin and only downloads when they differ, so
+  changing a pin in the script and re-running upgrades in place. If an
+  executable is running and cannot be replaced, that tool FAILs with a message.
+- Drift: the script reads `ACTIONLINT_VERSION` from `.github/workflows/ci.yml`
+  and FAILs without installing anything when it differs from its own pin.
+  Bumping `actionlint` therefore means changing the version and SHA-256 in
+  `ci.yml` (Linux line) and in the script (Windows line) together.
+  `shellcheck` is not pinned in CI (`ubuntu-latest` ships its own copy), so
+  the local version can differ from CI's.
+
+To remove: delete the folder and remove its entry from the user `PATH`
+(Settings, "Edit environment variables for your account").
+
+(decided during github-actions-optimization Stage 5a)
+
 ## Line endings
 
 `.gitattributes` sets `* text=auto eol=crlf`: the repository index stores
@@ -491,6 +535,7 @@ do not convert files with `sed -i` or any other automated rewrite.
 ## Human approval gate
 
 The script installs software and touches global machine state (VS Build
-Tools, `make`, PowerShell 7, vcpkg packages, and the eight `RESTIFY_MSVC_*`
-user environment variables). Per the project plan it must be approved before
-its first run on a given machine.
+Tools, `make`, PowerShell 7, vcpkg packages, the eight `RESTIFY_MSVC_*`
+user environment variables, and one user `PATH` entry for the lint tools).
+Per the project plan it must be approved before its first run on a given
+machine.
