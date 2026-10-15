@@ -1,9 +1,0 @@
-{
-  "command": "cut",
-  "eol": "lf",
-  "params": {"base": "1234567890abcdef1234567890abcdef12345678", "date": "2026-02-30"},
-  "expect": {
-    "exit": 2,
-    "output": []
-  }
-}

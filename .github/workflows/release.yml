@@ -21,6 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      pull-requests: read
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
       version: ${{ steps.tag.outputs.version }}
@@ -94,28 +95,77 @@ jobs:
         run: pwsh -NoProfile -File scripts/ci/changelog.ps1 notes -Mode "$MODE" -Sha "$GITHUB_SHA" -Output "$RUNNER_TEMP/notes-body.md"
 
       - name: Show the version
+        if: steps.mode.outputs.mode == 'tag'
         shell: bash
         env:
-          MODE: ${{ steps.mode.outputs.mode }}
           TAG_VERSION: ${{ steps.tag.outputs.version }}
+        run: printf "%s\n\n" "Version $TAG_VERSION, taken from the tag." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Preview the next release
+        if: steps.mode.outputs.mode == 'dry-run'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          # bash runs with -e: capture next-version's status on the same line or the step ends early.
+          # Informational: every outcome is written to the summary and the step ends green.
           set -euo pipefail
-          if [ "$MODE" = "tag" ]; then
-            printf "%s\n\n" "Version $TAG_VERSION, taken from the tag." >> "$GITHUB_STEP_SUMMARY"
-          else
-            code=0
-            next=$(pwsh -NoProfile -File scripts/ci/changelog.ps1 next-version) || code=$?
-            if [ "$code" -eq 0 ]; then
-              printf "%s\n\n" "Next version computed from [Unreleased], with no bump label: $next. A dry run publishes nothing." >> "$GITHUB_STEP_SUMMARY"
-            elif [ "$code" -eq 1 ]; then
-              reason=$(printf '%s\n' "$next" | sed 's/^::error:://')
-              printf "%s\n\n" "No next version can be computed from [Unreleased]: $reason" >> "$GITHUB_STEP_SUMMARY"
-            else
-              echo "::warning::next-version failed with exit code $code"
-              printf "%s\n\n" "next-version failed with exit code $code; see the log of this step." >> "$GITHUB_STEP_SUMMARY"
-            fi
+          messages="$RUNNER_TEMP/pr-messages.json"
+          generated="$RUNNER_TEMP/CHANGELOG.generated.md"
+          section="$RUNNER_TEMP/section.md"
+          summary() { printf "%s\n\n" "$1" >> "$GITHUB_STEP_SUMMARY"; }
+          cl() { code=0; out=$(pwsh -NoProfile -File scripts/ci/changelog.ps1 "$@") || code=$?; reason=$(printf '%s\n' "$out" | sed 's/^::error:://'); }
+
+          cl prs
+          if [ "$code" -ne 0 ]; then
+            echo "::warning::could not list the pull requests (exit $code)"
+            summary "No release preview: could not list the pull requests since the last tag: $reason"
+            exit 0
           fi
+          printf '{}' > "$messages"
+          while read -r n; do
+            [ -n "$n" ] || continue
+            code=0; msgs=$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/pulls/$n/commits" | jq -c '[.[][].commit.message]') || code=$?
+            if [ "$code" -ne 0 ]; then
+              echo "::warning::could not read the commits of pull request #$n (exit $code)"
+              summary "No release preview: could not read the commits of pull request #$n."
+              exit 0
+            fi
+            merged=$(jq -c --arg n "$n" --argjson m "$msgs" '. + {($n): $m}' "$messages")
+            printf '%s' "$merged" > "$messages"
+          done <<< "$out"
+
+          cl level -PrMessages "$messages"
+          if [ "$code" -ne 0 ]; then
+            echo "::warning::level failed with exit code $code"
+            summary "No release preview: the level could not be computed: $reason"
+            exit 0
+          fi
+          level="$out"
+          if [ "$level" = "none" ]; then
+            summary "Nothing to release: no commit since the last tag, after the cut-off, is a feat/, stage/ or fix/ change or a breaking change. A dry run publishes nothing."
+            exit 0
+          fi
+
+          cl next-version -Level "$level"
+          if [ "$code" -ne 0 ]; then
+            echo "::warning::next-version failed with exit code $code"
+            summary "No release preview: the version could not be computed: $reason"
+            exit 0
+          fi
+          version="$out"
+
+          cl generate -PrMessages "$messages" -Output "$generated" -SectionOutput "$section"
+          echo "$out"
+          if [ "$code" -ne 0 ]; then
+            summary "Level $level, next version $version, but the section could not be generated: $reason"
+            exit 0
+          fi
+          {
+            printf "%s\n\n" "Level $level, next version $version, computed from origin/main with no bump label. A dry run publishes nothing and changes no file."
+            printf '<details><summary>Generated CHANGELOG section</summary>\n\n````markdown\n'
+            cat "$section"
+            printf '````\n\n</details>\n\n'
+          } >> "$GITHUB_STEP_SUMMARY"
           exit 0
 
       - name: Upload the notes body
@@ -389,9 +439,9 @@ jobs:
         shell: bash
         run: |
           if gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" > /dev/null 2>&1; then
-            msg="The release for $TAG is public. Never move the tag; fix forward with a new version and mark this release as withdrawn."
+            msg="The release for $TAG is public. Never move the tag; fix forward through a fix/ pull request and the next version."
           else
-            msg="Nothing is public for $TAG. Re-run the failed jobs for a transient failure, or delete the draft and the tag, fix, and tag again."
+            msg="Nothing is public for $TAG. Re-run the failed jobs for a transient failure. For a defect, the tag stays and its name is never reused: fix it through a fix/ pull request and release the next version; the draft may be deleted."
           fi
           echo "::error::$msg"
           echo "$msg" >> "$GITHUB_STEP_SUMMARY"

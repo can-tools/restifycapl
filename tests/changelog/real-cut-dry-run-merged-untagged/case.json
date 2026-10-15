@@ -26,10 +26,10 @@
   "expect": {
     "exit": 0,
     "output": [
-      "::notice::The cut ## [0d0f52240d49] - 2026-10-09 is merged on main as 0e362df99ef1; push the tag on 0e362df99ef1."
+      "::notice::The cut ## [0d0f52240d49] - 2026-10-09 is merged on main as 0e362df99ef1; re-run the failed `tag-release.yml` run."
     ],
     "summary": [
-      "The cut ## [0d0f52240d49] - 2026-10-09 is merged on main as 0e362df99ef1; push the tag on 0e362df99ef1.",
+      "The cut ## [0d0f52240d49] - 2026-10-09 is merged on main as 0e362df99ef1; re-run the failed `tag-release.yml` run.",
       "Release notes taken from the CHANGELOG section `## [0d0f52240d49] - 2026-10-09` (dry-run mode)."
     ]
   }

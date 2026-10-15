@@ -1,6 +1,9 @@
 {
   "command": "next-version",
   "eol": "lf",
+  "params": {
+    "level": "minor"
+  },
   "git": {
     "allTags": ["v0.9.9"]
   },

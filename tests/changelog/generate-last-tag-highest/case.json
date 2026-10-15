@@ -1,0 +1,36 @@
+{
+  "command": "generate",
+  "eol": "lf",
+  "params": {
+    "date": "2026-11-01",
+    "prMessages": {
+      "71": [
+        "fix: after the highest tag"
+      ]
+    }
+  },
+  "git": {
+    "allTags": [
+      "v0.9.0",
+      "v0.10.0",
+      "v0.2.0",
+      "v0.10.0-rc1"
+    ],
+    "tip": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+    "log": [
+      {
+        "sha": "0000000a0000000a0000000a0000000a0000000a",
+        "subject": "fix/after-tag (#71)"
+      }
+    ],
+    "cutOff": "0000000100000001000000010000000100000001",
+    "cutOffChain": [
+      "0000000100000001000000010000000100000001"
+    ],
+    "logRange": "v0.10.0..a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+  },
+  "expect": {
+    "exit": 0,
+    "output": []
+  }
+}
