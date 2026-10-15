@@ -197,7 +197,9 @@ jobs:
         run: |
           set -euo pipefail
           ls -1 dist
-          [ "$(ls -1 dist | sort | tr '\n' ' ')" = "restifycapl-x64.dll restifycapl-x86.dll " ] || {
+          shopt -s nullglob
+          dist_files=(dist/*)
+          [ "$(printf '%s\n' "${dist_files[@]#dist/}" | sort | tr '\n' ' ')" = "restifycapl-x64.dll restifycapl-x86.dll " ] || {
             echo "::error::dist must contain exactly the two DLLs"
             exit 1
           }
@@ -212,15 +214,23 @@ jobs:
           {
             cat parts/body/notes-body.md
             printf '\n### Using this release\n\n'
-            printf '%s\n\n' 'Take `capl/` from this tag'"'"'s source archive; a DLL and `capl/` from different versions fail at CAPL compile.'
-            printf '%s\n\n' 'Check a download: in PowerShell, `Get-FileHash restifycapl-x64.dll` must print the hash listed for that file in `SHA256SUMS` (likewise `restifycapl-x86.dll`).'
-            printf '%s\n' 'Both DLLs carry a GitHub build-provenance attestation, which the release workflow verifies before publishing; to verify it yourself, see `docs/release-process.md` in the source archive.'
+            cat <<'EOF'
+          Take `capl/` from this tag's source archive; a DLL and `capl/` from different versions fail at CAPL compile.
+
+          Check a download: in PowerShell, `Get-FileHash restifycapl-x64.dll` must print the hash listed for that file in `SHA256SUMS` (likewise `restifycapl-x86.dll`).
+
+          Both DLLs carry a GitHub build-provenance attestation, which the release workflow verifies before publishing; to verify it yourself, see `docs/release-process.md` in the source archive.
+          EOF
             printf '\n### Export table\n\n<details>\n<summary>%s functions</summary>\n\n' "$rows"
             cat parts/table/export-table.md
             printf '\n</details>\n'
           } > dist/notes.md
 
-          chars=$(pwsh -NoProfile -Command '$t = [System.Text.Encoding]::UTF8.GetString([System.IO.File]::ReadAllBytes("dist/notes.md")); $t.Length - [regex]::Matches($t, "[\uD800-\uDBFF][\uDC00-\uDFFF]").Count')
+          count_chars=$(cat <<'PS'
+          $t = [System.Text.Encoding]::UTF8.GetString([System.IO.File]::ReadAllBytes("dist/notes.md")); $t.Length - [regex]::Matches($t, "[\uD800-\uDBFF][\uDC00-\uDFFF]").Count
+          PS
+          )
+          chars=$(pwsh -NoProfile -Command "$count_chars")
           if [ "$chars" -gt 125000 ]; then
             echo "::error::release notes are $chars characters, the limit is 125000"
             exit 1
@@ -275,7 +285,7 @@ jobs:
           set -euo pipefail
           for dll in restifycapl-x86.dll restifycapl-x64.dll; do
             verified=0
-            for attempt in 1 2 3; do
+            for _ in 1 2 3; do
               if gh attestation verify "dist/$dll" \
                   --repo "$GITHUB_REPOSITORY" \
                   --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"; then

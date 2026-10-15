@@ -109,29 +109,37 @@ jobs:
             echo '## Merge checklist'
             echo
             if [ "${plan_only}" = "true" ]; then
-              echo 'Plan-only branch: the `code-reviewer`, human-gate and `CHANGELOG.md` items'
-              echo 'below do not apply. CI green and up-to-date-with-`main` still apply.'
-              echo
+              cat <<'EOF'
+          Plan-only branch: the `code-reviewer`, human-gate and `CHANGELOG.md` items
+          below do not apply. CI green and up-to-date-with-`main` still apply.
+
+          EOF
             fi
-            echo '- [ ] CI green on both legs (`build + test (x86)`, `build + test (x64)`)'
-            echo '- [ ] `code-reviewer` clean on this branch (`git diff main...HEAD`), zero Must-fix'
-            echo '- [ ] Human gate passed against the PR CI artifact, if this branch has one'
+            cat <<'EOF'
+          - [ ] CI green on both legs (`build + test (x86)`, `build + test (x64)`)
+          - [ ] `code-reviewer` clean on this branch (`git diff main...HEAD`), zero Must-fix
+          - [ ] Human gate passed against the PR CI artifact, if this branch has one
+          EOF
             if [ "${exports_touched}" = "true" ]; then
               echo '- [ ] CANoe check: the CAPL nodes in capl/ compile in CANoe against the DLL from this PR'"'"'s CI artifact (author before Ready for review, or reviewer before approval)'
             fi
-            echo '- [ ] `CHANGELOG.md` `[Unreleased]` entry present'
-            echo '- [ ] Branch up to date with `main`'
-            echo '- [ ] Plan folded into `plan.md`, incl. any task-ID/section renumbering (last commit before marking Ready for review)'
-            echo
+            cat <<'EOF'
+          - [ ] `CHANGELOG.md` `[Unreleased]` entry present
+          - [ ] Branch up to date with `main`
+          - [ ] Plan folded into `plan.md`, incl. any task-ID/section renumbering (last commit before marking Ready for review)
+
+          EOF
             echo "${todo_line}"
 
             if [ "${exports_touched}" = "true" ]; then
-              echo
-              echo '---'
-              echo
-              echo '⚠️ This branch touches `src/module/exports.cpp`. Never have two open PRs that'
-              echo 'both touch this file. Also confirm the `export-table` check is green: it is'
-              echo 'not a required check, so a red result does not block the merge.'
+              cat <<'EOF'
+
+          ---
+
+          ⚠️ This branch touches `src/module/exports.cpp`. Never have two open PRs that
+          both touch this file. Also confirm the `export-table` check is green: it is
+          not a required check, so a red result does not block the merge.
+          EOF
             fi
 
             if [ -s "$RUNNER_TEMP/subjects.txt" ]; then
