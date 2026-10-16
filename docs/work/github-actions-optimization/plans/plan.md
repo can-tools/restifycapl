@@ -95,7 +95,7 @@ Stages 0–5 are done and merged on `main`; their text is kept as the record.
 
 ### Stage 5a — actionlint
 - Description: an `actionlint` job in `ci.yml`: no path filter, `if: github.event_name != 'workflow_dispatch'`, not a required check, pinned version with the download verified by SHA-256, `contents: read`. In that form it must never become a required check (a skipped required check counts as passed). No CHANGELOG entry (commits before the cut-off of stage 6a count as `### Development`).
-- Files: `.github/workflows/ci.yml`, `docs/ci-pipeline.md`.
+- Files: `.github/workflows/ci.yml`, `.github/workflows/auto-pr.yml`, `.github/workflows/release.yml`, `scripts/setup-dev-env.ps1`, `README.md`, `docs/development-environment.md`, `docs/ci-pipeline.md`.
 - Owners: `build-pipeline-engineer` → `code-reviewer`.
 - Verification: `actionlint` green on all workflows; `gate-x86` and `gate-x64` green.
 - Approval: no.
@@ -104,7 +104,7 @@ Stages 0–5 are done and merged on `main`; their text is kept as the record.
 - Description: in `scripts/ci/changelog.ps1`: `level` (level from the subjects of `git log <last tag>..<sha>` and from a file of PR commit messages fetched by the workflow; the script stays offline), `generate` (section per R11, heading per §2, link definition), `next-version` taking a level or a label, `cut` removed, `notes` and `check` unchanged, the one-time cut-off SHA (R11; set to the `main` tip the last version of this PR is based on), and the dry-run notice "re-run the failed `tag-release.yml` run" instead of "push the tag". Fixtures: `cut` cases removed and replaced by `generate` cases; `next-version` cases built on headings removed, tag/label/overflow cases adapted; dry-run cases using `[Unreleased]` adapted. `CHANGELOG.md`: remove `## [Unreleased]` with its hand-written `### Development` block and update the introduction; the v0.1.0 section stays. `release.yml`: the dry run computes the level from the commit range and previews the generated section without changing files; the `validate` job gets `pull-requests: read`; tag mode unchanged; the failure message of `publish` no longer says "delete the draft and the tag" (R17, R18). New Conventional Commits skill (R12). `project-docs` CHANGELOG section, `.claude/agents/cpp-implementer.md` (the `[Unreleased]` bullet duty) and `.claude/agents/build-pipeline-engineer.md` (the `[Unreleased]` rename duty) updated to generated sections. `docs/release-process.md` (cutting a release, dry run, failure cases per R17 and R18) and `docs/ci-pipeline.md`.
 - Files: `scripts/ci/changelog.ps1`, `tests/changelog/`, `CHANGELOG.md`, `.github/workflows/release.yml`, `.claude/skills/<new conventional-commits skill>/SKILL.md`, `.claude/skills/project-docs/SKILL.md`, `.claude/agents/cpp-implementer.md`, `.claude/agents/build-pipeline-engineer.md`, `docs/release-process.md`, `docs/ci-pipeline.md`.
 - Owners: `build-pipeline-engineer` → `code-reviewer`.
-- Verification: fixtures green; a dry run on the branch shows the computed level and the generated section and publishes nothing; `gate-x86` and `gate-x64` green.
+- Verification: fixtures green, including the `generate` fixtures, which are the only coverage of a generated section until the first releasing merge; a `Release` dry run on the branch publishes nothing, its notes step passes with the warning that the newest section was already released as v0.1.0, and its preview reports level `none` ("Nothing to release") because every commit on `main` is at or before the cut-off — so no pull request is listed and `pull-requests: read` is not exercised, which stays a Stage 7 first-run fact; `gate-x86` and `gate-x64` green.
 - Approval: checkpoint before merge; the user approves the texts of the new skill, the `project-docs` change and the agent files item by item.
 
 ### Stage 6b — `feat/` branch prefix
@@ -132,7 +132,7 @@ Stages 0–5 are done and merged on `main`; their text is kept as the record.
 - Description: README wording on how CHANGELOG sections are identified (commit hashes, not tags); `docs/capl-framework.md` setup steps name the GitHub release assets. On `fix/` branches with `fix:` commits, merged after stage 6a so they count past the cut-off.
 - Files: `README.md`, `docs/capl-framework.md`.
 - Owners: `docs-writer` (wording approved by the user) → `code-reviewer`.
-- Verification: `gate-x86` and `gate-x64` green.
+- Verification: `gate-x86` and `gate-x64` green; after the merge, a `Release` dry run on `main` shows level `patch` and the generated section and publishes nothing.
 - Approval: the user approves the wording.
 
 ### Stage 6f — flow documents
