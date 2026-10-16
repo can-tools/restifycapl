@@ -1,5 +1,3 @@
-# release.yml -- release of the two DLLs. The mode follows the ref: a tag ref
-# (pushed or dispatched) publishes, a branch ref is a dry run that never does.
 # See docs/release-process.md.
 
 name: Release
@@ -130,7 +128,12 @@ jobs:
               summary "No release preview: could not read the commits of pull request #$n."
               exit 0
             fi
-            merged=$(jq -c --arg n "$n" --argjson m "$msgs" '. + {($n): $m}' "$messages")
+            code=0; merged=$(jq -c --arg n "$n" --argjson m "$msgs" '. + {($n): $m}' "$messages") || code=$?
+            if [ "$code" -ne 0 ]; then
+              echo "::warning::could not add the commits of pull request #$n to the messages file (exit $code)"
+              summary "No release preview: could not add the commits of pull request #$n to the messages file."
+              exit 0
+            fi
             printf '%s' "$merged" > "$messages"
           done <<< "$out"
 

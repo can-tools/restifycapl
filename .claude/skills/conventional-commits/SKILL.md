@@ -18,6 +18,8 @@ The scope is optional. Reference: docs/recommendations/Conventional_Commits_v1.0
 | `chore/` | `chore:` | none (Development) |
 | `docs/` | `docs:` | none (Development) |
 
+The release effect comes from the branch prefix, not from the commit types: a `feat/`, `stage/` or `fix/` pull request releases even when all its messages are `chore:` (it is then listed by its branch name), so a change with nothing for users goes on a `chore/` branch.
+
 `stage:` means `feat:` and is used only for user-visible changes. Internal
 changes on a `stage/` branch use `chore:`.
 

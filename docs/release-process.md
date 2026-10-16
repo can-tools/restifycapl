@@ -11,8 +11,9 @@ the `msvc-build-conventions` skill.
   because `capl/includes/includes.cin` loads them by name.
 - `SHA256SUMS` for the two DLLs.
 - Release notes: the generated `CHANGELOG.md` section for the release (found
-  through the tagged commit's first parent) without its `### Development` part, then a generated `### Using this release` block and
-  a generated `### Export table` inside `<details>`.
+  through the tagged commit's first parent) without its `### Development`
+  part, then a generated `### Using this release` block and a generated
+  `### Export table` inside `<details>`.
 
 `capl/` is not packaged. Take it from the source archive of the same tag; a
 DLL and `capl/` from different versions fail at CAPL compile.
@@ -34,7 +35,9 @@ and `CHANGELOG.md` has no `## [Unreleased]`.
    of the section, taken from git. Rules:
    - The type comes from the commit subject, which is the pull request title
      (the branch name) plus `(#N)`: `feat/` and `stage/` minor, `fix/` patch,
-     `chore/` and `docs/` no release.
+     `chore/` and `docs/` no release. A subject starting with `release/` is
+     skipped; a subject with no known branch prefix is listed under Development
+     with a warning.
    - Entries come from the commit messages of the pull request, which the
      workflow fetches (the script itself stays offline): one entry per `feat`,
      `stage` or `fix` message, each linking to the pull request. A releasing
@@ -44,15 +47,21 @@ and `CHANGELOG.md` has no `## [Unreleased]`.
    - A breaking change is `type!:` or a `BREAKING CHANGE:` footer in any
      message, on any branch type. It gives minor while the major version is 0
      and major from 1.0.0; 1.0.0 itself is reached only with a `bump:major`
-     label.
+     label. A non-empty footer text replaces the description as the entry text,
+     and types are recognized only in lowercase followed by `: ` (`Fix:` is
+     ignored).
    - Sections are Breaking changes, Added, Fixed and Development, in that order.
      `chore/` and `docs/` pull requests are listed under Development, and so is
      every commit up to the one-time cut-off commit named in the script, which
      raises no level. A section with nothing to release besides Development is
      an error.
-3. Squash-merge the pull request that adds the section. Do not use a rebase merge: the check in `validate` needs the
-   merge commit's first parent to be the `main` commit named in the heading,
-   which a squash merge guarantees and a rebase merge does not.
+3. Until the release pull request is created automatically, generate the
+   section on a `chore/` branch that is up to date with `origin/main`, run the
+   dry run on that branch, and squash-merge it only while `origin/main` is still
+   the commit named in the heading; if `main` has moved, generate again. Do not
+   use a rebase merge: the check in `validate` needs the merge commit's first
+   parent to be the `main` commit named in the heading, which a squash merge
+   guarantees and a rebase merge does not.
 4. The tag `vX.Y.Z` goes on the squash-merge commit; the version exists only in
    the tag. The release workflow accepts an annotated or a lightweight tag and
    reads nothing from its annotation.
@@ -119,7 +128,8 @@ the Makefile runs `git` on every call and the ancestor check needs
 `origin/main`. The other jobs download artifacts and need no checkout.
 
 The section selection, the hash-heading checks, the notes body and the
-generated section come from `scripts/ci/changelog.ps1` (`pwsh` 7); `tests/changelog/` holds its fixtures.
+generated section come from `scripts/ci/changelog.ps1` (`pwsh` 7);
+`tests/changelog/` holds its fixtures.
 
 A hash heading has the form `## [<12 hex characters>] - YYYY-MM-DD`; the
 parent of a tagged merge commit is its first parent. CHANGELOG matching is
@@ -160,8 +170,8 @@ than one `### Development` block, or an empty section after removing it, fails.
 - **A merged section that stays untagged:** nothing generates it a second time.
   Once `tag-release.yml` exists (it does not yet), re-run its failed run
   ("Re-run jobs"); until then push the tag by hand on the merge commit. If the
-  defect is in the tagging workflow itself and a re-run cannot repair it, an ordinary pull request fixes the
-  workflow and also removes the generated, untagged section from
+  defect is in the tagging workflow itself and a re-run cannot repair it, an
+  ordinary pull request fixes the workflow and also removes the generated, untagged section from
   `CHANGELOG.md`; the next generation then covers the full range since the last
   tag.
 - **Wrong or missing hash heading:** `validate` fails with the expected hash,

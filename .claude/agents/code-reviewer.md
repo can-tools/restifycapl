@@ -57,6 +57,10 @@ files — you produce a review.
    project's only build mechanism is the Makefile (see
    `msvc-build-conventions`) — such a file is itself a review finding, not
    something to silently route around.
+10. **Workflow lint**: for any change under `.github/workflows/`, record the
+    result of the `actionlint` CI job or of a local `actionlint -color` on
+    the reviewed commit, and whether `shellcheck` was on `PATH`; if neither
+    was run, say so.
 
 ## Hard rules
 

@@ -250,7 +250,6 @@ function Invoke-RealGit([string[]]$GitArgs) {
   return [pscustomobject]@{ Code = $p.ExitCode; Out = $o.Result; Err = $e.Result }
 }
 
-# Answers exactly the git calls this script makes, from the case's "git" facts.
 function Invoke-MockGit([string[]]$GitArgs) {
   $f = $script:Ctx.Facts
   $a = $GitArgs
@@ -310,8 +309,6 @@ function Get-GitOutput([string[]]$GitArgs) {
   return $r.Out.Trim()
 }
 
-# A cut is either merged already (the first-parent child of its base carries the
-# heading) or pending (its base must be the origin/main tip the branch contains).
 function Test-Cut([string]$h, [string]$heading, [string]$sha) {
   $found = Invoke-Git @('rev-parse', '--verify', '--quiet', ($h + '^{commit}'))
   $base = $found.Out.Trim()
@@ -349,7 +346,6 @@ function Test-Cut([string]$h, [string]$heading, [string]$sha) {
   }
 }
 
-# A section ends at the next "## [" heading or at a link definition.
 function Get-SectionEnd($lines, [int]$start) {
   for ($i = $start + 1; $i -lt $lines.Count; $i++) {
     if ($ReHead.IsMatch($lines[$i]) -or $ReLinkDef.IsMatch($lines[$i])) { return $i }
@@ -357,7 +353,6 @@ function Get-SectionEnd($lines, [int]$start) {
   return $lines.Count
 }
 
-# Returns the section's notes lines, or $null when nothing is left once "### Development" is removed.
 function Get-SectionBody($lines, [int]$start) {
   $end = Get-SectionEnd $lines $start
   $body = [System.Collections.Generic.List[string]]::new($lines.GetRange($start + 1, $end - $start - 1))
@@ -418,7 +413,6 @@ function Write-Stderr([string]$s) {
   if ($null -ne $script:Ctx.Err) { $script:Ctx.Err.Add($s) } else { [Console]::Error.WriteLine($s) }
 }
 
-# A tag shaped like a version that cannot be a release tag is skipped with a warning; other tags silently.
 function Get-LatestVersion([string[]]$names) {
   $best = $null
   foreach ($name in $names) {
@@ -473,7 +467,6 @@ function Resolve-Base([string]$Base) {
   return $Base
 }
 
-# The pull request messages file: an object of pull request number -> array of full commit messages.
 function Read-PrMessages([string]$path) {
   $messages = @{}
   if ([string]::IsNullOrEmpty($path)) { return $messages }
@@ -520,7 +513,6 @@ function Read-Message([string]$message) {
   return [pscustomobject]@{ Type = $type; Breaking = ($bang -or $null -ne $footer); Text = $text }
 }
 
-# The commits of git log --first-parent <last tag>..<Base>, oldest first, each with its subject and, when the subject names a pull request, that request's parsed messages.
 function Get-Range([string]$Base, $Messages) {
   $latest = Get-LastVersion
   $tag = 'v{0}.{1}.{2}' -f $latest[0], $latest[1], $latest[2]
@@ -567,7 +559,6 @@ function Format-Entry([string]$text, [int]$number, [string]$RepoUrl) {
   return $line
 }
 
-# Sorts the range into the section's entry lists; warnings are returned, not printed.
 function Get-Entries($range, [string]$RepoUrl) {
   $e = [pscustomobject]@{
     Breaking = New-Object System.Collections.Generic.List[string]

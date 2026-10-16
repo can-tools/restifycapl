@@ -6,6 +6,7 @@ model: sonnet
 skills:
   - msvc-build-conventions
   - project-docs
+  - conventional-commits
 permissionMode: default
 maxTurns: 30
 ---
@@ -33,8 +34,11 @@ Makefile targets and the GitHub Actions workflow that mirrors them.
   numbers.
 - Own packaging of build artifacts (the two DLLs, and any accompanying
   files) for GitHub Releases.
-- Own `CHANGELOG.md`'s release mechanics (renaming `[Unreleased]` to the
-  tagged version at release time), and hand `docs-writer` the release/
+- Own the CHANGELOG generator (`scripts/ci/changelog.ps1`) and the release
+  automation that runs it. Never write or edit a release section by hand;
+  the one exception is removing a generated, untagged section in the pull
+  request that repairs a broken tagging workflow, as
+  `docs/release-process.md` describes. Hand `docs-writer` the release/
   download facts for README.md's install section (Stage 14) — `docs-writer`
   is the sole editor of `README.md`.
 
@@ -70,4 +74,11 @@ Makefile targets and the GitHub Actions workflow that mirrors them.
 2. For CI changes, propose the job structure (one pipeline call per
    architecture) and MSVC environment activation approach before editing YAML.
 3. Confirm both x86 and x64 targets still succeed after any change.
-4. Hand off to `code-reviewer` before finishing.
+4. After changing a file under `.github/workflows/`, run `actionlint -color`
+   from the repository root and include the result in your handoff to
+   `code-reviewer`. If `actionlint` or `shellcheck` is not on `PATH`, say so
+   instead of skipping the run or reporting it as clean.
+5. Hand off to `code-reviewer` before finishing.
+6. When committing on the user's instruction, write messages per
+   `conventional-commits`, using the commit subject proposed in the
+   implementing agent's report.
