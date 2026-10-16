@@ -1,0 +1,18 @@
+{
+  "command": "next-version",
+  "eol": "lf",
+  "params": {
+    "level": "none"
+  },
+  "git": {
+    "allTags": [
+      "v0.1.0"
+    ]
+  },
+  "expect": {
+    "exit": 1,
+    "output": [
+      "::error::nothing to release: the level is none"
+    ]
+  }
+}

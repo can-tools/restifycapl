@@ -135,36 +135,20 @@ A function without parameters is written `long restifyFoo()`.
 
 ## CHANGELOG.md
 
-- Format: [Keep a Changelog](https://keepachangelog.com/) — an
-  `## [Unreleased]` section at the top with `Added`/`Changed`/`Fixed`
-  subheadings, moved to a dated section headed
-  `## [<12-char hash>] - YYYY-MM-DD` at release time, under a fresh empty
-  `## [Unreleased]`.
-- The hash is the base commit of the cut: it comes from git
-  (`git rev-parse --short=12 origin/main`), never typed from memory. The cut
-  is squash-merged and the tag goes on the squash-merge commit, whose first
-  parent is that commit; the release workflow checks this. The version lives
-  only in the git tag (see `msvc-build-conventions`): no version is written
-  into a CHANGELOG heading.
-- Internal changes (repository, CI and tooling changes that neither a CAPL
-  user nor someone building from source would notice) go under a
-  `### Development` subsection of the same release section. It stays in
-  `CHANGELOG.md` and is removed from the GitHub release notes. No stage or
-  task IDs anywhere in `CHANGELOG.md`, including `### Development`.
-- Links inside a release section are inline and absolute, pinned to the full
-  40-character hash
-  (`https://github.com/<owner>/<repo>/blob/<full 40-char hash>/...`); a
-  reference-style link definition at the bottom of the file
-  (`[<12-char hash>]: https://github.com/<owner>/<repo>/commit/<full 40-char hash>`)
-  makes the heading clickable. Link definitions serve the headings only and
-  never appear in the release notes.
-- **Who writes what, and when:**
-  - Whoever appends an entry to the export table (`cpp-implementer`, after
-    `code-reviewer` sign-off) adds a one-line bullet under
-    `## [Unreleased]` describing the new/changed operation, *at the time
-    the export table changes* — not deferred, the same principle as "tests
-    aren't optional, add them with the change."
-  - `build-pipeline-engineer` owns the mechanics of cutting a release
-    section: renaming `[Unreleased]` to the hash heading
-    (`## [<12-char hash>] - date`) and starting a fresh empty `[Unreleased]`
-    above it.
+- Format: Keep a Changelog. There is no `## [Unreleased]` and nobody writes
+  release sections by hand: `scripts/ci/changelog.ps1 generate` creates
+  `## [<12-char hash>] - YYYY-MM-DD` from the commit messages since the last
+  tag (see `conventional-commits` and `docs/release-process.md`). Sections:
+  Breaking changes, Added, Fixed, Development, in that order.
+- The hash is the base commit of the cut, taken from git, never typed. The tag
+  goes on the squash-merge commit, whose first parent is that commit; the release
+  workflow checks this. No version is written into a heading (see
+  `msvc-build-conventions`).
+- Development entries (chore/ and docs/ PRs) stay in CHANGELOG.md and are removed
+  from the GitHub release notes. No stage or task IDs in CHANGELOG.md.
+- Links inside a release section are absolute; the heading's link definition
+  `[<12-char hash>]: https://github.com/<owner>/<repo>/commit/<full 40-char hash>`
+  is at the bottom of the file and never appears in the release notes.
+- Who writes what: nobody edits release sections by hand. Authors write
+  commit messages per `conventional-commits`; `build-pipeline-engineer` owns the
+  generator and the release bot.

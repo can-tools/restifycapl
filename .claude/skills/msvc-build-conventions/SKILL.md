@@ -213,6 +213,11 @@ version number found anywhere as a bug.
 - Every `uses:` in a workflow or action file is pinned to a full
   40-character commit SHA with a trailing `# vX.Y.Z` label; local references
   (`./.github/...`) are not pinned.
+- Workflow files lint clean with `actionlint`, run with `shellcheck` on
+  `PATH` so the `run:` blocks are checked too. The `actionlint` job in
+  `ci.yml` must never become a required check (see `docs/ci-pipeline.md`).
+  `scripts/setup-dev-env.ps1` installs the same `actionlint` version, and
+  `shellcheck`, locally.
 - Do not introduce CMake or replace the Makefile-based build unless
   explicitly asked to.
 

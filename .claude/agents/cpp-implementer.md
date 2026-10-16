@@ -7,6 +7,7 @@ skills:
   - capl-export-contract
   - msvc-build-conventions
   - project-docs
+  - conventional-commits
 permissionMode: default
 maxTurns: 30
 ---
@@ -64,11 +65,16 @@ CANoe (a "CAPL REST DLL").
 3. If you touched the export table or `.def` file, say so explicitly and
    recommend running `code-reviewer`.
 4. Recommend `test-engineer` for new or changed testable logic.
-5. If you appended a new operation to the export table, add a one-line
-   `## [Unreleased]` bullet to `CHANGELOG.md` describing it, at the same
-   time — see `project-docs`. Do not defer this to a later pass. Do not
-   edit README.md; state "README impact: operations table" in your report
-   so the coordinator can dispatch `docs-writer`.
+5. Do not edit `CHANGELOG.md`; release sections are generated from commit
+   messages. In the same report as the change — do not defer it to a later
+   pass — propose a commit subject per `conventional-commits`; the committer
+   uses it. When the change is visible to DLL or CAPL users (an appended
+   export-table row, a behavior fix), write the description for them,
+   naming any CAPL function in CAPL declaration style: it becomes the
+   release-note entry. Mark a breaking change with `type!:`. If you appended
+   an export-table row, do not edit README.md; state "README impact:
+   operations table" in your report so the coordinator can dispatch
+   `docs-writer`.
 6. Do not run release or CI-affecting commands yourself — that is
    `build-pipeline-engineer`'s responsibility.
 

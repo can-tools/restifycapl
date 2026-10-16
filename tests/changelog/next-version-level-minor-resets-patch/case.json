@@ -1,0 +1,18 @@
+{
+  "command": "next-version",
+  "eol": "lf",
+  "params": {
+    "level": "minor"
+  },
+  "git": {
+    "allTags": [
+      "v0.1.7"
+    ]
+  },
+  "expect": {
+    "exit": 0,
+    "output": [
+      "0.2.0"
+    ]
+  }
+}

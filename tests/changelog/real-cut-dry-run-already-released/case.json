@@ -30,10 +30,10 @@
   "expect": {
     "exit": 0,
     "output": [
-      "::warning::The newest CHANGELOG section ## [0d0f52240d49] - 2026-10-09 was already released as v0.1.0; this dry run previews its notes again. Add entries to [Unreleased] for the next release."
+      "::warning::The newest CHANGELOG section ## [0d0f52240d49] - 2026-10-09 was already released as v0.1.0; this dry run previews its notes again."
     ],
     "summary": [
-      "The newest CHANGELOG section ## [0d0f52240d49] - 2026-10-09 was already released as v0.1.0; this dry run previews its notes again. Add entries to [Unreleased] for the next release.",
+      "The newest CHANGELOG section ## [0d0f52240d49] - 2026-10-09 was already released as v0.1.0; this dry run previews its notes again.",
       "Release notes taken from the CHANGELOG section `## [0d0f52240d49] - 2026-10-09` (dry-run mode)."
     ]
   }

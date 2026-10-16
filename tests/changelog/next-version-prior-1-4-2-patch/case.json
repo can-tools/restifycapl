@@ -1,6 +1,9 @@
 {
   "command": "next-version",
   "eol": "lf",
+  "params": {
+    "level": "patch"
+  },
   "git": {
     "allTags": ["v1.4.2"]
   },

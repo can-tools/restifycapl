@@ -1,0 +1,40 @@
+{
+  "command": "generate",
+  "eol": "lf",
+  "params": {
+    "date": "2026-11-01",
+    "prMessages": {
+      "51": [
+        "feat: add restifyQux"
+      ]
+    }
+  },
+  "git": {
+    "allTags": [
+      "v0.1.0"
+    ],
+    "tip": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+    "log": [
+      {
+        "sha": "0000000b0000000b0000000b0000000b0000000b",
+        "subject": "feat/typed (#51)"
+      },
+      {
+        "sha": "0000000a0000000a0000000a0000000a0000000a",
+        "subject": "fix/direct-push"
+      }
+    ],
+    "cutOff": "0000000100000001000000010000000100000001",
+    "cutOffChain": [
+      "0000000100000001000000010000000100000001"
+    ],
+    "logRange": "v0.1.0..a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+  },
+  "expect": {
+    "exit": 0,
+    "output": [
+      "::warning::the subject \"fix/direct-push\" has no \"(#N)\"; its commit messages and breaking markers were not read",
+      "::warning::\"fix/direct-push\" has no feat, stage, fix or breaking commit message; it is listed by its branch name"
+    ]
+  }
+}

@@ -3,51 +3,10 @@
 All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
-Release headings correspond to commit hashes of the cut's base on this
-repository; there are no version numbers in files.
-
-## [Unreleased]
-
-### Development
-
-- [.github/workflows/ci.yml](.github/workflows/ci.yml) can now be started with
-  `workflow_dispatch`, which attaches the `build + test (x86)` and
-  `build + test (x64)` checks to the dispatched branch's tip.
-  [.github/workflows/release.yml](.github/workflows/release.yml) now picks its
-  mode from the ref instead of the event: a tag ref publishes (a tag push, or a
-  dispatch on the tag) and a branch ref is a dry run that never publishes. The
-  dry run's `validate` summary shows the version that
-  [scripts/ci/changelog.ps1](scripts/ci/changelog.ps1) `next-version` computes
-  from `[Unreleased]`, or the reason it computes none. See [docs/release-process.md](docs/release-process.md).
-- [.github/workflows/auto-pr.yml](.github/workflows/auto-pr.yml): the draft PR
-  checklist gains a CANoe check item (the CAPL nodes in `capl/` compile in CANoe
-  against the DLL from the PR's CI artifact), shown when the branch touches
-  `src/module/exports.cpp`, and the `exports.cpp` warning no longer repeats the
-  artifact verification the checklist now states.
-- [scripts/ci/changelog.ps1](scripts/ci/changelog.ps1): the CHANGELOG section
-  selection and cut checks of the `Release` workflow's `validate` job now run
-  from this PowerShell 7 script instead of inline Python, with the same
-  conditions, messages and notes output; `scripts/ci/` is the home for scripts
-  that only workflows invoke. The release notes' character count no longer uses
-  Python either. Fixtures in [tests/changelog](tests/changelog), including the
-  first release's cut, run in the `changelog-fixtures` job of `ci.yml` (not a
-  required check) and before the notes are extracted in `release.yml`.
-- [scripts/ci/changelog.ps1](scripts/ci/changelog.ps1): new `cut` and
-  `next-version` subcommands. `cut` turns `[Unreleased]` into the hash-headed
-  release section the way the hand-made cut does: a fresh empty `[Unreleased]`
-  above it, relative inline links pinned to the full hash (code spans and
-  fenced code blocks are left alone; reference-style links are refused, as is
-  a fenced block with a line that `notes` would read as the end of the section
-  or the start or end of the `### Development` block), and the heading's link
-  definition added above the existing ones at the end of the file. It refuses
-  a section with nothing but `### Development`.
-  `next-version` prints the next `X.Y.Z` from the highest `vX.Y.Z` tag and the
-  categories in `[Unreleased]`: `### Added`, `### Changed` or `### Deprecated`
-  give a minor version, anything else a patch version, `### Removed` needs a
-  `bump:*` label to decide, and a label overrides the level. Tags that look
-  like a version but cannot be a release tag are skipped with a warning on
-  stderr. Nothing calls them yet; their cases are in
-  [tests/changelog](tests/changelog).
+From now on, release sections are generated from commit messages when a release
+is prepared and are not written by hand; the oldest section predates the
+generator. Headings are the first 12 characters of
+the commit hash the release is based on, and there are no version numbers in files.
 
 ## [0d0f52240d49] - 2026-10-09
 

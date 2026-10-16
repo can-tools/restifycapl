@@ -122,9 +122,9 @@ GitHub runs a `shell: bash` step as `bash --noprofile --norc -e -o pipefail`.
 substitution that exits non-zero, as in `next=$(cmd)`, ends the step before a
 following `code=$?` runs. A status the step means to handle is captured on
 the same line with `|| code=$?` (after `code=0`) or tested in an `if`. The
-"Show the version" step in `release.yml` does this for `next-version`, whose
-exit status 1 (no version computable from `[Unreleased]`) is an expected
-case.
+"Preview the next release" step in `release.yml` does this for every
+`changelog.ps1` call it makes, `next-version` and `level` included, whose
+exit status 1 (nothing to release) is an expected case.
 
 ## No concurrency block: every run completes (decided during Stage 14, OQ13)
 
@@ -204,9 +204,10 @@ workflow's `validate` job runs the same command before it parses
 `CHANGELOG.md`. Each `tests/changelog/<case>/` directory holds `CHANGELOG.md`,
 `case.json` (mode, line endings, the simulated git history, the expected exit
 code, `::` output lines and summary lines) and, for a successful case,
-`expected-notes.md`. A case for `cut` or `next-version` runs that subcommand
-instead; a successful cut is compared with `expected-CHANGELOG.md` and run
-twice to prove its output is deterministic. The `case.json` format is
+`expected-notes.md`. A case for `generate`, `level`, `prs` or `next-version` runs that subcommand
+instead (the last three need no `CHANGELOG.md`); a successful `generate` is
+compared with `expected-CHANGELOG.md` and run twice to prove its output is
+deterministic. The `case.json` format is
 described in the script's help (`Get-Help scripts/ci/changelog.ps1 -Full`).
 The runner replaces git with the case's simulated history,
 so the cases need no repository; line endings are applied in memory, so the
@@ -215,6 +216,19 @@ calls are not covered by the fixtures; the release workflow's dry run covers
 them. The job is not a gate and not a required check, and no gate waits for
 it. The script exits 0 when every case matched, 1 when one did not, and 2 on a
 usage error.
+
+## The generated CHANGELOG and the dry-run preview (decided during github-actions-optimization Stage 6a)
+
+`scripts/ci/changelog.ps1` generates release sections instead of cutting a
+hand-written one: `level`, `generate`, `prs` and `next-version`, with the rules
+in `docs/release-process.md`. The script never touches the network; the
+workflow fetches the commit messages of each pull request named by `(#N)` with
+`gh api` and passes them as a JSON file. The `validate` job of `release.yml`
+therefore has `pull-requests: read` besides `contents: read`. In a dry run its
+"Preview the next release" step lists the pull requests with `prs`, fetches
+their messages, and writes the level, the version and the generated section to
+the summary without changing any file; every outcome, an error included, leaves
+the step green. Tag mode is unchanged.
 
 ## The actionlint job (decided during github-actions-optimization Stage 5a)
 
