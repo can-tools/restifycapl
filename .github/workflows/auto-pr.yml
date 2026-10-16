@@ -1,5 +1,5 @@
 # auto-pr.yml -- bot-side draft PR opener for restifycapl (CAPL REST DLL).
-# Opens a draft PR on the first push to a stage/chore/fix/docs branch, with
+# Opens a draft PR on the first push to a feat/stage/chore/fix/docs branch, with
 # a merge checklist tailored to whether the branch is plan-only and whether
 # it touches src/module/exports.cpp. Requires the repo setting "Allow
 # GitHub Actions to create and approve pull requests" -> ON.
@@ -9,6 +9,7 @@ name: Auto PR
 on:
   push:
     branches:
+      - 'feat/**'
       - 'stage/**'
       - 'chore/**'
       - 'fix/**'
@@ -110,8 +111,8 @@ jobs:
             echo
             if [ "${plan_only}" = "true" ]; then
               cat <<'EOF'
-          Plan-only branch: the `code-reviewer`, human-gate and `CHANGELOG.md` items
-          below do not apply. CI green and up-to-date-with-`main` still apply.
+          Plan-only branch: the `code-reviewer` and human-gate items below do not
+          apply. CI green and up-to-date-with-`main` still apply.
 
           EOF
             fi
@@ -124,7 +125,7 @@ jobs:
               echo '- [ ] CANoe check: the CAPL nodes in capl/ compile in CANoe against the DLL from this PR'"'"'s CI artifact (author before Ready for review, or reviewer before approval)'
             fi
             cat <<'EOF'
-          - [ ] `CHANGELOG.md` `[Unreleased]` entry present
+          - [ ] Commit messages follow the Conventional Commits skill
           - [ ] Branch up to date with `main`
           - [ ] Plan folded into `plan.md`, incl. any task-ID/section renumbering (last commit before marking Ready for review)
 
