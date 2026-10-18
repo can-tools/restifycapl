@@ -9,7 +9,7 @@ name: CI
 # the stage-branch skill's naming convention.
 on:
   push:
-    branches: [main, "stage/**", "chore/**", "fix/**", "docs/**"]
+    branches: [main, "feat/**", "stage/**", "chore/**", "fix/**", "docs/**"]
   pull_request:
     branches: [main]
   # A dispatch runs the gates on any ref, so automation can get the required checks for a branch no push filter covers.

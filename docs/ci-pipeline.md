@@ -97,11 +97,12 @@ pinned tool tag regardless.
 
 ## Branch filter avoids racing `release.yml` on a tag push (found during Stage 7, BPE-20)
 
-`ci.yml`'s `push:` trigger is filtered to `main` plus the four
-working-branch prefixes (`stage/**`, `chore/**`, `fix/**`, `docs/**`) so
+`ci.yml`'s `push:` trigger is filtered to `main` plus the five
+working-branch prefixes (`feat/**`, `stage/**`, `chore/**`, `fix/**`,
+`docs/**`) so
 that a release tag push (`vX.Y.Z`) does not also match this trigger and
 race `release.yml`. A branch filter means tag pushes no longer match `push`
-at all. The four prefixes here must stay in sync with `auto-pr.yml`'s
+at all. The five prefixes here must stay in sync with `auto-pr.yml`'s
 trigger filter and the `stage-branch` skill's naming convention.
 
 ## `ci.yml` can be dispatched (decided during github-actions-optimization Stage 5)
