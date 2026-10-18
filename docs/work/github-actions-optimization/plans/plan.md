@@ -108,10 +108,10 @@ Stages 0–5 are done and merged on `main`; their text is kept as the record.
 - Approval: checkpoint before merge; the user approves the texts of the new skill, the `project-docs` change and the agent files item by item.
 
 ### Stage 6b — `feat/` branch prefix
-- Description: add `feat/` to the push filters of `auto-pr.yml` and `ci.yml`, and to the `stage-branch` skill (naming table; the "do not invent a fifth" sentence; the line saying `release/*` is absent now names the bot's `release/next`). In `auto-pr.yml` also: remove the checklist item "`CHANGELOG.md` `[Unreleased]` entry present", adjust the plan-only note, add an informational item that commit messages follow the Conventional Commits skill. The `.claude/settings.json` allowlist for `feat/` is changed by the user.
-- Files: `.github/workflows/auto-pr.yml`, `.github/workflows/ci.yml`, `.claude/skills/stage-branch/SKILL.md`; `.claude/settings.json` (user).
+- Description: add `feat/` to the push filters of `auto-pr.yml` and `ci.yml`, and to the `stage-branch` skill (naming table; the "do not invent a fifth" sentence; the line saying `release/*` is absent now names the bot's `release/next`). In `auto-pr.yml` also: remove the checklist item "`CHANGELOG.md` `[Unreleased]` entry present", adjust the plan-only note, add an informational item that commit messages follow the Conventional Commits skill. The `.claude/settings.json` allowlist for `feat/` is changed by the user. `docs/release-process.md`: the manual cut (step 3) and the manual tag push sentences are removed; the document states that no release is made until the release bot and the tagging workflow are on `main` (R17, R20).
+- Files: `.github/workflows/auto-pr.yml`, `.github/workflows/ci.yml`, `.claude/skills/stage-branch/SKILL.md`, `.claude/agents/code-reviewer.md`, `docs/release-process.md`, `docs/ci-pipeline.md`; `.claude/settings.json` (user).
 - Owners: `build-pipeline-engineer` → `code-reviewer`; user for `.claude/settings.json`.
-- Verification: a pushed `feat/` branch gets a draft PR and both gates; `gate-x86` and `gate-x64` green.
+- Verification: `gate-x86` and `gate-x64` green on the 6b PR; `actionlint` clean; the PR body for `feat/`, `stage/`, `fix/`, `docs/` and for `chore/` with and without a task ID checked by running the extracted step script. That a `feat/` push starts `auto-pr.yml` and `ci.yml` is confirmed by the first `feat/` branch pushed in normal work and recorded then; no branch is pushed only to test it.
 - Approval: checkpoint before merge.
 
 ### Stage 6c — release PR bot and the `bump label` check
@@ -132,7 +132,7 @@ Stages 0–5 are done and merged on `main`; their text is kept as the record.
 - Description: README wording on how CHANGELOG sections are identified (commit hashes, not tags); `docs/capl-framework.md` setup steps name the GitHub release assets. On `fix/` branches with `fix:` commits, merged after stage 6a so they count past the cut-off.
 - Files: `README.md`, `docs/capl-framework.md`.
 - Owners: `docs-writer` (wording approved by the user) → `code-reviewer`.
-- Verification: `gate-x86` and `gate-x64` green; after the merge, a `Release` dry run on `main` shows level `patch` and the generated section and publishes nothing.
+- Verification: `gate-x86` and `gate-x64` green. The first real generated section is checked in the release PR that `release-pr.yml` opens after stage 6c.
 - Approval: the user approves the wording.
 
 ### Stage 6f — flow documents
