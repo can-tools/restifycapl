@@ -31,15 +31,8 @@
       "Bash(git switch -c fix/*)",
       "Bash(git switch -c docs/*)",
       "Bash(git switch main)",
-      "Bash(git pull --ff-only)",
-      "Bash(git push -u origin stage/*)",
-      "Bash(git push -u origin chore/*)",
-      "Bash(git push -u origin fix/*)",
-      "Bash(git push -u origin docs/*)",
-      "Bash(git push origin stage/*)",
-      "Bash(git push origin chore/*)",
-      "Bash(git push origin fix/*)",
-      "Bash(git push origin docs/*)"
+      "Bash(git switch -c feat/*)",
+      "Bash(git pull --ff-only)"
     ],
     "deny": [
       "Bash(git tag *)",
