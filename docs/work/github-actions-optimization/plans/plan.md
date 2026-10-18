@@ -116,7 +116,7 @@ Stages 0–5 are done and merged on `main`; their text is kept as the record.
 
 ### Stage 6c — release PR bot and the `bump label` check
 - Description: `release-pr.yml` per R13, R16 and R17 (its part), with the version preview, the generated notes preview, the `> [!CAUTION]` block (R10), the checklist with the reviewer items (R14, R10) and the comment on label changes; permissions `contents: write`, `pull-requests: write`, `actions: write`. The `bump label` workflow per R15, permissions `contents: read`, `pull-requests: read`. The release PR must not be merged before stage 6d is on `main` (R20).
-- Files: `.github/workflows/release-pr.yml`, `.github/workflows/<bump label workflow>.yml`, `docs/release-process.md`, `docs/ci-pipeline.md`.
+- Files: `.github/workflows/release-pr.yml`, `.github/workflows/bump-label.yml`, `scripts/ci/changelog.ps1`, `tests/changelog/`, `docs/release-process.md`, `docs/ci-pipeline.md`.
 - Owners: `build-pipeline-engineer` → `code-reviewer`; the user adds `bump label` to the `main` ruleset after the merge.
 - Verification: before merge — review, fixtures, `gate-x86` and `gate-x64` green. After merge — the first push to `main` with releasing commits creates `release/next` and a ready release PR with exactly one `bump:*` label; `build + test (x86)`, `build + test (x64)` and `bump label` appear on its head and satisfy the ruleset; changing the label to two labels turns `bump label` red, back to one turns it green.
 - Approval: checkpoint before merge.
