@@ -266,6 +266,47 @@ local run without `shellcheck` does not.
 (see `docs/development-environment.md`). After running it and opening a new
 window, lint locally from the repository root with `actionlint -color`.
 
+## The `bump label` check (decided during github-actions-optimization Stage 6c)
+
+`bump-label.yml` is a separate workflow with one job, named exactly `bump label`
+(`ubuntu-latest`, no checkout, `contents: read` and `pull-requests: read`, no
+third-party actions). It is meant to become a required check on `main`. The
+result comes only from the step's exit code: the job has no `if:` and the
+workflow no path filter, because a skipped required check counts as passing.
+Every run evaluates, and a branch other than `release/next` is green at once.
+
+For a head branch `release/next` the check is green only when the pull request
+carries exactly one label starting with `bump:`; zero, or two or more, ends
+red with an `::error::` message. The workflow only reads: it never adds or
+removes a label.
+
+- Triggers: `pull_request` (`opened`, `synchronize`, `reopened`, `labeled`,
+  `unlabeled`) and `workflow_dispatch`. The release bot dispatches it on
+  `release/next` after every rebuild, because events created with
+  `GITHUB_TOKEN` start no runs. A dispatch attaches the check to the tip SHA of
+  the branch it runs on. A label change made by a person on the release pull
+  request starts a `pull_request` run that re-evaluates and lands on the head
+  SHA. Label events cannot be filtered by label at the trigger, so a label
+  change on any pull request runs the job, which is green outside
+  `release/next`.
+- Reading the labels: always live through the API
+  (`gh api repos/<repo>/pulls/<n>`), never from the event payload, because a
+  re-run of a run replays the original payload and would show labels that are
+  no longer there. For `pull_request` the number comes from the event; for a
+  dispatch it comes from the open pull request whose head is
+  `<owner>:release/next`.
+- Fails closed: on `release/next` a dispatch with no open pull request, with
+  more than one, or an API error ends red, as does a label read failure. A red
+  result from a dispatch that ran before the pull request existed is replaced
+  by the next run.
+- Concurrency: `opened`, `synchronize`, `reopened` and dispatch runs share a
+  group per branch and a newer run cancels an older one. `labeled` and
+  `unlabeled` runs have a group per pull request and never cancel a running
+  one, so the last label change is evaluated last.
+
+The `bump label` job is not a required check until the user adds it to the
+`main` ruleset after this workflow is on `main`; until then it is informational.
+
 ## `ci.yml` never calls `scripts/setup-dev-env.ps1` (found during Stage 6/7, BPE-24)
 
 That script provisions a local development machine: installing MSVC Build
