@@ -1,0 +1,27 @@
+{
+  "command": "pending-cut",
+  "eol": "lf",
+  "git": {
+    "tip": "c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1",
+    "chain": [
+      "c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1",
+      "b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0",
+      "e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3"
+    ],
+    "showTexts": {
+      "c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1": "# Changelog\n\n## [b0b0b0b0b0b0] - 2026-11-01\n\n### Added\n\n- add restifyBaz\n\n[b0b0b0b0b0b0]: https://github.com/can-tools/restifycapl/commit/b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0\n"
+    },
+    "failures": {
+      "tag --points-at c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1": {
+        "code": 128,
+        "stderr": "fatal: boom"
+      }
+    }
+  },
+  "expect": {
+    "exit": 1,
+    "output": [
+      "::error::git tag --points-at c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1 failed: fatal: boom"
+    ]
+  }
+}

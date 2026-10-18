@@ -1,0 +1,18 @@
+{
+  "command": "body-version",
+  "eol": "lf",
+  "params": {
+    "label": "bump:major"
+  },
+  "git": {
+    "allTags": [
+      "v65535.0.0"
+    ]
+  },
+  "expect": {
+    "exit": 1,
+    "output": [
+      "::error::the next version 65536.0.0 has a field above 65535 (version resource fields are 16-bit)"
+    ]
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "command": "body-version",
+  "eol": "lf",
+  "params": {
+    "label": "bump:minor"
+  },
+  "git": {
+    "allTags": [
+      "v0.1.0"
+    ]
+  },
+  "expect": {
+    "exit": 0,
+    "output": []
+  }
+}

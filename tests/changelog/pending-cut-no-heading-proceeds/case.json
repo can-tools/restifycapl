@@ -1,0 +1,11 @@
+{
+  "command": "pending-cut",
+  "eol": "lf",
+  "git": {},
+  "expect": {
+    "exit": 0,
+    "output": [
+      "proceed"
+    ]
+  }
+}

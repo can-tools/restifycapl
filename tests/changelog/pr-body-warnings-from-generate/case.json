@@ -1,0 +1,45 @@
+{
+  "command": "pr-body",
+  "eol": "lf",
+  "params": {
+    "prMessages": {
+      "21": [
+        "chore: tidy"
+      ]
+    }
+  },
+  "git": {
+    "allTags": [
+      "v0.1.0"
+    ],
+    "tip": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+    "log": [
+      {
+        "sha": "0000000e0000000e0000000e0000000e0000000e",
+        "subject": "weird-branch (#25)"
+      },
+      {
+        "sha": "0000000d0000000d0000000d0000000d0000000d",
+        "subject": "feat/no-number"
+      },
+      {
+        "sha": "0000000c0000000c0000000c0000000c0000000c",
+        "subject": "feat/new-api (#21)"
+      }
+    ],
+    "cutOff": "0000000100000001000000010000000100000001",
+    "cutOffChain": [
+      "0000000100000001000000010000000100000001"
+    ],
+    "logRange": "v0.1.0..a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+  },
+  "expect": {
+    "exit": 0,
+    "output": [
+      "::warning::\"feat/new-api\" has no feat, stage, fix or breaking commit message; it is listed by its branch name",
+      "::warning::the subject \"feat/no-number\" has no \"(#N)\"; its commit messages and breaking markers were not read",
+      "::warning::\"feat/no-number\" has no feat, stage, fix or breaking commit message; it is listed by its branch name",
+      "::warning::the subject \"weird-branch\" does not start with a feat/, stage/, fix/, chore/ or docs/ branch prefix; it is listed under Development"
+    ]
+  }
+}

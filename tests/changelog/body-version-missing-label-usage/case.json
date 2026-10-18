@@ -1,0 +1,13 @@
+{
+  "command": "body-version",
+  "eol": "lf",
+  "git": {
+    "allTags": [
+      "v0.1.0"
+    ]
+  },
+  "expect": {
+    "exit": 2,
+    "output": []
+  }
+}

@@ -105,8 +105,9 @@ three ways:
 - Once the section is merged (the first-parent commit after the heading's hash
   carries the heading) it passes, names that commit and says to re-run the
   failed `tag-release.yml` run.
-- When that commit already carries a `v*.*.*` tag it passes with a warning
-  that the section was already released; the notes are previewed again.
+- When that commit already carries a release tag (vX.Y.Z, no leading zeros, each
+  field at most 65535) it passes with a warning that the section was already
+  released; the notes are previewed again.
 
 ## Jobs
 

@@ -1,0 +1,16 @@
+{
+  "command": "body-version",
+  "eol": "lf",
+  "params": {
+    "label": "bump:patch"
+  },
+  "git": {
+    "allTags": []
+  },
+  "expect": {
+    "exit": 1,
+    "output": [
+      "::error::no tag of the form vX.Y.Z found; fetch the tags (a shallow checkout has none) or tag the first release by hand"
+    ]
+  }
+}

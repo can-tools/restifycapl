@@ -1,0 +1,16 @@
+{
+  "command": "body-version",
+  "eol": "marked",
+  "params": {
+    "label": "bump:patch"
+  },
+  "git": {
+    "allTags": [
+      "v0.1.0"
+    ]
+  },
+  "expect": {
+    "exit": 0,
+    "output": []
+  }
+}

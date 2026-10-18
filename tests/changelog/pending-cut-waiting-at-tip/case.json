@@ -1,0 +1,21 @@
+{
+  "command": "pending-cut",
+  "eol": "lf",
+  "git": {
+    "tip": "c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1",
+    "chain": [
+      "c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1",
+      "b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0",
+      "e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3"
+    ],
+    "showTexts": {
+      "c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1": "# Changelog\n\n## [b0b0b0b0b0b0] - 2026-11-01\n\n### Added\n\n- add restifyBaz\n\n[b0b0b0b0b0b0]: https://github.com/can-tools/restifycapl/commit/b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0\n"
+    }
+  },
+  "expect": {
+    "exit": 0,
+    "output": [
+      "waiting"
+    ]
+  }
+}
