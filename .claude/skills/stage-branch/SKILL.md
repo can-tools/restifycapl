@@ -13,7 +13,7 @@ the full branching strategy this skill is one piece of.
 
 **Requires `.claude/settings.json`'s allowlist.** This skill's
 create-and-push actions only work once `.claude/settings.json` allows
-`git switch -c` and `git push` for the four prefixes below. If it doesn't,
+`git switch -c` and `git push` for the five prefixes below. If it doesn't,
 branch creation and push are a human action instead.
 
 ## Naming convention
@@ -23,14 +23,17 @@ or date prefixes (one developer — the plan ID is the identity).
 
 | Prefix | Form | Example |
 |---|---|---|
+| User-visible addition outside a plan stage | `feat/<slug>` | `feat/http-request-headers` |
 | Stage work | `stage/<nn>-<kebab-slug>` | `stage/08-core-pure-logic` |
 | Combined stages | `stage/<nn>-<nn>-<slug>` | `stage/08-09-core-and-http` |
-| Non-stage follow-up owned by a task ID | `chore/<task-id>-<slug>` | `chore/bpe-18-changelog-entries` |
+| Non-stage follow-up | `chore/<slug>`, or `chore/<task-id>-<slug>` when a task ID owns it | `chore/ci-actionlint` |
 | Bug fix against merged work | `fix/<slug>` | `fix/stage5-abi-calling-convention` |
 | Docs-only | `docs/<slug>` | `docs/plan-v15` |
 
-`release/*` is deliberately absent — there are no release branches; tags are
-cut from `main` directly.
+`release/*` is not a working-branch prefix: `release/next` is reserved for the
+release bot — never create it or commit to it by hand; anything committed there
+is overwritten — and no other `release/*` branch is used. Release tags go on
+the squash-merge commit on `main`; see `docs/release-process.md`.
 
 ## Create-and-push procedure
 
@@ -42,8 +45,8 @@ git switch -c <prefix>/<slug>
 git push -u origin <prefix>/<slug>
 ```
 
-Only these four prefixes (`stage/`, `chore/`, `fix/`, `docs/`) are permitted
-by `.claude/settings.json`'s allowlist — do not invent a fifth.
+Only these five prefixes (`feat/`, `stage/`, `chore/`, `fix/`, `docs/`) are
+permitted by `.claude/settings.json`'s allowlist — do not invent a sixth.
 
 ## Scope stops at the push
 
@@ -55,7 +58,7 @@ create` manually as part of this procedure.
 
 ## Why the naming convention is load-bearing, not cosmetic
 
-The same four prefixes are hardcoded in four separate places, and they must
+The same five prefixes are hardcoded in five separate places, and they must
 stay in sync:
 
 1. `.github/workflows/auto-pr.yml`'s `push.branches` trigger filter.
@@ -65,6 +68,8 @@ stay in sync:
    `msvc-build-conventions`.
 4. `auto-pr.yml`'s PR base, which is always `main` regardless of prefix —
    see below.
+5. `scripts/ci/changelog.ps1`'s branch-prefix pattern, which takes the release
+   level from the prefix — see `conventional-commits`.
 
 A branch named outside this convention gets no automatic PR and a
 permission prompt on push, silently. Deliberately loud when it happens, but

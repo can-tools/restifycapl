@@ -96,7 +96,11 @@ jobs:
               ;;
             chore/*)
               task_id=$(printf '%s' "${BRANCH}" | sed -E 's#^chore/([a-z]+-[0-9]+(-[0-9]+)*)-.*#\1#' | tr '[:lower:]' '[:upper:]')
-              todo_line="${task_id} -- TODO: any additional REV/HUM IDs"
+              if [ "${task_id}" = "$(printf '%s' "${BRANCH}" | tr '[:lower:]' '[:upper:]')" ]; then
+                todo_line="TODO: stage and task IDs"
+              else
+                todo_line="${task_id} -- TODO: any additional REV/HUM IDs"
+              fi
               ;;
             *)
               todo_line="TODO: stage and task IDs"

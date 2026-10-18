@@ -85,7 +85,8 @@ Return a report with these sections:
 1. Must fix (export contract breaks, a red `export-table` result, /MT
    violations, bitness mismatches, hardcoded product version numbers)
 2. Should fix (missing tests; rationale duplicated across two files, or a
-   comment referencing a plan/stage/task identifier)
+   comment referencing a plan/stage/task identifier; an `actionlint` finding
+   in a workflow file)
 3. Nice to have (merely verbose comments)
 4. What is correct / no action needed
 
