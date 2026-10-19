@@ -1,0 +1,343 @@
+# release-pr.yml -- the release bot: builds release/next and its pull request. See docs/release-process.md.
+
+name: Release PR
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    concurrency:
+      group: release-pr-build
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      REPO_OWNER: ${{ github.repository_owner }}
+      EVENT_NAME: ${{ github.event_name }}
+    steps:
+      - name: Checkout main (full history and tags)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Wait for the tag of a merged cut
+        id: guard
+        shell: bash
+        run: |
+          code=0; out=$(pwsh -NoProfile -File scripts/ci/changelog.ps1 pending-cut) || code=$?
+          if [ "$code" -ne 0 ]; then
+            echo "$out"
+            exit 1
+          fi
+          case "$out" in
+            proceed)
+              echo "proceed=true" >> "$GITHUB_OUTPUT"
+              ;;
+            waiting)
+              echo "proceed=false" >> "$GITHUB_OUTPUT"
+              echo "::notice::waiting for tag: the newest CHANGELOG section is merged but not tagged yet"
+              printf "%s\n\n" "Waiting for tag: the merged release has no tag yet. Nothing was changed." >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            *)
+              echo "::error::unexpected answer from pending-cut: $out"
+              exit 1
+              ;;
+          esac
+
+      - name: Fetch the pull request data
+        id: fetch
+        if: steps.guard.outputs.proceed == 'true'
+        shell: bash
+        run: |
+          messages="$RUNNER_TEMP/pr-messages.json"
+          files="$RUNNER_TEMP/pr-files.json"
+          base=$(git rev-parse origin/main)
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+
+          code=0; out=$(pwsh -NoProfile -File scripts/ci/changelog.ps1 prs -Base "$base") || code=$?
+          if [ "$code" -ne 0 ]; then
+            echo "$out"
+            exit 1
+          fi
+          printf '{}' > "$messages"
+          printf '{}' > "$files"
+          while read -r n; do
+            [ -n "$n" ] || continue
+            code=0; commits=$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/pulls/$n/commits") || code=$?
+            if [ "$code" -ne 0 ]; then
+              echo "::error::could not read the commits of pull request #$n (exit $code)"
+              exit 1
+            fi
+            code=0; changed=$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/pulls/$n/files") || code=$?
+            if [ "$code" -ne 0 ]; then
+              echo "::error::could not read the changed files of pull request #$n (exit $code)"
+              exit 1
+            fi
+            msgs=$(printf '%s' "$commits" | jq -c '[.[][].commit.message]')
+            names=$(printf '%s' "$changed" | jq -c '[.[][].filename]')
+            merged=$(jq -c --arg n "$n" --argjson m "$msgs" '. + {($n): $m}' "$messages")
+            printf '%s' "$merged" > "$messages"
+            merged=$(jq -c --arg n "$n" --argjson f "$names" '. + {($n): $f}' "$files")
+            printf '%s' "$merged" > "$files"
+          done <<< "$out"
+
+      - name: Compute the release level
+        id: level
+        if: steps.guard.outputs.proceed == 'true'
+        shell: bash
+        env:
+          BASE: ${{ steps.fetch.outputs.base }}
+        run: |
+          code=0; out=$(pwsh -NoProfile -File scripts/ci/changelog.ps1 level -Base "$BASE" -PrMessages "$RUNNER_TEMP/pr-messages.json") || code=$?
+          if [ "$code" -ne 0 ]; then
+            echo "$out"
+            exit 1
+          fi
+          case "$out" in
+            major|minor|patch)
+              release=true
+              ;;
+            none)
+              release=false
+              ;;
+            *)
+              echo "::error::unexpected level from changelog.ps1: $out"
+              exit 1
+              ;;
+          esac
+          echo "level=$out" >> "$GITHUB_OUTPUT"
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+
+      - name: Look up the open release pull requests
+        id: lookup
+        if: steps.guard.outputs.proceed == 'true'
+        shell: bash
+        run: |
+          errfile="$RUNNER_TEMP/lookup.err"
+          code=0; out=$(gh api "repos/${GH_REPO}/pulls?state=open&base=main&head=${REPO_OWNER}:release/next" --jq '.[].number' 2>"$errfile") || code=$?
+          if [ "$code" -ne 0 ]; then
+            echo "::error::could not list the pull requests of release/next (exit $code): $(tr '\n' ' ' < "$errfile")"
+            exit 1
+          fi
+          count=0; number=""
+          : > "$RUNNER_TEMP/release-prs.txt"
+          while read -r n; do
+            [ -n "$n" ] || continue
+            if [[ ! "$n" =~ ^[0-9]+$ ]]; then
+              echo "::error::unexpected output from the pull request lookup: $n"
+              exit 1
+            fi
+            count=$((count + 1))
+            number="$n"
+            echo "$n" >> "$RUNNER_TEMP/release-prs.txt"
+          done <<< "$out"
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+
+      - name: Close the release PR and delete release/next when nothing is left to release
+        if: steps.level.outputs.release == 'false'
+        shell: bash
+        run: |
+          closed=0
+          while read -r n; do
+            [ -n "$n" ] || continue
+            gh pr close "$n" --comment "Closed by the release bot: nothing on main is left to release."
+            closed=$((closed + 1))
+          done < "$RUNNER_TEMP/release-prs.txt"
+
+          code=0; git ls-remote --exit-code --heads origin release/next > /dev/null || code=$?
+          deleted=no
+          if [ "$code" -eq 0 ]; then
+            git push origin --delete release/next
+            deleted=yes
+          elif [ "$code" -ne 2 ]; then
+            echo "::error::could not look up release/next on the remote (exit $code)"
+            exit 1
+          fi
+          printf "%s\n\n" "Nothing to release. Release pull requests closed: $closed. Branch release/next deleted: $deleted." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Stop when several release pull requests are open
+        if: steps.level.outputs.release == 'true' && steps.lookup.outputs.count >= 2
+        shell: bash
+        env:
+          COUNT: ${{ steps.lookup.outputs.count }}
+        run: |
+          echo "::error::release/next has $COUNT open pull requests; close the extra ones by hand. Nothing was pushed or changed."
+          exit 1
+
+      - name: Generate the CHANGELOG section
+        if: steps.level.outputs.release == 'true'
+        shell: bash
+        env:
+          BASE: ${{ steps.fetch.outputs.base }}
+        run: |
+          code=0; out=$(pwsh -NoProfile -File scripts/ci/changelog.ps1 generate -Base "$BASE" \
+            -PrMessages "$RUNNER_TEMP/pr-messages.json" \
+            -Output "$RUNNER_TEMP/CHANGELOG.generated.md" \
+            -SectionOutput "$RUNNER_TEMP/section.md") || code=$?
+          echo "$out"
+          if [ "$code" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Generate the pull request body
+        if: steps.level.outputs.release == 'true'
+        shell: bash
+        env:
+          BASE: ${{ steps.fetch.outputs.base }}
+          LEVEL: ${{ steps.level.outputs.level }}
+        run: |
+          code=0; out=$(pwsh -NoProfile -File scripts/ci/changelog.ps1 pr-body -Base "$BASE" \
+            -PrMessages "$RUNNER_TEMP/pr-messages.json" \
+            -PrFiles "$RUNNER_TEMP/pr-files.json" \
+            -Label "bump:$LEVEL" \
+            -ChangelogPath "$RUNNER_TEMP/CHANGELOG.generated.md" \
+            -Output "$RUNNER_TEMP/pr-body.md") || code=$?
+          echo "$out"
+          if [ "$code" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Build the release/next commit
+        id: build
+        if: steps.level.outputs.release == 'true'
+        shell: bash
+        env:
+          BASE: ${{ steps.fetch.outputs.base }}
+          COUNT: ${{ steps.lookup.outputs.count }}
+        run: |
+          git switch -C release/next "$BASE"
+          cp "$RUNNER_TEMP/CHANGELOG.generated.md" CHANGELOG.md
+          git add CHANGELOG.md
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit -m "release: add the CHANGELOG section for ${BASE:0:12}"
+          new_tree=$(git rev-parse 'HEAD^{tree}')
+
+          code=0; remote=$(git rev-parse --verify --quiet refs/remotes/origin/release/next) || code=$?
+          if [ "$code" -ne 0 ]; then remote=""; fi
+          echo "remote=$remote" >> "$GITHUB_OUTPUT"
+
+          identical=false
+          if [ -n "$remote" ]; then
+            code=0; remote_parent=$(git rev-parse --verify --quiet "$remote^") || code=$?
+            if [ "$code" -ne 0 ]; then remote_parent=""; fi
+            remote_tree=$(git rev-parse "$remote^{tree}")
+            if [ "$remote_parent" = "$BASE" ] && [ "$remote_tree" = "$new_tree" ]; then identical=true; fi
+          fi
+
+          skip=false
+          if [ "$identical" = true ] && [ "$EVENT_NAME" = push ] && [ "$COUNT" -eq 1 ]; then skip=true; fi
+          echo "skip=$skip" >> "$GITHUB_OUTPUT"
+          if [ "$skip" = true ]; then
+            printf "%s\n\n" "Skipped: release/next already holds the same CHANGELOG commit on the same base and has an open pull request. Nothing was pushed, and the pull request body, checklist and label are left as they are." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Push release/next
+        if: steps.build.outputs.skip == 'false'
+        shell: bash
+        env:
+          EXPECTED: ${{ steps.build.outputs.remote }}
+        run: git push --force-with-lease="release/next:${EXPECTED}" origin release/next
+
+      - name: Open or update the release pull request
+        id: pr
+        if: steps.build.outputs.skip == 'false'
+        shell: bash
+        env:
+          LEVEL: ${{ steps.level.outputs.level }}
+          COUNT: ${{ steps.lookup.outputs.count }}
+          NUMBER: ${{ steps.lookup.outputs.number }}
+        run: |
+          body="$RUNNER_TEMP/pr-body.md"
+          errfile="$RUNNER_TEMP/pr.err"
+          if [ "$COUNT" -eq 0 ]; then
+            code=0; out=$(gh pr create --base main --head release/next --title 'release/next' --body-file "$body" 2>"$errfile") || code=$?
+            if [ "$code" -ne 0 ]; then
+              echo "::error::could not open the release pull request (exit $code): $out $(tr '\n' ' ' < "$errfile")"
+              exit 1
+            fi
+            url=${out##*$'\n'}
+            number=${url##*/}
+            case "$number" in
+              ''|*[!0-9]*)
+                code=0; found=$(gh api "repos/${GH_REPO}/pulls?state=open&base=main&head=${REPO_OWNER}:release/next" --jq '.[].number' 2>"$errfile") || code=$?
+                if [ "$code" -ne 0 ]; then
+                  echo "::error::could not find the new release pull request (exit $code): $(tr '\n' ' ' < "$errfile")"
+                  exit 1
+                fi
+                number=""
+                while read -r n; do
+                  [ -n "$n" ] || continue
+                  if [[ ! "$n" =~ ^[0-9]+$ ]]; then
+                    echo "::error::unexpected output from the pull request lookup: $n"
+                    exit 1
+                  fi
+                  if [ -z "$number" ]; then number="$n"; fi
+                done <<< "$found"
+                case "$number" in
+                  ''|*[!0-9]*)
+                    echo "::error::could not determine the number of the new release pull request"
+                    exit 1
+                    ;;
+                esac
+                ;;
+            esac
+            what="opened (#$number)"
+          else
+            number="$NUMBER"
+            code=0; state=$(gh pr view "$number" --json state --jq .state 2>"$errfile") || code=$?
+            if [ "$code" -ne 0 ]; then
+              echo "::error::could not read the state of release pull request #$number (exit $code): $(tr '\n' ' ' < "$errfile")"
+              exit 1
+            fi
+            if [ "$state" != OPEN ]; then
+              echo "::error::release pull request #$number is no longer open (state: $state); the next push to main or a manual dispatch opens a new one"
+              exit 1
+            fi
+            gh pr edit "$number" --body-file "$body"
+            what="updated (#$number)"
+          fi
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+          printf "%s\n\n" "Level $LEVEL. Release pull request $what." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep exactly one bump label
+        if: steps.build.outputs.skip == 'false'
+        shell: bash
+        env:
+          LEVEL: ${{ steps.level.outputs.level }}
+          NUMBER: ${{ steps.pr.outputs.number }}
+        run: |
+          computed="bump:$LEVEL"
+          number="$NUMBER"
+          names=$(gh pr view "$number" --json labels --jq '.labels[].name')
+          count=0; existing=""
+          while IFS= read -r name; do
+            case "$name" in
+              bump:*)
+                count=$((count + 1))
+                existing="$name"
+                ;;
+            esac
+          done <<< "$names"
+
+          if [ "$count" -eq 0 ]; then
+            gh pr edit "$number" --add-label "$computed"
+          elif [ "$count" -eq 1 ] && [ "$existing" != "$computed" ]; then
+            gh pr edit "$number" --add-label "$computed" --remove-label "$existing"
+            gh pr comment "$number" --body "The release bot replaced the label $existing with $computed, the level computed from the commits on main."
+          elif [ "$count" -ge 2 ]; then
+            echo "::warning::pull request #$number has $count bump:* labels; none was changed, and the bump label check stays red until exactly one is left"
+          fi
