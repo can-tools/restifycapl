@@ -158,7 +158,7 @@ jobs:
             closed=$((closed + 1))
           done < "$RUNNER_TEMP/release-prs.txt"
 
-          code=0; git ls-remote --exit-code --heads origin release/next > /dev/null || code=$?
+          code=0; git ls-remote --exit-code origin refs/heads/release/next > /dev/null || code=$?
           deleted=no
           if [ "$code" -eq 0 ]; then
             git push origin --delete release/next
@@ -341,3 +341,17 @@ jobs:
           elif [ "$count" -ge 2 ]; then
             echo "::warning::pull request #$number has $count bump:* labels; none was changed, and the bump label check stays red until exactly one is left"
           fi
+
+      - name: Dispatch CI and the bump label check on release/next
+        if: steps.build.outputs.skip == 'false'
+        shell: bash
+        run: |
+          errfile="$RUNNER_TEMP/dispatch.err"
+          for workflow in ci.yml bump-label.yml; do
+            code=0; out=$(gh workflow run "$workflow" --ref release/next 2>"$errfile") || code=$?
+            if [ "$code" -ne 0 ]; then
+              echo "::error::could not dispatch $workflow on release/next (exit $code): $(printf '%s' "$out" | tr '\r\n' '  ') $(tr '\r\n' '  ' < "$errfile")"
+              exit 1
+            fi
+          done
+          printf "%s\n\n" "Dispatched ci.yml and bump-label.yml on release/next." >> "$GITHUB_STEP_SUMMARY"
