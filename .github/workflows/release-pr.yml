@@ -129,7 +129,7 @@ jobs:
           errfile="$RUNNER_TEMP/lookup.err"
           code=0; out=$(gh api "repos/${GH_REPO}/pulls?state=open&base=main&head=${REPO_OWNER}:release/next" --jq '.[].number' 2>"$errfile") || code=$?
           if [ "$code" -ne 0 ]; then
-            echo "::error::could not list the pull requests of release/next (exit $code): $(tr '\n' ' ' < "$errfile")"
+            echo "::error::could not list the pull requests of release/next (exit $code): $(tr '\r\n' '  ' < "$errfile")"
             exit 1
           fi
           count=0; number=""
@@ -266,7 +266,7 @@ jobs:
           if [ "$COUNT" -eq 0 ]; then
             code=0; out=$(gh pr create --base main --head release/next --title 'release/next' --body-file "$body" 2>"$errfile") || code=$?
             if [ "$code" -ne 0 ]; then
-              echo "::error::could not open the release pull request (exit $code): $out $(tr '\n' ' ' < "$errfile")"
+              echo "::error::could not open the release pull request (exit $code): $(printf '%s' "$out" | tr '\r\n' '  ') $(tr '\r\n' '  ' < "$errfile")"
               exit 1
             fi
             url=${out##*$'\n'}
@@ -275,7 +275,7 @@ jobs:
               ''|*[!0-9]*)
                 code=0; found=$(gh api "repos/${GH_REPO}/pulls?state=open&base=main&head=${REPO_OWNER}:release/next" --jq '.[].number' 2>"$errfile") || code=$?
                 if [ "$code" -ne 0 ]; then
-                  echo "::error::could not find the new release pull request (exit $code): $(tr '\n' ' ' < "$errfile")"
+                  echo "::error::could not find the new release pull request (exit $code): $(tr '\r\n' '  ' < "$errfile")"
                   exit 1
                 fi
                 number=""
@@ -300,7 +300,7 @@ jobs:
             number="$NUMBER"
             code=0; state=$(gh pr view "$number" --json state --jq .state 2>"$errfile") || code=$?
             if [ "$code" -ne 0 ]; then
-              echo "::error::could not read the state of release pull request #$number (exit $code): $(tr '\n' ' ' < "$errfile")"
+              echo "::error::could not read the state of release pull request #$number (exit $code): $(tr '\r\n' '  ' < "$errfile")"
               exit 1
             fi
             if [ "$state" != OPEN ]; then
