@@ -307,6 +307,45 @@ removes a label.
 The `bump label` job is not a required check until the user adds it to the
 `main` ruleset after this workflow is on `main`; until then it is informational.
 
+## The release bot dispatches checks and refreshes the body on label changes (decided during github-actions-optimization Stage 6c)
+
+Events created with `GITHUB_TOKEN` (a push, a label change) start no workflow
+runs, except `workflow_dispatch` and `repository_dispatch`. `release-pr.yml`
+has two jobs because of that.
+
+- `build` (triggers `push` to `main` and `workflow_dispatch`; skipped on the
+  `pull_request` trigger). After pushing `release/next`, opening or updating
+  the pull request and keeping the single bump label, it runs
+  `gh workflow run ci.yml --ref release/next` and the same for
+  `bump-label.yml`, so both see the final label and the pushed commit. Neither
+  workflow has dispatch inputs. A failed dispatch ends the job with
+  `::error::`, and nothing is dispatched when the rebuild is skipped. The
+  job needs `actions: write` for this. It looks `release/next` up on the
+  remote by its full ref, `refs/heads/release/next`, because a short name also
+  matches a ref that merely ends in it.
+- `labels` (trigger `pull_request` `labeled` and `unlabeled` on `main`).
+  Runs only when the head branch is `release/next` in this repository (a fork
+  is excluded by comparing the head repository) and the changed label starts
+  with `bump:`. Permissions are `contents: read` and `pull-requests: write`.
+  It checks out the pull request head SHA (not the merge ref) with
+  `persist-credentials: false` and never pushes. It reads the current labels
+  from the API at run time, not from the event, because a re-run replays the
+  original payload. With exactly one valid `bump:*` label it regenerates the
+  body (`prs`, `pr-body`, with the base taken as the parent of the head
+  commit, the commit `build` made on) and runs only `gh pr edit --body-file`.
+  With zero or several labels it warns and the body previews the computed
+  level. It adds no comment and never changes a label.
+
+A label change made by a person starts the `labels` job; the bot's own label
+change in `build` does not (it was made with `GITHUB_TOKEN`), and the body it
+wrote already has the computed level. The job has its own concurrency group
+that never cancels a running job; GitHub keeps at most one waiting run per
+group, and since the label is read when the job runs, the surviving run still
+sees the latest state. A push to `main` rebuilding the pull request at the
+same moment can leave a body one change behind; the next rebuild corrects it.
+Every label event on any pull request creates a `Release PR` run whose jobs
+are skipped.
+
 ## `ci.yml` never calls `scripts/setup-dev-env.ps1` (found during Stage 6/7, BPE-24)
 
 That script provisions a local development machine: installing MSVC Build

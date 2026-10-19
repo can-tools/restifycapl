@@ -31,7 +31,17 @@ workflow; neither is on `main` yet, and until both are, no release is made.
 
 1. On every push to `main`, the release bot computes the level; when there is
    something to release, it opens or updates the release pull request on
-   `release/next`, and the required checks run on its head.
+   `release/next`, and the required checks run on its head. Pushes and label
+   changes made with `GITHUB_TOKEN` start no workflow, so after each rebuild
+   the bot dispatches `ci.yml` and `bump-label.yml` on `release/next`, once the
+   push and the label step are done; a failed dispatch fails the run. Nothing
+   is dispatched when the rebuild is skipped. A person who changes the bump
+   label on the release pull request starts the `bump label` check and a
+   refresh of the pull request body by the `labels` job of `release-pr.yml`:
+   the body is regenerated with the label as it is when the job runs, and the
+   job changes nothing else (it pushes nothing, and adds no comment or label).
+   A body refreshed just after a new rebuild can show the older preview until
+   the next push to `main`.
 2. The release bot runs `scripts/ci/changelog.ps1`: `level` computes the level
    from the squash-merge commits since the last tag, `next-version` the version
    from it, and `generate` writes the section
