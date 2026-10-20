@@ -337,7 +337,11 @@ has two jobs because of that.
   included; the checklist resets only when `build` rebuilds the pull request.
   With zero, several or invalid `bump:*` labels nothing changes: the job warns
   and stays green, because the `bump label` check is the authoritative red
-  signal. It adds no comment, never changes a label and never pushes.
+  signal. If the version preview line is missing from the body (deleted by
+  hand) or the body is empty, `changelog.ps1 body-version` exits 1, the job
+  goes red with an `::error::` and changes nothing; the next rebuild by the
+  `build` job restores the body. It adds no comment, never changes a label and
+  never pushes.
 
 A label change made by a person starts the `labels` job; the bot's own label
 change in `build` does not (it was made with `GITHUB_TOKEN`), and the body it
@@ -346,8 +350,8 @@ that never cancels a running job; GitHub keeps at most one waiting run per
 group, and since the label is read when the job runs, the surviving run still
 sees the latest state. A push to `main` rebuilding the pull request at the
 same moment can leave a body one change behind; the next rebuild corrects it.
-Every label event on any pull request into `main` creates a `Release PR` run whose jobs
-are skipped.
+Every label event on any pull request into `main` creates a `Release PR` run
+whose jobs are skipped.
 
 ## `ci.yml` never calls `scripts/setup-dev-env.ps1` (found during Stage 6/7, BPE-24)
 
