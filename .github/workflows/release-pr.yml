@@ -68,6 +68,7 @@ jobs:
         run: |
           messages="$RUNNER_TEMP/pr-messages.json"
           files="$RUNNER_TEMP/pr-files.json"
+          arg_file="$RUNNER_TEMP/pr-arg.json"
           base=$(git rev-parse origin/main)
           echo "base=$base" >> "$GITHUB_OUTPUT"
 
@@ -92,9 +93,11 @@ jobs:
             fi
             msgs=$(printf '%s' "$commits" | jq -c '[.[][].commit.message]')
             names=$(printf '%s' "$changed" | jq -c '[.[][].filename]')
-            merged=$(jq -c --arg n "$n" --argjson m "$msgs" '. + {($n): $m}' "$messages")
+            printf '%s' "$msgs" > "$arg_file"
+            merged=$(jq -c --arg n "$n" --slurpfile m "$arg_file" '. + {($n): $m[0]}' "$messages")
             printf '%s' "$merged" > "$messages"
-            merged=$(jq -c --arg n "$n" --argjson f "$names" '. + {($n): $f}' "$files")
+            printf '%s' "$names" > "$arg_file"
+            merged=$(jq -c --arg n "$n" --slurpfile f "$arg_file" '. + {($n): $f[0]}' "$files")
             printf '%s' "$merged" > "$files"
           done <<< "$out"
 
