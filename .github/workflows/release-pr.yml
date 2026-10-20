@@ -56,7 +56,7 @@ jobs:
               printf "%s\n\n" "Waiting for tag: the merged release has no tag yet. Nothing was changed." >> "$GITHUB_STEP_SUMMARY"
               ;;
             *)
-              echo "::error::unexpected answer from pending-cut: $out"
+              echo "::error::unexpected answer from pending-cut: $(printf '%s' "$out" | tr '\r\n' '  ')"
               exit 1
               ;;
           esac
@@ -118,7 +118,7 @@ jobs:
               release=false
               ;;
             *)
-              echo "::error::unexpected level from changelog.ps1: $out"
+              echo "::error::unexpected level from changelog.ps1: $(printf '%s' "$out" | tr '\r\n' '  ')"
               exit 1
               ;;
           esac
