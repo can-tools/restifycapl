@@ -43,8 +43,11 @@ workflow; neither is on `main` yet, and until both are, no release is made.
    rebuilds the pull request. With zero, several or invalid bump labels
    nothing changes and the job warns (the `bump label` check is the
    authoritative red signal). The job pushes nothing and adds no comment or
-   label. A body rewritten just after a new rebuild can be one change behind;
-   the next rebuild corrects it.
+   label. A body rewritten just after a new rebuild can be one change behind,
+   and a checklist tick made in that window can be lost and must be ticked
+   again. A later push to `main` that would rebuild an identical `release/next`
+   is skipped and does not repair it; a manual `workflow_dispatch` of
+   `Release PR` is never skipped and does.
 2. The release bot runs `scripts/ci/changelog.ps1`: `level` computes the level
    from the squash-merge commits since the last tag, `next-version` the version
    from it, and `generate` writes the section

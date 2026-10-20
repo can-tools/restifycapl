@@ -349,7 +349,11 @@ wrote already has the computed level. The job has its own concurrency group
 that never cancels a running job; GitHub keeps at most one waiting run per
 group, and since the label is read when the job runs, the surviving run still
 sees the latest state. A push to `main` rebuilding the pull request at the
-same moment can leave a body one change behind; the next rebuild corrects it.
+same moment can leave a body one change behind, and a checklist tick made in
+that window can be lost and must be ticked again. The next push to `main` does
+not repair it when it would rebuild an identical `release/next` (same parent
+and tree, exactly one open pull request): `build` skips it. A manual
+`workflow_dispatch` of `Release PR` is never skipped and repairs the body.
 Every label event on any pull request into `main` creates a `Release PR` run
 whose jobs are skipped.
 
