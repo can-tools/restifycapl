@@ -307,7 +307,7 @@ removes a label.
 The `bump label` job is not a required check until the user adds it to the
 `main` ruleset after this workflow is on `main`; until then it is informational.
 
-## The release bot dispatches checks and refreshes the body on label changes (decided during github-actions-optimization Stage 6c)
+## The release bot dispatches checks and rewrites the body preview on label changes (decided during github-actions-optimization Stage 6c)
 
 Events created with `GITHUB_TOKEN` (a push, a label change) start no workflow
 runs, except `workflow_dispatch` and `repository_dispatch`. `release-pr.yml`
@@ -327,14 +327,17 @@ has two jobs because of that.
   Runs only when the head branch is `release/next` in this repository (a fork
   is excluded by comparing the head repository) and the changed label starts
   with `bump:`. Permissions are `contents: read` and `pull-requests: write`.
-  It checks out the pull request head SHA (not the merge ref) with
-  `persist-credentials: false` and never pushes. It reads the current labels
-  from the API at run time, not from the event, because a re-run replays the
-  original payload. With exactly one valid `bump:*` label it regenerates the
-  body (`prs`, `pr-body`, with the base taken as the parent of the head
-  commit, the commit `build` made on) and runs only `gh pr edit --body-file`.
-  With zero or several labels it warns and the body previews the computed
-  level. It adds no comment and never changes a label.
+  It checks out `main` (not the pull request head) with
+  `persist-credentials: false` and never pushes. It reads the labels and the
+  body from one API snapshot of the pull request taken at run time, not from
+  the event, because a re-run replays the original payload. With exactly one
+  valid `bump:*` label it runs `changelog.ps1 body-version`, which rewrites
+  only the version preview line of that body, and then `gh pr edit
+  --body-file`. Every other byte of the body is kept, reviewer checklist ticks
+  included; the checklist resets only when `build` rebuilds the pull request.
+  With zero, several or invalid `bump:*` labels nothing changes: the job warns
+  and stays green, because the `bump label` check is the authoritative red
+  signal. It adds no comment, never changes a label and never pushes.
 
 A label change made by a person starts the `labels` job; the bot's own label
 change in `build` does not (it was made with `GITHUB_TOKEN`), and the body it
@@ -343,7 +346,7 @@ that never cancels a running job; GitHub keeps at most one waiting run per
 group, and since the label is read when the job runs, the surviving run still
 sees the latest state. A push to `main` rebuilding the pull request at the
 same moment can leave a body one change behind; the next rebuild corrects it.
-Every label event on any pull request creates a `Release PR` run whose jobs
+Every label event on any pull request into `main` creates a `Release PR` run whose jobs
 are skipped.
 
 ## `ci.yml` never calls `scripts/setup-dev-env.ps1` (found during Stage 6/7, BPE-24)

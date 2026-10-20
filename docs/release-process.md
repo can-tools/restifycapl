@@ -36,12 +36,15 @@ workflow; neither is on `main` yet, and until both are, no release is made.
    the bot dispatches `ci.yml` and `bump-label.yml` on `release/next`, once the
    push and the label step are done; a failed dispatch fails the run. Nothing
    is dispatched when the rebuild is skipped. A person who changes the bump
-   label on the release pull request starts the `bump label` check and a
-   refresh of the pull request body by the `labels` job of `release-pr.yml`:
-   the body is regenerated with the label as it is when the job runs, and the
-   job changes nothing else (it pushes nothing, and adds no comment or label).
-   A body refreshed just after a new rebuild can show the older preview until
-   the next push to `main`.
+   label on the release pull request starts the `bump label` check and the
+   `labels` job of `release-pr.yml`, which checks out `main` and rewrites only
+   the version preview line of the body for the label as it is when the job
+   runs. Checklist ticks are kept; the checklist resets only when the bot
+   rebuilds the pull request. With zero, several or invalid bump labels
+   nothing changes and the job warns (the `bump label` check is the
+   authoritative red signal). The job pushes nothing and adds no comment or
+   label. A body rewritten just after a new rebuild can be one change behind;
+   the next rebuild corrects it.
 2. The release bot runs `scripts/ci/changelog.ps1`: `level` computes the level
    from the squash-merge commits since the last tag, `next-version` the version
    from it, and `generate` writes the section
