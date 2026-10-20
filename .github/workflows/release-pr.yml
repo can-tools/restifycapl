@@ -1,4 +1,4 @@
-# release-pr.yml -- the release bot: builds release/next and its pull request, and refreshes its body on a label change. See docs/release-process.md.
+# release-pr.yml -- the release bot: builds release/next and its pull request, and rewrites the version preview of its body on a label change. See docs/release-process.md.
 
 name: Release PR
 
@@ -378,15 +378,15 @@ jobs:
       GH_REPO: ${{ github.repository }}
       PR_NUMBER: ${{ github.event.pull_request.number }}
     steps:
-      - name: Checkout the release/next head (full history and tags)
+      - name: Checkout main (full history and tags)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: main
           fetch-depth: 0
           fetch-tags: true
           persist-credentials: false
 
-      - name: Read the current bump label
+      - name: Read the bump label and the body of the pull request
         id: label
         shell: bash
         run: |
@@ -394,12 +394,16 @@ jobs:
             echo "::error::unexpected pull request number: $PR_NUMBER"
             exit 1
           fi
-          errfile="$RUNNER_TEMP/labels.err"
-          code=0; names=$(gh api "repos/${GH_REPO}/pulls/${PR_NUMBER}" --jq '.labels[].name' 2>"$errfile") || code=$?
+          errfile="$RUNNER_TEMP/pr.err"
+          snapshot="$RUNNER_TEMP/pr.json"
+          code=0; out=$(gh api "repos/${GH_REPO}/pulls/${PR_NUMBER}" 2>"$errfile") || code=$?
           if [ "$code" -ne 0 ]; then
-            echo "::error::could not read the labels of pull request #$PR_NUMBER (exit $code): $(tr '\r\n' '  ' < "$errfile")"
+            echo "::error::could not read pull request #$PR_NUMBER (exit $code): $(tr '\r\n' '  ' < "$errfile")"
             exit 1
           fi
+          printf '%s' "$out" > "$snapshot"
+          jq -j '.body // ""' "$snapshot" > "$RUNNER_TEMP/body.md"
+          names=$(jq -r '.labels[].name' "$snapshot")
           count=0; label=""
           while IFS= read -r name; do
             case "$name" in
@@ -409,83 +413,48 @@ jobs:
                 ;;
             esac
           done <<< "$names"
+          reason=""
           if [ "$count" -ne 1 ]; then
-            echo "::warning::pull request #$PR_NUMBER has $count bump:* labels; the body previews the computed level"
+            reason="pull request #$PR_NUMBER has $count bump:* labels; the bump label check stays red until exactly one is left"
+          else
+            case "$label" in
+              bump:major|bump:minor|bump:patch)
+                ;;
+              *)
+                reason="the label $label is not bump:major, bump:minor or bump:patch; the bump label check stays red until it is replaced"
+                ;;
+            esac
+          fi
+          if [ -n "$reason" ]; then
+            echo "::warning::$reason; the body was not changed"
+            printf "%s\n\n" "Pull request #$PR_NUMBER: nothing changed." >> "$GITHUB_STEP_SUMMARY"
             label=""
           fi
-          case "$label" in
-            ''|bump:major|bump:minor|bump:patch)
-              ;;
-            *)
-              echo "::warning::the label $label is not bump:major, bump:minor or bump:patch; the body previews the computed level"
-              label=""
-              ;;
-          esac
           echo "label=$label" >> "$GITHUB_OUTPUT"
 
-      - name: Fetch the pull request data
-        id: fetch
-        shell: bash
-        run: |
-          messages="$RUNNER_TEMP/pr-messages.json"
-          files="$RUNNER_TEMP/pr-files.json"
-          code=0; base=$(git rev-parse 'HEAD^') || code=$?
-          if [ "$code" -ne 0 ] || [[ ! "$base" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "::error::could not read the base commit of the release/next head (exit $code): $base"
-            exit 1
-          fi
-          echo "base=$base" >> "$GITHUB_OUTPUT"
-
-          code=0; out=$(pwsh -NoProfile -File scripts/ci/changelog.ps1 prs -Base "$base") || code=$?
-          if [ "$code" -ne 0 ]; then
-            echo "$out"
-            exit 1
-          fi
-          printf '{}' > "$messages"
-          printf '{}' > "$files"
-          while read -r n; do
-            [ -n "$n" ] || continue
-            code=0; commits=$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/pulls/$n/commits") || code=$?
-            if [ "$code" -ne 0 ]; then
-              echo "::error::could not read the commits of pull request #$n (exit $code)"
-              exit 1
-            fi
-            code=0; changed=$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/pulls/$n/files") || code=$?
-            if [ "$code" -ne 0 ]; then
-              echo "::error::could not read the changed files of pull request #$n (exit $code)"
-              exit 1
-            fi
-            msgs=$(printf '%s' "$commits" | jq -c '[.[][].commit.message]')
-            names=$(printf '%s' "$changed" | jq -c '[.[][].filename]')
-            merged=$(jq -c --arg n "$n" --argjson m "$msgs" '. + {($n): $m}' "$messages")
-            printf '%s' "$merged" > "$messages"
-            merged=$(jq -c --arg n "$n" --argjson f "$names" '. + {($n): $f}' "$files")
-            printf '%s' "$merged" > "$files"
-          done <<< "$out"
-
-      - name: Generate the pull request body
+      - name: Rewrite the version preview line of the body
+        if: steps.label.outputs.label != ''
         shell: bash
         env:
-          BASE: ${{ steps.fetch.outputs.base }}
           LABEL: ${{ steps.label.outputs.label }}
         run: |
-          args=(-Base "$BASE" -PrMessages "$RUNNER_TEMP/pr-messages.json" -PrFiles "$RUNNER_TEMP/pr-files.json" -Output "$RUNNER_TEMP/pr-body.md")
-          if [ -n "$LABEL" ]; then args+=(-Label "$LABEL"); fi
-          code=0; out=$(pwsh -NoProfile -File scripts/ci/changelog.ps1 pr-body "${args[@]}") || code=$?
-          echo "$out"
+          body="$RUNNER_TEMP/body.md"
+          code=0; out=$(pwsh -NoProfile -File scripts/ci/changelog.ps1 body-version -Body "$body" -Label "$LABEL" -Output "$body") || code=$?
           if [ "$code" -ne 0 ]; then
+            echo "::error::could not rewrite the version preview of pull request #$PR_NUMBER (exit $code): $(printf '%s' "$out" | tr '\r\n' '  ')"
             exit 1
           fi
 
       - name: Update the pull request body
+        if: steps.label.outputs.label != ''
         shell: bash
         env:
           LABEL: ${{ steps.label.outputs.label }}
         run: |
           errfile="$RUNNER_TEMP/edit.err"
-          code=0; out=$(gh pr edit "$PR_NUMBER" --body-file "$RUNNER_TEMP/pr-body.md" 2>"$errfile") || code=$?
+          code=0; out=$(gh pr edit "$PR_NUMBER" --body-file "$RUNNER_TEMP/body.md" 2>"$errfile") || code=$?
           if [ "$code" -ne 0 ]; then
             echo "::error::could not update the body of pull request #$PR_NUMBER (exit $code): $(printf '%s' "$out" | tr '\r\n' '  ') $(tr '\r\n' '  ' < "$errfile")"
             exit 1
           fi
-          printf "%s\n\n" "Pull request #$PR_NUMBER body refreshed for label ${LABEL:-none}." >> "$GITHUB_STEP_SUMMARY"
+          printf "%s\n\n" "Pull request #$PR_NUMBER: version preview rewritten for label $LABEL." >> "$GITHUB_STEP_SUMMARY"
