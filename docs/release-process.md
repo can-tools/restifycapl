@@ -31,7 +31,23 @@ workflow; neither is on `main` yet, and until both are, no release is made.
 
 1. On every push to `main`, the release bot computes the level; when there is
    something to release, it opens or updates the release pull request on
-   `release/next`, and the required checks run on its head.
+   `release/next`, and the required checks run on its head. Pushes and label
+   changes made with `GITHUB_TOKEN` start no workflow, so after each rebuild
+   the bot dispatches `ci.yml` and `bump-label.yml` on `release/next`, once the
+   push and the label step are done; a failed dispatch fails the run. Nothing
+   is dispatched when the rebuild is skipped. A person who changes the bump
+   label on the release pull request starts the `bump label` check and the
+   `labels` job of `release-pr.yml`, which checks out `main` and rewrites only
+   the version preview line of the body for the label as it is when the job
+   runs. Checklist ticks are kept; the checklist resets only when the bot
+   rebuilds the pull request. With zero, several or invalid bump labels
+   nothing changes and the job warns (the `bump label` check is the
+   authoritative red signal). The job pushes nothing and adds no comment or
+   label. A body rewritten just after a new rebuild can be one change behind,
+   and a checklist tick made in that window can be lost and must be ticked
+   again. A later push to `main` that would rebuild an identical `release/next`
+   is skipped and does not repair it; a manual `workflow_dispatch` of
+   `Release PR` is never skipped and does.
 2. The release bot runs `scripts/ci/changelog.ps1`: `level` computes the level
    from the squash-merge commits since the last tag, `next-version` the version
    from it, and `generate` writes the section
@@ -105,8 +121,9 @@ three ways:
 - Once the section is merged (the first-parent commit after the heading's hash
   carries the heading) it passes, names that commit and says to re-run the
   failed `tag-release.yml` run.
-- When that commit already carries a `v*.*.*` tag it passes with a warning
-  that the section was already released; the notes are previewed again.
+- When that commit already carries a release tag (vX.Y.Z, no leading zeros, each
+  field at most 65535) it passes with a warning that the section was already
+  released; the notes are previewed again.
 
 ## Jobs
 

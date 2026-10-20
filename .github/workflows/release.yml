@@ -108,6 +108,7 @@ jobs:
           # Informational: every outcome is written to the summary and the step ends green.
           set -euo pipefail
           messages="$RUNNER_TEMP/pr-messages.json"
+          arg_file="$RUNNER_TEMP/pr-arg.json"
           generated="$RUNNER_TEMP/CHANGELOG.generated.md"
           section="$RUNNER_TEMP/section.md"
           summary() { printf "%s\n\n" "$1" >> "$GITHUB_STEP_SUMMARY"; }
@@ -128,7 +129,8 @@ jobs:
               summary "No release preview: could not read the commits of pull request #$n."
               exit 0
             fi
-            code=0; merged=$(jq -c --arg n "$n" --argjson m "$msgs" '. + {($n): $m}' "$messages") || code=$?
+            printf '%s' "$msgs" > "$arg_file"
+            code=0; merged=$(jq -c --arg n "$n" --slurpfile m "$arg_file" '. + {($n): $m[0]}' "$messages") || code=$?
             if [ "$code" -ne 0 ]; then
               echo "::warning::could not add the commits of pull request #$n to the messages file (exit $code)"
               summary "No release preview: could not add the commits of pull request #$n to the messages file."

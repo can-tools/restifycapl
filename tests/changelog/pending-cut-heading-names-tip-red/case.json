@@ -1,0 +1,17 @@
+{
+  "command": "pending-cut",
+  "eol": "lf",
+  "git": {
+    "tip": "b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0",
+    "chain": [
+      "b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0",
+      "e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3"
+    ]
+  },
+  "expect": {
+    "exit": 1,
+    "output": [
+      "::error::the newest CHANGELOG section ## [b0b0b0b0b0b0] - 2026-11-01 names the origin/main tip itself, so no commit after it can be its cut"
+    ]
+  }
+}

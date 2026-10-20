@@ -31,15 +31,20 @@ jobs:
       - name: Require exactly one bump label on release/next
         shell: bash
         run: |
+          errfile="$RUNNER_TEMP/bump-label.err"
           if [ "$HEAD_REF" != "release/next" ]; then
             echo "Head branch '$HEAD_REF' is not release/next: no bump label required."
             exit 0
           fi
           number="$PR_NUMBER"
+          if [ -n "$number" ] && [[ ! "$number" =~ ^[0-9]+$ ]]; then
+            echo "::error::unexpected pull request number: $number"
+            exit 1
+          fi
           if [ -z "$number" ]; then
-            code=0; number=$(gh api "repos/${GH_REPO}/pulls?state=open&head=${REPO_OWNER}:${HEAD_REF}" --jq '.[].number' 2>&1) || code=$?
+            code=0; number=$(gh api "repos/${GH_REPO}/pulls?state=open&head=${REPO_OWNER}:${HEAD_REF}" --jq '.[].number' 2>"$errfile") || code=$?
             if [ "$code" -ne 0 ]; then
-              echo "::error::could not list the pull requests of release/next (exit $code): $number"
+              echo "::error::could not list the pull requests of release/next (exit $code): $(tr '\r\n' '  ' < "$errfile")"
               exit 1
             fi
             if [ -z "$number" ]; then
@@ -51,11 +56,15 @@ jobs:
                 echo "::error::release/next has more than one open pull request"
                 exit 1
                 ;;
+              *[!0-9]*)
+                echo "::error::unexpected output from the pull request lookup: $number"
+                exit 1
+                ;;
             esac
           fi
-          code=0; names=$(gh api "repos/${GH_REPO}/pulls/${number}" --jq '.labels[].name' 2>&1) || code=$?
+          code=0; names=$(gh api "repos/${GH_REPO}/pulls/${number}" --jq '.labels[].name' 2>"$errfile") || code=$?
           if [ "$code" -ne 0 ]; then
-            echo "::error::could not read the labels of pull request #${number} (exit $code): $names"
+            echo "::error::could not read the labels of pull request #${number} (exit $code): $(tr '\r\n' '  ' < "$errfile")"
             exit 1
           fi
           count=0; selected=""

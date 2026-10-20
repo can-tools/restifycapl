@@ -1,0 +1,18 @@
+{
+  "command": "body-version",
+  "eol": "lf",
+  "params": {
+    "label": "bump:patch"
+  },
+  "git": {
+    "allTags": [
+      "v0.1.0"
+    ]
+  },
+  "expect": {
+    "exit": 1,
+    "output": [
+      "::error::body.md must hold exactly one line with both version markers in order; found 1 line(s) with a marker"
+    ]
+  }
+}

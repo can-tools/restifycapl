@@ -21,6 +21,13 @@ Subcommands (first argument):
             ("[<12>]: <RepoUrl>/commit/<Base>") above the existing ones at the end of the file
   next-version  -Level major|minor|patch|none | -Label bump:major|bump:minor|bump:patch
             print the next version as X.Y.Z (no "v" prefix; the tag is "v" plus this)
+  pending-cut  [-ChangelogPath <file>]
+            print proceed, or waiting when the newest hash-headed section is a merged cut at the
+            origin/main tip that has no release tag yet; fail when that cut is deeper than the tip or invalid
+  pr-body   -Output <file> [-Base <40-hex>] [-RepoUrl <url>] [-PrMessages <file>] [-PrFiles <file>] [-Label bump:major|bump:minor|bump:patch] [-ChangelogPath <file>]
+            write the release pull request description for the commits since the last tag
+  body-version  -Body <file> -Label bump:major|bump:minor|bump:patch -Output <file>
+            copy a release pull request description, replacing only the text between the version markers
   fixtures  -FixtureDir <dir>
             run every <dir>/*/case.json against a simulated git history
 Exit codes: 0 success; 1 a validation failed, git failed or CHANGELOG.md could not
@@ -70,12 +77,33 @@ next-version: the previous version is the highest tag as above. -Level or -Label
 one) decides the bump: major adds one to the first field, minor to the second, patch to the third.
 -Level none and a resulting field above 65535 fail with exit 1. stdout carries only the version.
 A major bump is never computed by level; the only way to it is the label bump:major.
+pending-cut reads the first "## [" heading of -ChangelogPath (the file at the origin/main tip). Without a
+hash-shaped heading it prints proceed. Otherwise the 12 characters must name exactly one commit on
+"git rev-list --first-parent origin/main", other than the tip, and the commit after it (the cut) must carry
+the heading in its CHANGELOG.md; anything else fails with exit 1. A cut with a release tag (vX.Y.Z, no
+leading zeros, each field at most 65535) prints proceed; an untagged cut that is the tip prints waiting; an
+untagged cut deeper than the tip fails and tells to re-run the failed tag-release.yml run.
+pr-body: the description opens with "Version preview: <!-- version -->vX.Y.Z (vA.B.C + level)<!-- /version -->",
+the version being the next version for -Label, else for the level computed from the commits. A "> [!CAUTION]"
+block lists the breaking changes when there are any. Then come the release notes preview (the generated
+section without Development), the warnings (those of generate, and a fix/ pull request whose -PrFiles entry
+lists src/module/exports.cpp), fixed sentences and a reviewer checklist, every item unchecked. Nothing to
+release besides Development fails with exit 1 and writes nothing. Without -Label the version comes from the
+commits, so a description built after a human changed the label shows the computed level until body-version
+rewrites the marker line.
+body-version: exactly one line of the body must hold both markers; the text between them becomes
+"vX.Y.Z (vA.B.C + level)" for -Label and every other byte, ticked checklist items included, is kept.
+-PrFiles names a JSON file the workflow builds from "gh api pulls/N/files": an object whose keys are pull
+request numbers and whose values are arrays of changed files, each a path string or an object with a
+"filename" string. A pull request absent from the file is treated as having changed nothing.
 
 A fixture case may declare "match": "error" instead of exact output; the run must then
 exit non-zero and print at least one ::error:: line.
-A fixture case with "command": "generate", "level", "prs" or "next-version" runs that subcommand
-instead of notes and check. "params" holds base, date, repoUrl, prMessages (an object, written to
-a file for the run) (generate), level or label (next-version); "git" may carry "tip" (the answer for the default
+A fixture case with "command": "generate", "level", "prs", "next-version", "pending-cut", "pr-body" or
+"body-version" runs that subcommand instead of notes and check. "params" holds base, date, repoUrl,
+prMessages and prFiles (objects, each written to a file for the run) (generate, pr-body), level or label
+(next-version, pr-body, body-version); a body-version case reads body.md and expects expected-body.md, a
+pr-body case expects expected-body.md; "git" may carry "tip" (the answer for the default
 -Base), "allTags" (every tag name), "log" (objects with "sha" and "subject", newest first, the answer
 for the commit range), "logRange" (the range the log is for; any other range fails), "cutOff" (replaces
 the cut-off commit) and "cutOffChain" (the commits reachable from the cut-off along first parents).
@@ -116,6 +144,12 @@ The repository URL, https://github.com/<owner>/<repo>, used for pull request lin
 .PARAMETER PrMessages
 The JSON file of pull request commit messages described above; optional.
 
+.PARAMETER PrFiles
+The JSON file of pull request changed files described above; optional.
+
+.PARAMETER Body
+The release pull request description body-version rewrites.
+
 .PARAMETER Level
 One of major, minor, patch, none; the bump level next-version applies.
 
@@ -141,6 +175,12 @@ pwsh -NoProfile -File scripts/ci/changelog.ps1 generate -PrMessages pr-messages.
 pwsh -NoProfile -File scripts/ci/changelog.ps1 next-version -Label bump:patch
 
 .EXAMPLE
+pwsh -NoProfile -File scripts/ci/changelog.ps1 pr-body -PrMessages pr-messages.json -PrFiles pr-files.json -Output pr-body.md
+
+.EXAMPLE
+pwsh -NoProfile -File scripts/ci/changelog.ps1 body-version -Body pr-body.md -Label bump:patch -Output pr-body.md
+
+.EXAMPLE
 pwsh -NoProfile -File scripts/ci/changelog.ps1 fixtures -FixtureDir tests/changelog
 #>
 
@@ -158,6 +198,8 @@ param(
   [string]$Date,
   [string]$RepoUrl,
   [string]$PrMessages,
+  [string]$PrFiles,
+  [string]$Body,
   [string]$Level,
   [string]$Label,
   [string]$FixtureDir
@@ -191,10 +233,22 @@ $ReBlank = [regex]'^[ \t]*\r?$'
 $ReSquash = [regex]'^(.*\S) \(#([0-9]{1,9})\)$'
 $ReBranchType = [regex]'^(feat|stage|fix|chore|docs|release)/'
 $ReMessageHead = [regex]'^([a-z]+)(?:\([^()]*\))?(!)?: (\S.*)$'
+$ReVersionMarks = [regex]'^(.*<!-- version -->).*?(<!-- /version -->.*)$'
 $ReBreakingFooter = [regex]'^BREAKING[ -]CHANGE:[ \t]*(.*)$'
 # Version-shaped tags; the release.yml rule (no leading zeros, at most 65535) is applied per field so a skipped tag can be reported.
 $ReTagShape = [regex]'^v([0-9]+)\.([0-9]+)\.([0-9]+)$'
 $MaxField = 65535
+
+function Test-ReleaseTag([string]$name) {
+  $shape = $ReTagShape.Match($name)
+  if (-not $shape.Success) { return $false }
+  foreach ($i in 1, 2, 3) {
+    $field = $shape.Groups[$i].Value
+    if ($field.Length -gt 1 -and $field.StartsWith('0', [System.StringComparison]::Ordinal)) { return $false }
+    if ($field.Length -gt 5 -or [int]$field -gt $MaxField) { return $false }
+  }
+  return $true
+}
 $Levels = @('major', 'minor', 'patch', 'none')
 
 $script:Ctx = @{ Git = 'Invoke-RealGit'; Out = $null; Err = $null; Summary = $null; Facts = $null; ShowText = $null }
@@ -322,7 +376,7 @@ function Test-Cut([string]$h, [string]$heading, [string]$sha) {
     $child = $chain[$idx - 1]
     $shown = Invoke-Git @('show', ($child + ':CHANGELOG.md'))
     if ($shown.Code -eq 0 -and (@($shown.Out.Split([char]10) | ForEach-Object { $_.TrimEnd("`r") }) -ccontains $heading)) {
-      $tags = @((Split-Words (Get-GitOutput @('tag', '--points-at', $child))) | Where-Object { $_ -clike 'v*.*.*' })
+      $tags = @((Split-Words (Get-GitOutput @('tag', '--points-at', $child))) | Where-Object { Test-ReleaseTag $_ })
       if ($tags.Count -gt 0) {
         Add-Annotation 'warning' ('The newest CHANGELOG section {0} was already released as {1}; this dry run previews its notes again.' -f $heading, $tags[0])
       }
@@ -437,8 +491,9 @@ function Get-LastVersion {
   return , $latest
 }
 
-function Get-NextVersion([string]$Level, [string]$Label) {
-  $latest = Get-LastVersion
+function Get-NextVersion([string]$Level, [string]$Label, $Latest = $null) {
+  $latest = $Latest
+  if ($null -eq $latest) { $latest = Get-LastVersion }
   if (-not [string]::IsNullOrEmpty($Label)) { $Level = $Label.Substring('bump:'.Length) }
   if ($Level -ceq 'none') { Stop-WithError 'nothing to release: the level is none' }
   $next = switch ($Level) {
@@ -483,6 +538,39 @@ function Read-PrMessages([string]$path) {
     $messages[[string]$key] = [string[]]@($value)
   }
   return $messages
+}
+
+function Read-PrFiles([string]$path) {
+  $files = @{}
+  if ([string]::IsNullOrEmpty($path)) { return $files }
+  try {
+    $json = $Utf8Strict.GetString([System.IO.File]::ReadAllBytes((Resolve-FullPath $path))) | ConvertFrom-Json -AsHashtable
+  }
+  catch { Stop-WithError ('cannot read {0}: {1}' -f $path, $_.Exception.Message) }
+  if ($json -isnot [hashtable]) { Stop-WithError ('{0} must hold a JSON object of pull request number to an array of changed files' -f $path) }
+  foreach ($key in $json.Keys) {
+    $value = $json[$key]
+    if ($value -is [string] -or $value -is [hashtable] -or $value -isnot [System.Collections.IEnumerable]) {
+      Stop-WithError ('{0}: the value of "{1}" must be an array of changed files' -f $path, $key)
+    }
+    $names = New-Object System.Collections.Generic.List[string]
+    foreach ($item in $value) {
+      if ($item -is [string]) { $names.Add($item) }
+      elseif ($item -is [hashtable] -and $item.ContainsKey('filename') -and $item['filename'] -is [string]) { $names.Add($item['filename']) }
+      else { Stop-WithError ('{0}: each changed file of "{1}" must be a path string or an object with a "filename" string' -f $path, $key) }
+    }
+    $files[[string]$key] = [string[]]$names.ToArray()
+  }
+  return $files
+}
+
+function Get-RepoUrl($lines, [string]$RepoUrl) {
+  if (-not [string]::IsNullOrEmpty($RepoUrl)) { return $RepoUrl }
+  foreach ($line in $lines) {
+    $m = $ReRepoDef.Match($line)
+    if ($m.Success) { return $m.Groups[1].Value }
+  }
+  Stop-WithError 'no repository URL: the file has no link definition to take it from; pass -RepoUrl'
 }
 
 function Read-Subject([string]$subject) {
@@ -665,7 +753,7 @@ function Write-Usage([string]$msg) {
   # Fixture runs would otherwise print every expected usage error to the log.
   if ($null -ne $script:Ctx.Out) { return }
   [Console]::Error.WriteLine($msg)
-  [Console]::Error.WriteLine('usage: changelog.ps1 notes|check -Mode tag|dry-run -Sha <commit> [-Output <file>] [-ChangelogPath <file>] | prs [-Base <hash>] | level [-Base <hash>] [-PrMessages <file>] | generate [-Base <hash>] [-Date <YYYY-MM-DD>] [-RepoUrl <url>] [-PrMessages <file>] [-Output <file>] [-SectionOutput <file>] [-ChangelogPath <file>] | next-version -Level <level> | -Label <bump:level> | fixtures -FixtureDir <dir>')
+  [Console]::Error.WriteLine('usage: changelog.ps1 notes|check -Mode tag|dry-run -Sha <commit> [-Output <file>] [-ChangelogPath <file>] | prs [-Base <hash>] | level [-Base <hash>] [-PrMessages <file>] | generate [-Base <hash>] [-Date <YYYY-MM-DD>] [-RepoUrl <url>] [-PrMessages <file>] [-Output <file>] [-SectionOutput <file>] [-ChangelogPath <file>] | next-version -Level <level> | -Label <bump:level> | pending-cut [-ChangelogPath <file>] | pr-body -Output <file> [-Base <hash>] [-RepoUrl <url>] [-PrMessages <file>] [-PrFiles <file>] [-Label <bump:level>] [-ChangelogPath <file>] | body-version -Body <file> -Label <bump:level> -Output <file> | fixtures -FixtureDir <dir>')
 }
 
 function Invoke-Run([string]$Command, [string]$Mode, [string]$Sha, [byte[]]$Bytes, [string]$OutPath, [string]$Display) {
@@ -724,14 +812,7 @@ function Invoke-GenerateRun([byte[]]$Bytes, [string]$Display, [string]$Base, [st
       foreach ($line in $lines) {
         if ($line.StartsWith('## [' + $short + ']', [System.StringComparison]::Ordinal)) { Stop-WithError ('the file already has a section for {0}' -f $short) }
       }
-      $repo = $RepoUrl
-      if ([string]::IsNullOrEmpty($repo)) {
-        foreach ($line in $lines) {
-          $m = $ReRepoDef.Match($line)
-          if ($m.Success) { $repo = $m.Groups[1].Value; break }
-        }
-      }
-      if ([string]::IsNullOrEmpty($repo)) { Stop-WithError 'no repository URL: the file has no link definition to take it from; pass -RepoUrl' }
+      $repo = Get-RepoUrl $lines $RepoUrl
       $range = Get-Range $resolvedBase (Read-PrMessages $PrMessagesPath)
       $entries = Get-Entries $range $repo
       foreach ($w in $entries.Warnings) { Write-Line ('::warning::' + $w) }
@@ -752,6 +833,137 @@ function Invoke-NextVersionRun([string]$Level, [string]$Label) {
   if ($hasLevel -and $Level -cnotin $Levels) { Write-Usage '-Level must be major, minor, patch or none'; return 2 }
   if ($hasLabel -and $Label -cnotin @('bump:major', 'bump:minor', 'bump:patch')) { Write-Usage '-Label must be bump:major, bump:minor or bump:patch'; return 2 }
   return (Invoke-Guarded { Write-Line (Get-NextVersion $Level $Label) })
+}
+
+function Invoke-PendingCutRun([byte[]]$Bytes, [string]$Display) {
+  return (Invoke-Guarded {
+      try { $Text = $Utf8Strict.GetString($Bytes) }
+      catch { Stop-WithError ('cannot read {0}: {1}' -f $Display, $_.Exception.Message) }
+      $heading = $null
+      foreach ($line in $Text.Split([char]10)) {
+        if ($ReHead.IsMatch($line)) { $heading = $line.TrimEnd("`r"); break }
+      }
+      $m = $null
+      if ($null -ne $heading) { $m = $ReHashHead.Match($heading) }
+      if ($null -eq $m -or -not $m.Success) { Write-Line 'proceed'; return }
+      $h = $m.Groups[1].Value
+      $tip = Get-GitOutput @('rev-parse', 'origin/main')
+      $chain = Split-Words (Get-GitOutput @('rev-list', '--first-parent', 'origin/main'))
+      $idx = -1
+      $hits = 0
+      for ($i = 0; $i -lt $chain.Count; $i++) {
+        if ($chain[$i].StartsWith($h, [System.StringComparison]::Ordinal)) { if ($idx -lt 0) { $idx = $i }; $hits++ }
+      }
+      if ($hits -ne 1) {
+        Stop-WithError ('the newest CHANGELOG section {0} names {1}, which is not exactly one commit on the first-parent history of origin/main' -f $heading, $h)
+      }
+      if ($idx -eq 0) {
+        Stop-WithError ('the newest CHANGELOG section {0} names the origin/main tip itself, so no commit after it can be its cut' -f $heading)
+      }
+      $child = $chain[$idx - 1]
+      $shown = Invoke-Git @('show', ($child + ':CHANGELOG.md'))
+      if ($shown.Code -ne 0 -or -not (@($shown.Out.Split([char]10) | ForEach-Object { $_.TrimEnd("`r") }) -ccontains $heading)) {
+        Stop-WithError ('the commit {0} after {1} does not carry the CHANGELOG section {2}, so it is not that cut' -f (Get-Prefix $child 12), $h, $heading)
+      }
+      $tags = @((Split-Words (Get-GitOutput @('tag', '--points-at', $child))) | Where-Object { Test-ReleaseTag $_ })
+      if ($tags.Count -gt 0) { Write-Line 'proceed'; return }
+      if ($child -ceq $tip) { Write-Line 'waiting'; return }
+      Stop-WithError ('the cut {0} is merged on main as {1} but has no release tag, and main has moved on; re-run the failed `tag-release.yml` run' -f $heading, (Get-Prefix $child 12))
+    })
+}
+
+function Format-VersionPreview([string]$Level, [string]$Label, $Latest) {
+  $shown = $Level
+  if (-not [string]::IsNullOrEmpty($Label)) { $shown = $Label.Substring('bump:'.Length) }
+  $next = Get-NextVersion $Level $Label $Latest
+  return 'v{0} (v{1}.{2}.{3} + {4})' -f $next, $Latest[0], $Latest[1], $Latest[2], $shown
+}
+
+function Test-LabelArgument([string]$Label) {
+  if ($Label -cnotin @('bump:major', 'bump:minor', 'bump:patch')) { Write-Usage '-Label must be bump:major, bump:minor or bump:patch'; return $false }
+  return $true
+}
+
+function Invoke-PrBodyRun([byte[]]$Bytes, [string]$Display, [string]$Base, [string]$RepoUrl, [string]$PrMessagesPath, [string]$PrFilesPath, [string]$Label, [string]$OutPath) {
+  if (-not (Test-BaseArgument $Base)) { return 2 }
+  if (-not [string]::IsNullOrEmpty($RepoUrl) -and -not $ReRepoUrl.IsMatch($RepoUrl)) { Write-Usage '-RepoUrl must be https://github.com/<owner>/<repo>'; return 2 }
+  if (-not [string]::IsNullOrEmpty($Label) -and -not (Test-LabelArgument $Label)) { return 2 }
+  return (Invoke-Guarded {
+      try { $Text = $Utf8Strict.GetString($Bytes) }
+      catch { Stop-WithError ('cannot read {0}: {1}' -f $Display, $_.Exception.Message) }
+      $lines = [System.Collections.Generic.List[string]]::new([string[]]$Text.Split([char]10))
+      $repo = Get-RepoUrl $lines $RepoUrl
+      $range = Get-Range (Resolve-Base $Base) (Read-PrMessages $PrMessagesPath)
+      $files = Read-PrFiles $PrFilesPath
+      $entries = Get-Entries $range $repo
+      $warnings = New-Object System.Collections.Generic.List[string]
+      $warnings.AddRange($entries.Warnings)
+      foreach ($c in $range.Commits) {
+        if ($c.Pre -or $c.Subject.Type -cne 'fix' -or $c.Subject.Number -le 0) { continue }
+        $key = [string]$c.Subject.Number
+        if ($files.ContainsKey($key) -and ($files[$key] -ccontains 'src/module/exports.cpp')) {
+          $warnings.Add(('the fix/ pull request #{0} changed src/module/exports.cpp; confirm that no export table row was renamed, reordered or removed' -f $key))
+        }
+      }
+      foreach ($w in $warnings) { Write-Line ('::warning::' + $w) }
+      if ($entries.Breaking.Count + $entries.Added.Count + $entries.Fixed.Count -eq 0) {
+        Stop-WithError ('nothing to release since {0}: no feat/, stage/ or fix/ change and no breaking marker after the cut-off commit' -f $range.Tag)
+      }
+      $preview = Format-VersionPreview (Get-Level $range) $Label $range.Latest
+      $notes = [pscustomobject]@{ Breaking = $entries.Breaking; Added = $entries.Added; Fixed = $entries.Fixed; Development = (New-Object System.Collections.Generic.List[string]) }
+      $out = New-Object System.Collections.Generic.List[string]
+      $out.Add('Version preview: <!-- version -->' + $preview + '<!-- /version -->')
+      $out.Add('')
+      if ($entries.Breaking.Count -gt 0) {
+        $out.Add('> [!CAUTION]')
+        $out.Add('> **Breaking change.** This release contains:')
+        $out.Add('>')
+        foreach ($b in $entries.Breaking) { $out.Add('> ' + $b) }
+        $out.Add('')
+      }
+      $out.Add('## Release notes')
+      $out.Add('')
+      $out.Add('Development entries stay in CHANGELOG.md and are left out of the GitHub release notes.')
+      $section = Get-SectionLines $notes ''
+      for ($i = 1; $i -lt $section.Count; $i++) { $out.Add($section[$i]) }
+      $out.Add('')
+      if ($warnings.Count -gt 0) {
+        $out.Add('## Warnings')
+        $out.Add('')
+        foreach ($w in $warnings) { $out.Add('- ' + $w) }
+        $out.Add('')
+      }
+      $out.Add('## Review')
+      $out.Add('')
+      $out.Add('The release bot maintains this pull request: commits pushed to `release/next` by hand are overwritten the next time it rebuilds the branch, and the checklist below is reset on every rebuild. Squash-merging the pull request releases the version.')
+      $out.Add('')
+      $out.Add('- [ ] The release notes above read correctly for DLL and CAPL users')
+      $out.Add('- [ ] The `bump:*` label matches the intended version (the preview is the last tag plus the label''s level)')
+      if ($entries.Breaking.Count -gt 0) { $out.Add('- [ ] The breaking changes in the caution block above are intended') }
+      [System.IO.File]::WriteAllBytes($OutPath, $Utf8.GetBytes((($out -join "`n") + "`n")))
+    })
+}
+
+function Invoke-BodyVersionRun([byte[]]$Bytes, [string]$Display, [string]$Label, [string]$OutPath) {
+  if (-not (Test-LabelArgument $Label)) { return 2 }
+  return (Invoke-Guarded {
+      try { $Text = $Utf8Strict.GetString($Bytes) }
+      catch { Stop-WithError ('cannot read {0}: {1}' -f $Display, $_.Exception.Message) }
+      $lines = $Text.Split([char]10)
+      $at = -1
+      $count = 0
+      for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i].Contains('<!-- version -->') -or $lines[$i].Contains('<!-- /version -->')) { if ($at -lt 0) { $at = $i }; $count++ }
+      }
+      $m = $null
+      if ($count -eq 1) { $m = $ReVersionMarks.Match($lines[$at]) }
+      if ($count -ne 1 -or -not $m.Success -or $lines[$at].Split([string[]]@('<!-- version -->'), [System.StringSplitOptions]::None).Count -ne 2 -or $lines[$at].Split([string[]]@('<!-- /version -->'), [System.StringSplitOptions]::None).Count -ne 2) {
+        Stop-WithError ('{0} must hold exactly one line with both version markers in order; found {1} line(s) with a marker' -f $Display, $count)
+      }
+      $preview = Format-VersionPreview '' $Label (Get-LastVersion)
+      $lines[$at] = $m.Groups[1].Value + $preview + $m.Groups[2].Value
+      [System.IO.File]::WriteAllBytes($OutPath, $Utf8.GetBytes(($lines -join "`n")))
+    })
 }
 
 function Invoke-Capture([scriptblock]$Body) {
@@ -884,6 +1096,63 @@ function Test-ToolCase($case, [string]$command, $problems, [string]$tmp) {
   }
 }
 
+function Test-PendingCutCase($case, [byte[]]$bytes, $problems) {
+  $r = Invoke-Capture { Invoke-PendingCutRun $bytes 'CHANGELOG.md' }
+  Test-ToolResult $r $case['expect'] $problems
+}
+
+function Write-CaseJson($case, [string]$key, [string]$path) {
+  if (-not ($case.ContainsKey('params') -and $case['params'].ContainsKey($key))) { return '' }
+  [System.IO.File]::WriteAllText($path, (ConvertTo-Json $case['params'][$key] -Depth 6), $Utf8)
+  return $path
+}
+
+function Test-BodyResult($r, $case, [string]$caseDir, [string]$tmp, [string]$again, $problems) {
+  $expect = $case['expect']
+  Test-ToolResult $r $expect $problems
+  if (-not $expect.ContainsKey('exit')) { return }
+  if ([int]$expect['exit'] -eq 0) {
+    if (-not [System.IO.File]::Exists($tmp)) { $problems.Add('no result file was written'); return }
+    $want = Convert-Eol $Utf8Strict.GetString([System.IO.File]::ReadAllBytes((Join-Path $caseDir 'expected-body.md'))) $case['eol']
+    if ($Utf8Strict.GetString([System.IO.File]::ReadAllBytes($tmp)) -cne $want) { $problems.Add('result differs from expected-body.md') }
+    if (-not [System.IO.File]::Exists($again) -or [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($again)) -cne [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($tmp))) { $problems.Add('a second run gave a different result') }
+  }
+  elseif ([System.IO.File]::Exists($tmp)) { $problems.Add('a result file was written although the run failed') }
+}
+
+function Test-PrBodyCase($case, [string]$caseDir, [byte[]]$bytes, $problems, [string]$tmp) {
+  $again = $tmp + '.again'
+  $messages = $tmp + '.messages'
+  $filesJson = $tmp + '.files'
+  try {
+    $messagesArg = Write-CaseJson $case 'prMessages' $messages
+    $filesArg = Write-CaseJson $case 'prFiles' $filesJson
+    $base = Get-CaseParam $case 'base'; $repo = Get-CaseParam $case 'repoUrl'; $label = Get-CaseParam $case 'label'
+    $r = Invoke-Capture { Invoke-PrBodyRun $bytes 'CHANGELOG.md' $base $repo $messagesArg $filesArg $label $tmp }
+    [void](Invoke-Capture { Invoke-PrBodyRun $bytes 'CHANGELOG.md' $base $repo $messagesArg $filesArg $label $again })
+    Test-BodyResult $r $case $caseDir $tmp $again $problems
+  }
+  finally {
+    foreach ($f in @($again, $messages, $filesJson)) { if ([System.IO.File]::Exists($f)) { [System.IO.File]::Delete($f) } }
+  }
+}
+
+function Test-BodyVersionCase($case, [string]$caseDir, $problems, [string]$tmp) {
+  $again = $tmp + '.again'
+  try {
+    $bodyFile = Join-Path $caseDir 'body.md'
+    $bodyBytes = [byte[]]@()
+    if ([System.IO.File]::Exists($bodyFile)) { $bodyBytes = $Utf8.GetBytes((Convert-Eol $Utf8Strict.GetString([System.IO.File]::ReadAllBytes($bodyFile)) $case['eol'])) }
+    $label = Get-CaseParam $case 'label'
+    $r = Invoke-Capture { Invoke-BodyVersionRun $bodyBytes 'body.md' $label $tmp }
+    [void](Invoke-Capture { Invoke-BodyVersionRun $bodyBytes 'body.md' $label $again })
+    Test-BodyResult $r $case $caseDir $tmp $again $problems
+  }
+  finally {
+    if ([System.IO.File]::Exists($again)) { [System.IO.File]::Delete($again) }
+  }
+}
+
 function Invoke-FixtureRun([string]$Dir) {
   $dirFull = Resolve-FullPath $Dir
   if (-not [System.IO.Directory]::Exists($dirFull)) { Write-Usage ('fixture directory not found: {0}' -f $Dir); return 2 }
@@ -916,6 +1185,9 @@ function Invoke-FixtureRun([string]$Dir) {
       if ($case.ContainsKey('command')) { $command = $case['command'] }
       if ($command -ceq 'generate') { Test-GenerateCase $case $caseDir $bytes $problems $tmp }
       elseif ($command -cin @('level', 'prs', 'next-version')) { Test-ToolCase $case $command $problems $tmp }
+      elseif ($command -ceq 'pending-cut') { Test-PendingCutCase $case $bytes $problems }
+      elseif ($command -ceq 'pr-body') { Test-PrBodyCase $case $caseDir $bytes $problems $tmp }
+      elseif ($command -ceq 'body-version') { Test-BodyVersionCase $case $caseDir $problems $tmp }
       else { Test-NotesCase $case $caseDir $bytes $text $problems $tmp }
     }
     catch {
@@ -936,7 +1208,19 @@ if ($Command -ceq 'fixtures') {
   if ([string]::IsNullOrEmpty($FixtureDir)) { Write-Usage '-FixtureDir is required for fixtures'; exit 2 }
   exit (Invoke-FixtureRun $FixtureDir)
 }
-if ($Command -cnotin @('notes', 'check', 'prs', 'level', 'generate', 'next-version')) { Write-Usage 'the first argument must be notes, check, prs, level, generate, next-version or fixtures'; exit 2 }
+if ($Command -cnotin @('notes', 'check', 'prs', 'level', 'generate', 'next-version', 'pending-cut', 'pr-body', 'body-version')) { Write-Usage 'the first argument must be notes, check, prs, level, generate, next-version, pending-cut, pr-body, body-version or fixtures'; exit 2 }
+if ($Command -cin @('pr-body', 'body-version') -and [string]::IsNullOrEmpty($Output)) { Write-Usage ('-Output is required for ' + $Command); exit 2 }
+if ($Command -ceq 'body-version') {
+  if ([string]::IsNullOrEmpty($Body)) { Write-Usage '-Body is required for body-version'; exit 2 }
+  try {
+    $bodyBytes = [System.IO.File]::ReadAllBytes((Resolve-FullPath $Body))
+  }
+  catch {
+    Write-Line ('::error::cannot read {0}: {1}' -f $Body, $_.Exception.Message)
+    exit 1
+  }
+  exit (Invoke-BodyVersionRun $bodyBytes $Body $Label (Resolve-FullPath $Output))
+}
 if ($Command -ceq 'notes' -or $Command -ceq 'check') {
   if ($Mode -cne 'tag' -and $Mode -cne 'dry-run') { Write-Usage '-Mode must be tag or dry-run'; exit 2 }
   if ([string]::IsNullOrEmpty($Sha)) { Write-Usage '-Sha is required (GITHUB_SHA is not set)'; exit 2 }
@@ -953,6 +1237,8 @@ catch {
   Write-Line ('::error::cannot read {0}: {1}' -f $ChangelogPath, $_.Exception.Message)
   exit 1
 }
+if ($Command -ceq 'pending-cut') { exit (Invoke-PendingCutRun $bytes $ChangelogPath) }
+if ($Command -ceq 'pr-body') { exit (Invoke-PrBodyRun $bytes $ChangelogPath $Base $RepoUrl $PrMessages $PrFiles $Label (Resolve-FullPath $Output)) }
 if ($Command -ceq 'generate') {
   $target = $ChangelogPath
   if (-not [string]::IsNullOrEmpty($Output)) { $target = $Output }

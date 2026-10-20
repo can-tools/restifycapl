@@ -1,0 +1,18 @@
+{
+  "command": "pending-cut",
+  "eol": "lf",
+  "git": {
+    "failures": {
+      "rev-parse origin/main": {
+        "code": 128,
+        "stderr": "fatal: bad revision"
+      }
+    }
+  },
+  "expect": {
+    "exit": 1,
+    "output": [
+      "::error::git rev-parse origin/main failed: fatal: bad revision"
+    ]
+  }
+}
