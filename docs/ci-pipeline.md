@@ -205,8 +205,12 @@ workflow's `validate` job runs the same command before it parses
 `CHANGELOG.md`. Each `tests/changelog/<case>/` directory holds `CHANGELOG.md`,
 `case.json` (mode, line endings, the simulated git history, the expected exit
 code, `::` output lines and summary lines) and, for a successful case,
-`expected-notes.md`. A case for `generate`, `level`, `prs` or `next-version` runs that subcommand
-instead (the last three need no `CHANGELOG.md`); a successful `generate` is
+`expected-notes.md`. A case for `generate`, `level`, `prs`, `release-prs`,
+`pending-cut` or `next-version` runs that subcommand instead (all but
+`generate` need no `CHANGELOG.md`; `pending-cut` takes its pull request data
+from `params.prReleases` and the commits' parents and trees from
+`git.commitInfo`); a `generate` case reads the CHANGELOG at the last tag from
+`git.showTexts`, else from `tag-CHANGELOG.md`, else it is the case's own file; a successful `generate` is
 compared with `expected-CHANGELOG.md` and run twice to prove its output is
 deterministic. The `case.json` format is
 described in the script's help (`Get-Help scripts/ci/changelog.ps1 -Full`).
@@ -356,6 +360,43 @@ and tree, exactly one open pull request): `build` skips it. A manual
 `workflow_dispatch` of `Release PR` is never skipped and repairs the body.
 Every label event on any pull request into `main` creates a `Release PR` run
 whose jobs are skipped.
+
+## Content-free release recognition (decided during github-actions-optimization Stage 6c-fix)
+
+No decision depends on `CHANGELOG.md` content. A release commit is a
+first-parent commit after the highest valid `vX.Y.Z` tag whose subject is
+exactly `release/next (#N)` and whose pull request N, read live through the
+API, is merged, has `merge_commit_sha` equal to that commit, base `main` and
+head ref `release/next` in the same repository as the base. It is faithful when
+its single parent and its tree equal the parent and tree of the pull request's
+head commit (`head.sha`).
+
+- `release-pr.yml` (job `build`) asks `changelog.ps1 release-prs` for the pull
+  request numbers of those subjects, reads `gh api repos/<repo>/pulls/<N>` and
+  `gh api repos/<repo>/commits/<head.sha>` for each and writes
+  `pr-releases.json` in `$RUNNER_TEMP`, built with `jq --slurpfile` like the
+  other data files. The script stays offline. No permission beyond the job's
+  `contents`, `pull-requests` and `actions` is needed. A 404 for the pull
+  request is recorded as `{"found": false}`; a 404 or 422 for the head commit
+  records null parents and tree (not faithful); any other API error fails the
+  run.
+- `changelog.ps1 pending-cut -PrReleases <file>` looks at the newest valid
+  release commit only: none gives `proceed`; faithful and the `origin/main`
+  tip gives `waiting` (the run changes nothing; re-run the failed tagging run);
+  anything else gives `abandoned`, which also proceeds. A subject
+  `release/next (#N)` with no entry in the file fails the run.
+- `generate` removes every hash-headed section, and its link definition, that
+  `git show <last tag>:CHANGELOG.md` does not carry, so the sections of
+  abandoned release commits are dropped. This only edits the output.
+- The dry run of `release.yml` is a pure preview and checks nothing about the
+  section it takes the notes from.
+
+Known limitation: if a release commit is merged and another pull request is
+merged before the tagging run has created the tag, the release commit is no
+longer the `main` tip, so the `release-pr.yml` run of the second push treats it
+as abandoned although it is tagged moments later. The release pull request that
+run opens can then list changes that are already released; the next rebuild
+(a push to `main` or a manual dispatch) corrects it. Not handled in code.
 
 ## `ci.yml` never calls `scripts/setup-dev-env.ps1` (found during Stage 6/7, BPE-24)
 
