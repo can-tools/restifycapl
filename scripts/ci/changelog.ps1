@@ -83,18 +83,14 @@ next-version: the previous version is the highest tag as above. -Level or -Label
 one) decides the bump: major adds one to the first field, minor to the second, patch to the third.
 -Level none and a resulting field above 65535 fail with exit 1. stdout carries only the version.
 A major bump is never computed by level; the only way to it is the label bump:major.
-A release commit is a commit of "git log --first-parent <last tag>..origin/main" whose subject is exactly
-"release/next (#N)" and whose pull request N, as given in the -PrReleases file, is merged, has
-merge_commit_sha equal to the commit, base main and head ref release/next in the same repository as the base.
-It is faithful when its single parent and its tree equal the parent and tree of that pull request's head
-commit. Nothing is read from CHANGELOG.md. A release commit has no release tag by construction: the range
-starts after the highest valid tag.
+A release commit is a "release/next (#N)" commit after the last tag whose pull request data matches; the
+definition is in docs/ci-pipeline.md, "Content-free release recognition". Nothing is read from CHANGELOG.md.
 release-prs prints the numbers N of the commits whose subject has that form, valid or not.
 pending-cut looks at the newest valid release commit only. With none it prints proceed. A faithful one that is
 the origin/main tip prints waiting (re-run the failed tag-release.yml run if it failed). Any other one is
 abandoned: it prints abandoned, with the reason on stderr, and the caller proceeds. -PrReleases names a JSON
 file the workflow builds from "gh api pulls/N" and "gh api commits/<head.sha>": an object whose keys are pull
-request numbers and whose values are {"found": false} or an object with found (true), merged (bool),
+request numbers and whose values are {"found": false} or an object with found (true) and every key below (a missing key fails with exit 1), merged (bool),
 mergeCommitSha (string or null), baseRef, baseRepo, headRef (strings), headRepo (string or null), headSha
 (string), headParents (array of strings, or null when the head commit was not fetchable) and headTree (string
 or null). A release-commit subject whose number has no key, when it is evaluated, fails with exit 1.

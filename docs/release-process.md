@@ -77,16 +77,12 @@ workflow; neither is on `main` yet, and until both are, no release is made.
      raises no level. A section with nothing to release besides Development is
      an error.
 3. The release pull request is squash-merged; nobody generates or merges a
-   section by hand. The squash-merge commit is the release commit: its subject
-   is exactly `release/next (#N)`, and pull request N, read live through the
-   API, is merged, has that commit as `merge_commit_sha`, base `main` and head
-   branch `release/next` in this repository. It is faithful when its parent and
-   tree equal the parent and tree of the pull request's head commit; only a
-   faithful release commit is tagged, and its first parent is then the base
-   named in the heading. No workflow decides from `CHANGELOG.md` content which
-   commit is a release. Do not use a rebase merge: it produces no release
-   commit, so nothing is tagged and the next release pull request covers the
-   full range again.
+   section by hand. The squash-merge commit is the release commit; only a
+   faithful one is tagged, and its first parent is then the base named in the
+   heading (the definition is in `docs/ci-pipeline.md`, "Content-free release
+   recognition"). Do not use a rebase merge or the merge-commit strategy: neither
+   produces a release commit, so nothing is tagged and the next release pull
+   request covers the full range again.
 4. The tagging workflow creates the tag `vX.Y.Z` on the squash-merge commit,
    from the last tag and the single `bump:*` label of the merged release pull
    request; the version exists only in the tag. The release workflow accepts an

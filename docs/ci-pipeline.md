@@ -206,7 +206,7 @@ workflow's `validate` job runs the same command before it parses
 `case.json` (mode, line endings, the simulated git history, the expected exit
 code, `::` output lines and summary lines) and, for a successful case,
 `expected-notes.md`. A case for `generate`, `level`, `prs`, `release-prs`,
-`pending-cut` or `next-version` runs that subcommand instead (all but
+`pending-cut`, `pr-body`, `body-version` or `next-version` runs that subcommand instead (all but
 `generate` need no `CHANGELOG.md`; `pending-cut` takes its pull request data
 from `params.prReleases` and the commits' parents and trees from
 `git.commitInfo`); a `generate` case reads the CHANGELOG at the last tag from
