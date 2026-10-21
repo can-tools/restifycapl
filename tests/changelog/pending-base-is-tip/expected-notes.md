@@ -1,3 +1,0 @@
-### Added
-
-- Pending cut entry.

@@ -1,0 +1,33 @@
+{
+  "command": "generate",
+  "eol": "lf",
+  "params": {
+    "date": "2026-11-01",
+    "prMessages": {
+      "40": [
+        "fix: stop leaking the response buffer on a timeout"
+      ]
+    }
+  },
+  "git": {
+    "allTags": [
+      "v0.1.0"
+    ],
+    "tip": "1d912d92a13da6c25879a65c8c4015b1410d7fcd",
+    "log": [
+      {
+        "sha": "00000040000000400000004000000040000000a0",
+        "subject": "fix/handle-timeout (#40)"
+      }
+    ],
+    "cutOff": "df84cf03894e55c41d2197e344f6e21e492490aa",
+    "cutOffChain": [
+      "df84cf03894e55c41d2197e344f6e21e492490aa"
+    ],
+    "logRange": "v0.1.0..1d912d92a13da6c25879a65c8c4015b1410d7fcd"
+  },
+  "expect": {
+    "exit": 0,
+    "output": []
+  }
+}

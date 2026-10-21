@@ -1,0 +1,12 @@
+{
+  "command": "release-prs",
+  "eol": "lf",
+  "params": {
+    "base": "abc"
+  },
+  "git": {},
+  "expect": {
+    "exit": 2,
+    "output": []
+  }
+}

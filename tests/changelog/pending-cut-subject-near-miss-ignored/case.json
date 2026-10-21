@@ -1,0 +1,31 @@
+{
+  "command": "pending-cut",
+  "eol": "lf",
+  "git": {
+    "allTags": [
+      "v0.1.0"
+    ],
+    "tip": "c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1",
+    "log": [
+      {
+        "sha": "c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1",
+        "subject": "release/next (#41) again"
+      },
+      {
+        "sha": "a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
+        "subject": "release/other (#42)"
+      },
+      {
+        "sha": "a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3",
+        "subject": "release/next (#043)"
+      }
+    ],
+    "logRange": "v0.1.0..c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1"
+  },
+  "expect": {
+    "exit": 0,
+    "output": [
+      "proceed"
+    ]
+  }
+}
