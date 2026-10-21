@@ -1,0 +1,21 @@
+{
+  "command": "release-prs",
+  "eol": "lf",
+  "git": {
+    "allTags": [
+      "v0.1.0"
+    ],
+    "tip": "c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1",
+    "log": [
+      {
+        "sha": "c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1",
+        "subject": "chore/ci-tidy (#40)"
+      }
+    ],
+    "logRange": "v0.1.0..c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1"
+  },
+  "expect": {
+    "exit": 0,
+    "output": []
+  }
+}

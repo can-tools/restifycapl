@@ -1,14 +1,14 @@
 <#
 .SYNOPSIS
-Reads and generates CHANGELOG.md for the release workflow: selects and validates the release notes, computes the release level from the commits since the last tag, generates the release section, computes the next version.
+Reads and generates CHANGELOG.md for the release workflow: locates the release notes, computes the release level from the commits since the last tag, generates the release section, computes the next version.
 
 .DESCRIPTION
 Subcommands (first argument):
   notes     -Mode tag|dry-run -Sha <commit> -Output <file> [-ChangelogPath <file>]
-            select the section, validate it, write the notes body (LF, UTF-8, no BOM)
+            locate the section, write the notes body (LF, UTF-8, no BOM)
             and append the "taken from" line to $GITHUB_STEP_SUMMARY
   check     -Mode tag|dry-run -Sha <commit> [-ChangelogPath <file>]
-            the same selection and validation, but writes no notes file and no
+            the same selection, but writes no notes file and no
             "taken from" line
   prs       [-Base <40-hex>]
             print the pull request numbers ("(#N)" at the end of a subject) of the commits
@@ -21,16 +21,19 @@ Subcommands (first argument):
             ("[<12>]: <RepoUrl>/commit/<Base>") above the existing ones at the end of the file
   next-version  -Level major|minor|patch|none | -Label bump:major|bump:minor|bump:patch
             print the next version as X.Y.Z (no "v" prefix; the tag is "v" plus this)
-  pending-cut  [-ChangelogPath <file>]
-            print proceed, or waiting when the newest hash-headed section is a merged cut at the
-            origin/main tip that has no release tag yet; fail when that cut is deeper than the tip or invalid
+  release-prs  [-Base <40-hex>]
+            print the pull request numbers of the release commits ("release/next (#N)") among the
+            commits since the last tag, newest first, one per line, whose data the workflow must fetch
+  pending-cut  [-PrReleases <file>]
+            print proceed (no release commit since the last tag), waiting (the newest release commit
+            is faithful and is the origin/main tip) or abandoned (it is not); abandoned also means proceed
   pr-body   -Output <file> [-Base <40-hex>] [-RepoUrl <url>] [-PrMessages <file>] [-PrFiles <file>] [-Label bump:major|bump:minor|bump:patch] [-ChangelogPath <file>]
             write the release pull request description for the commits since the last tag
   body-version  -Body <file> -Label bump:major|bump:minor|bump:patch -Output <file>
             copy a release pull request description, replacing only the text between the version markers
   fixtures  -FixtureDir <dir>
             run every <dir>/*/case.json against a simulated git history
-Exit codes: 0 success; 1 a validation failed, git failed or CHANGELOG.md could not
+Exit codes: 0 success; 1 a check failed, git failed or CHANGELOG.md could not
 be read (a file that is not valid UTF-8 included); 2 usage error (missing or invalid
 -Mode, -Sha, -Output, -Base, -Date, -RepoUrl, -Level, -Label, -FixtureDir, or an unknown subcommand);
 a parameter PowerShell itself cannot bind (one given twice, for instance) fails before the script runs
@@ -72,17 +75,27 @@ file, Base, Date, RepoUrl and messages give byte-identical output; line endings 
 final newline are kept. The result replaces -ChangelogPath unless -Output names another file;
 -SectionOutput also receives the new section alone (LF, UTF-8, no BOM). Nothing is written on
 failure. RepoUrl is -RepoUrl, else taken from the first existing link definition
-[<12 hex>]: https://github.com/<owner>/<repo>/commit/<40 hex>; with neither the run fails.
+[<12 hex>]: https://github.com/<owner>/<repo>/commit/<40 hex>; with neither the run fails. Before the section
+is added, every hash-headed section (and its link definition) whose 12 characters are not a hash heading of
+"git show <last tag>:CHANGELOG.md" is removed from the result: it belongs to a release commit that was never
+tagged. Other headings are kept; a failing git show fails the run.
 next-version: the previous version is the highest tag as above. -Level or -Label (give exactly
 one) decides the bump: major adds one to the first field, minor to the second, patch to the third.
 -Level none and a resulting field above 65535 fail with exit 1. stdout carries only the version.
 A major bump is never computed by level; the only way to it is the label bump:major.
-pending-cut reads the first "## [" heading of -ChangelogPath (the file at the origin/main tip). Without a
-hash-shaped heading it prints proceed. Otherwise the 12 characters must name exactly one commit on
-"git rev-list --first-parent origin/main", other than the tip, and the commit after it (the cut) must carry
-the heading in its CHANGELOG.md; anything else fails with exit 1. A cut with a release tag (vX.Y.Z, no
-leading zeros, each field at most 65535) prints proceed; an untagged cut that is the tip prints waiting; an
-untagged cut deeper than the tip fails and tells to re-run the failed tag-release.yml run.
+A release commit is a "release/next (#N)" commit after the last tag whose pull request data matches; the
+definition is in docs/ci-pipeline.md, "Content-free release recognition". Nothing is read from CHANGELOG.md.
+release-prs prints the numbers N of the commits whose subject has that form, valid or not.
+pending-cut looks at the newest valid release commit only. With none it prints proceed. A faithful one that is
+the origin/main tip prints waiting (re-run the failed tag-release.yml run if it failed). Any other one is
+abandoned: it prints abandoned, with the reason on stderr, and the caller proceeds. -PrReleases names a JSON
+file the workflow builds from "gh api pulls/N" and "gh api commits/<head.sha>": an object whose keys are pull
+request numbers and whose values are {"found": false} or an object with found (true) and these keys: merged
+(bool), mergeCommitSha (string, or null when merged is false), baseRef, baseRepo, headRef (strings), headRepo
+(string or null), headSha (string), headParents (array of strings, or null when the head commit was not
+fetchable) and headTree (string or null). A missing key, a value of another type, or a null mergeCommitSha
+with merged true fails with exit 1, as does a release-commit subject whose number has no key, when it is
+evaluated.
 pr-body: the description opens with "Version preview: <!-- version -->vX.Y.Z (vA.B.C + level)<!-- /version -->",
 the version being the next version for -Label, else for the level computed from the commits. A "> [!CAUTION]"
 block lists the breaking changes when there are any. Then come the release notes preview (the generated
@@ -99,23 +112,27 @@ request numbers and whose values are arrays of changed files, each a path string
 
 A fixture case may declare "match": "error" instead of exact output; the run must then
 exit non-zero and print at least one ::error:: line.
-A fixture case with "command": "generate", "level", "prs", "next-version", "pending-cut", "pr-body" or
-"body-version" runs that subcommand instead of notes and check. "params" holds base, date, repoUrl,
-prMessages and prFiles (objects, each written to a file for the run) (generate, pr-body), level or label
-(next-version, pr-body, body-version); a body-version case reads body.md and expects expected-body.md, a
-pr-body case expects expected-body.md; "git" may carry "tip" (the answer for the default
--Base), "allTags" (every tag name), "log" (objects with "sha" and "subject", newest first, the answer
-for the commit range), "logRange" (the range the log is for; any other range fails), "cutOff" (replaces
-the cut-off commit) and "cutOffChain" (the commits reachable from the cut-off along first parents).
+A fixture case with "command": "generate", "level", "prs", "release-prs", "next-version", "pending-cut",
+"pr-body" or "body-version" runs that subcommand instead of notes and check. "params" holds base, date,
+repoUrl, prMessages, prFiles and prReleases (objects, each written to a file for the run) (generate,
+pr-body, pending-cut), level or label (next-version, pr-body, body-version); a body-version case reads
+body.md and expects expected-body.md, a pr-body case expects expected-body.md; "git" may carry "tip" (the
+answer for the default -Base), "allTags" (every tag name), "log" (objects with "sha" and "subject", newest
+first, the answer for the commit range), "logRange" (the range the log is for; any other range fails),
+"commitInfo" (an object from a commit to {"parents": [...], "tree": "..."}), "showTexts" (an object from a
+tag to the CHANGELOG.md text at that tag), "cutOff" (replaces the cut-off commit) and "cutOffChain" (the
+commits reachable from the cut-off along first parents). A generate case reads the CHANGELOG.md at the last
+tag from git.showTexts, else from tag-CHANGELOG.md in the case directory, else it is the case's own
+CHANGELOG.md (no section dropped).
 "expect" holds "exit", "output" (the exact stdout lines, or "match": "error"), optionally "stderr"
 (the exact stderr lines; not checked when absent) and, for a successful generate, the file
 expected-CHANGELOG.md and optionally expected-section.md. Each generate runs twice and the two results
-must be byte-identical. A case for level, prs or next-version needs no CHANGELOG.md.
+must be byte-identical. A case for level, prs, release-prs, pending-cut or next-version needs no CHANGELOG.md.
 "eol": "marked" keeps the line endings written in the files, where the text <CR> stands for a
 carriage return (git would normalise a file with mixed endings).
 
 .PARAMETER Command
-The subcommand: notes, check, prs, level, generate, next-version or fixtures.
+The subcommand: notes, check, prs, release-prs, level, generate, next-version, pending-cut, pr-body, body-version or fixtures.
 
 .PARAMETER Mode
 tag (the run is for a pushed tag) or dry-run (a manual run that never publishes); required by notes and check.
@@ -146,6 +163,9 @@ The JSON file of pull request commit messages described above; optional.
 
 .PARAMETER PrFiles
 The JSON file of pull request changed files described above; optional.
+
+.PARAMETER PrReleases
+The JSON file of pull request data for the release commits described above; optional.
 
 .PARAMETER Body
 The release pull request description body-version rewrites.
@@ -199,6 +219,7 @@ param(
   [string]$RepoUrl,
   [string]$PrMessages,
   [string]$PrFiles,
+  [string]$PrReleases,
   [string]$Body,
   [string]$Level,
   [string]$Label,
@@ -223,6 +244,7 @@ $CutOffSha = 'df84cf03894e55c41d2197e344f6e21e492490aa'
 $ReHead = [regex]'^## \['
 $ReHashHead = [regex]'^## \[([0-9a-f]{12})\] - \d{4}-\d{2}-\d{2}\r?$'
 $ReLinkDef = [regex]'^\[[^\]]+\]:[ \t]*\S'
+$ReDefHash = [regex]'^\[([0-9a-f]{12})\]:'
 $ReRepoDef = [regex]'^\[[0-9a-f]{12}\]:[ \t]*(https://github\.com/[^/\s]+/[^/\s]+)/commit/[0-9a-f]{40}\r?$'
 $ReRepoUrl = [regex]'^https://github\.com/[^/\s]+/[^/\s]+$'
 $ReBase = [regex]'^[0-9a-f]{40}$'
@@ -239,19 +261,10 @@ $ReBreakingFooter = [regex]'^BREAKING[ -]CHANGE:[ \t]*(.*)$'
 $ReTagShape = [regex]'^v([0-9]+)\.([0-9]+)\.([0-9]+)$'
 $MaxField = 65535
 
-function Test-ReleaseTag([string]$name) {
-  $shape = $ReTagShape.Match($name)
-  if (-not $shape.Success) { return $false }
-  foreach ($i in 1, 2, 3) {
-    $field = $shape.Groups[$i].Value
-    if ($field.Length -gt 1 -and $field.StartsWith('0', [System.StringComparison]::Ordinal)) { return $false }
-    if ($field.Length -gt 5 -or [int]$field -gt $MaxField) { return $false }
-  }
-  return $true
-}
+$ReReleaseSubject = [regex]'^release/next \(#([1-9][0-9]{0,8})\)$'
 $Levels = @('major', 'minor', 'patch', 'none')
 
-$script:Ctx = @{ Git = 'Invoke-RealGit'; Out = $null; Err = $null; Summary = $null; Facts = $null; ShowText = $null }
+$script:Ctx = @{ Git = 'Invoke-RealGit'; Out = $null; Err = $null; Summary = $null; Facts = $null; TagChangelog = $null }
 
 function Resolve-FullPath([string]$p) {
   if (-not [System.IO.Path]::IsPathRooted($p)) { $p = Join-Path (Get-Location).ProviderPath $p }
@@ -273,11 +286,6 @@ function Stop-Run([int]$code) { throw [ChangelogExit]::new($code) }
 function Stop-WithError([string]$message) {
   Write-Line ('::error::' + $message)
   Stop-Run 1
-}
-
-function Add-Annotation([string]$kind, [string]$message) {
-  Write-Line ('::{0}::{1}' -f $kind, $message)
-  Add-Summary ($message + "`n`n")
 }
 
 function Get-Prefix([string]$s, [int]$n) {
@@ -309,26 +317,13 @@ function Invoke-MockGit([string[]]$GitArgs) {
   $a = $GitArgs
   $ok = { param($o) [pscustomobject]@{ Code = 0; Out = $o; Err = '' } }
   $no = { param($c) [pscustomobject]@{ Code = $c; Out = ''; Err = 'unsupported or unknown in the simulated history' } }
-  $commits = @(); if ($f.ContainsKey('commits')) { $commits = @($f['commits']) }
-  $ancestors = @(); if ($f.ContainsKey('ancestors')) { $ancestors = @($f['ancestors']) }
   if ($f.ContainsKey('failures') -and $f['failures'].ContainsKey($a -join ' ')) {
     $fl = $f['failures'][$a -join ' ']
     return [pscustomobject]@{ Code = [int]$fl['code']; Out = ''; Err = [string]$fl['stderr'] }
   }
-  if ($a.Count -eq 4 -and $a[0] -ceq 'rev-parse' -and $a[1] -ceq '--verify' -and $a[2] -ceq '--quiet' -and $a[3].EndsWith('^{commit}', [System.StringComparison]::Ordinal)) {
-    $h = $a[3].Substring(0, $a[3].Length - '^{commit}'.Length)
-    $m = @($commits | Where-Object { $_.StartsWith($h, [System.StringComparison]::Ordinal) })
-    if ($m.Count -eq 1) { return & $ok ($m[0] + "`n") }
-    return & $no 1
-  }
   if ($a.Count -eq 2 -and $a[0] -ceq 'rev-parse' -and $a[1] -ceq 'origin/main' -and $f.ContainsKey('tip')) { return & $ok ($f['tip'] + "`n") }
   if ($a.Count -eq 2 -and $a[0] -ceq 'rev-parse' -and $f.ContainsKey('parent') -and $a[1] -ceq ($f['sha'] + '^')) { return & $ok ($f['parent'] + "`n") }
-  if ($a.Count -eq 4 -and $a[0] -ceq 'merge-base' -and $a[1] -ceq '--is-ancestor' -and $a[3] -ceq $f['sha']) {
-    if ($ancestors -ccontains $a[2]) { return & $ok '' }
-    return & $no 1
-  }
-  if ($a.Count -eq 3 -and $a[0] -ceq 'rev-list' -and $a[1] -ceq '--first-parent' -and $a[2] -ceq 'origin/main' -and $f.ContainsKey('chain')) { return & $ok ((@($f['chain']) -join "`n") + "`n") }
-  if ($a.Count -eq 3 -and $a[0] -ceq 'rev-list' -and $a[1] -ceq '--first-parent' -and $a[2] -cne 'origin/main') {
+  if ($a.Count -eq 3 -and $a[0] -ceq 'rev-list' -and $a[1] -ceq '--first-parent') {
     $c = @(); if ($f.ContainsKey('cutOffChain')) { $c = @($f['cutOffChain']) }
     return & $ok (($c -join "`n") + "`n")
   }
@@ -340,13 +335,15 @@ function Invoke-MockGit([string[]]$GitArgs) {
   if ($a.Count -eq 2 -and $a[0] -ceq 'show' -and $a[1].EndsWith(':CHANGELOG.md', [System.StringComparison]::Ordinal)) {
     $c = $a[1].Substring(0, $a[1].Length - ':CHANGELOG.md'.Length)
     if ($f.ContainsKey('showTexts') -and $f['showTexts'].ContainsKey($c)) { return & $ok ([string]$f['showTexts'][$c]) }
-    $at = @(); if ($f.ContainsKey('changelogAt')) { $at = @($f['changelogAt']) }
-    if ($at -ccontains $c) { return & $ok $script:Ctx.ShowText }
+    if (-not $f.ContainsKey('showTexts') -and $null -ne $script:Ctx.TagChangelog) { return & $ok $script:Ctx.TagChangelog }
     return & $no 128
   }
-  if ($a.Count -eq 3 -and $a[0] -ceq 'tag' -and $a[1] -ceq '--points-at') {
-    $t = @(); if ($f.ContainsKey('tags') -and $f['tags'].ContainsKey($a[2])) { $t = @($f['tags'][$a[2]]) }
-    return & $ok (($t -join "`n") + "`n")
+  if ($a.Count -eq 4 -and $a[0] -ceq 'log' -and $a[1] -ceq '-1' -and $a[2] -ceq '--format=%P%x09%T') {
+    if ($f.ContainsKey('commitInfo') -and $f['commitInfo'].ContainsKey($a[3])) {
+      $info = $f['commitInfo'][$a[3]]
+      return & $ok ((@($info['parents']) -join ' ') + "`t" + $info['tree'] + "`n")
+    }
+    return & $no 128
   }
   if ($a.Count -eq 2 -and $a[0] -ceq 'tag' -and $a[1] -ceq '--list') {
     $t = @(); if ($f.ContainsKey('allTags')) { $t = @($f['allTags']) }
@@ -361,43 +358,6 @@ function Get-GitOutput([string[]]$GitArgs) {
   $r = Invoke-Git $GitArgs
   if ($r.Code -ne 0) { Stop-WithError ('git {0} failed: {1}' -f ($GitArgs -join ' '), $r.Err.Trim()) }
   return $r.Out.Trim()
-}
-
-function Test-Cut([string]$h, [string]$heading, [string]$sha) {
-  $found = Invoke-Git @('rev-parse', '--verify', '--quiet', ($h + '^{commit}'))
-  $base = $found.Out.Trim()
-  if ($found.Code -ne 0 -or (Invoke-Git @('merge-base', '--is-ancestor', $base, $sha)).Code -ne 0) {
-    Stop-WithError ("the heading {0} names {1}, which is not a commit in this run's history; take the hash from git rev-parse --short=12 origin/main" -f $heading, $h)
-  }
-  $tip = Get-GitOutput @('rev-parse', 'origin/main')
-  $chain = Split-Words (Get-GitOutput @('rev-list', '--first-parent', 'origin/main'))
-  $idx = [System.Array]::IndexOf($chain, $base)
-  if ($idx -gt 0) {
-    $child = $chain[$idx - 1]
-    $shown = Invoke-Git @('show', ($child + ':CHANGELOG.md'))
-    if ($shown.Code -eq 0 -and (@($shown.Out.Split([char]10) | ForEach-Object { $_.TrimEnd("`r") }) -ccontains $heading)) {
-      $tags = @((Split-Words (Get-GitOutput @('tag', '--points-at', $child))) | Where-Object { Test-ReleaseTag $_ })
-      if ($tags.Count -gt 0) {
-        Add-Annotation 'warning' ('The newest CHANGELOG section {0} was already released as {1}; this dry run previews its notes again.' -f $heading, $tags[0])
-      }
-      else {
-        Add-Annotation 'notice' ('The cut {0} is merged on main as {1}; re-run the failed `tag-release.yml` run.' -f $heading, (Get-Prefix $child 12))
-      }
-      return
-    }
-  }
-  $errors = New-Object System.Collections.Generic.List[string]
-  if ($h -cne (Get-Prefix $tip 12)) {
-    $t12 = Get-Prefix $tip 12
-    $errors.Add(('the heading {0} names {1}, but the origin/main tip is {2}; main has moved: generate the section again from {2}' -f $heading, $h, $t12))
-  }
-  if ((Invoke-Git @('merge-base', '--is-ancestor', $tip, $sha)).Code -ne 0) {
-    $errors.Add(('the cut branch does not contain the origin/main tip {0}; merge main into the branch so the dry run builds what the squash merge will produce' -f (Get-Prefix $tip 12)))
-  }
-  if ($errors.Count -gt 0) {
-    foreach ($e in $errors) { Write-Line ('::error::' + $e) }
-    Stop-Run 1
-  }
 }
 
 function Get-SectionEnd($lines, [int]$start) {
@@ -457,8 +417,6 @@ function Resolve-Release([string]$Mode, [string]$Sha, [string]$Text) {
       }
     }
     if ($null -eq $body) { Stop-WithError 'no CHANGELOG.md section has release notes once "### Development" is removed' }
-    $m = $ReHashHead.Match($chosen)
-    if ($m.Success) { Test-Cut $m.Groups[1].Value $chosen $Sha }
   }
   return [pscustomobject]@{ Chosen = $chosen; Body = $body }
 }
@@ -564,6 +522,68 @@ function Read-PrFiles([string]$path) {
   return $files
 }
 
+function Read-PrReleases([string]$path) {
+  $releases = @{}
+  if ([string]::IsNullOrEmpty($path)) { return $releases }
+  try {
+    $json = $Utf8Strict.GetString([System.IO.File]::ReadAllBytes((Resolve-FullPath $path))) | ConvertFrom-Json -AsHashtable
+  }
+  catch { Stop-WithError ('cannot read {0}: {1}' -f $path, $_.Exception.Message) }
+  if ($json -isnot [hashtable]) { Stop-WithError ('{0} must hold a JSON object of pull request number to pull request data' -f $path) }
+  foreach ($key in $json.Keys) {
+    $e = $json[$key]
+    if ($e -isnot [hashtable] -or $e['found'] -isnot [bool]) { Stop-WithError ('{0}: the value of "{1}" must be an object with a boolean "found"' -f $path, $key) }
+    if ($e['found']) {
+      foreach ($name in 'mergeCommitSha', 'headRepo', 'headParents', 'headTree') {
+        if (-not $e.ContainsKey($name)) { Stop-WithError ('{0}: "{1}" of "{2}" is missing' -f $path, $name, $key) }
+      }
+      foreach ($name in 'baseRef', 'baseRepo', 'headRef', 'headSha') {
+        if ($e[$name] -isnot [string]) { Stop-WithError ('{0}: "{1}" of "{2}" must be a string' -f $path, $name, $key) }
+      }
+      foreach ($name in 'mergeCommitSha', 'headRepo', 'headTree') {
+        if ($null -ne $e[$name] -and $e[$name] -isnot [string]) { Stop-WithError ('{0}: "{1}" of "{2}" must be a string or null' -f $path, $name, $key) }
+      }
+      if ($e['merged'] -isnot [bool]) { Stop-WithError ('{0}: "merged" of "{1}" must be a boolean' -f $path, $key) }
+      if ($e['merged'] -and $null -eq $e['mergeCommitSha']) { Stop-WithError ('{0}: "mergeCommitSha" of "{1}" must not be null when "merged" is true' -f $path, $key) }
+      $parents = $e['headParents']
+      if ($null -ne $parents -and ($parents -is [string] -or $parents -isnot [System.Collections.IEnumerable] -or @($parents | Where-Object { $_ -isnot [string] }).Count -gt 0)) {
+        Stop-WithError ('{0}: "headParents" of "{1}" must be an array of strings or null' -f $path, $key)
+      }
+    }
+    $releases[[string]$key] = $e
+  }
+  return $releases
+}
+
+function Remove-UntaggedSections($lines) {
+  $latest = Get-LastVersion
+  $tag = 'v{0}.{1}.{2}' -f $latest[0], $latest[1], $latest[2]
+  $shown = Invoke-Git @('show', ($tag + ':CHANGELOG.md'))
+  if ($shown.Code -ne 0) { Stop-WithError ('git show {0}:CHANGELOG.md failed: {1}' -f $tag, $shown.Err.Trim()) }
+  $released = New-Object 'System.Collections.Generic.HashSet[string]'
+  foreach ($line in $shown.Out.Split([char]10)) {
+    $m = $ReHashHead.Match($line)
+    if ($m.Success) { [void]$released.Add($m.Groups[1].Value) }
+  }
+  $dropped = New-Object 'System.Collections.Generic.HashSet[string]'
+  foreach ($line in $lines) {
+    $m = $ReHashHead.Match($line)
+    if ($m.Success -and -not $released.Contains($m.Groups[1].Value)) { [void]$dropped.Add($m.Groups[1].Value) }
+  }
+  if ($dropped.Count -eq 0) { return , $lines }
+  $kept = New-Object System.Collections.Generic.List[string]
+  $i = 0
+  while ($i -lt $lines.Count) {
+    $m = $ReHashHead.Match($lines[$i])
+    if ($m.Success -and $dropped.Contains($m.Groups[1].Value)) { $i = Get-SectionEnd $lines $i; continue }
+    $d = $ReDefHash.Match($lines[$i])
+    if ($d.Success -and $dropped.Contains($d.Groups[1].Value)) { $i++; continue }
+    $kept.Add($lines[$i])
+    $i++
+  }
+  return , $kept
+}
+
 function Get-RepoUrl($lines, [string]$RepoUrl) {
   if (-not [string]::IsNullOrEmpty($RepoUrl)) { return $RepoUrl }
   foreach ($line in $lines) {
@@ -601,28 +621,37 @@ function Read-Message([string]$message) {
   return [pscustomobject]@{ Type = $type; Breaking = ($bang -or $null -ne $footer); Text = $text }
 }
 
-function Get-Range([string]$Base, $Messages) {
+function Get-RangeLog([string]$Base) {
   $latest = Get-LastVersion
   $tag = 'v{0}.{1}.{2}' -f $latest[0], $latest[1], $latest[2]
   $log = Get-GitOutput @('log', '--first-parent', '--format=%H%x09%s', ($tag + '..' + $Base))
-  $before = New-Object 'System.Collections.Generic.HashSet[string]'
-  foreach ($h in (Split-Words (Get-GitOutput @('rev-list', '--first-parent', (Get-CutOffSha))))) { [void]$before.Add($h) }
   $rows = @()
   if ($log -cne '') { $rows = @($log.Split([char]10)) }
-  $commits = New-Object System.Collections.Generic.List[object]
-  for ($i = $rows.Count - 1; $i -ge 0; $i--) {
-    $row = $rows[$i].TrimEnd("`r")
+  $entries = New-Object System.Collections.Generic.List[object]
+  foreach ($raw in $rows) {
+    $row = $raw.TrimEnd("`r")
     $tab = $row.IndexOf([char]9)
     if ($tab -lt 1) { Stop-WithError ('unexpected line in the git log output: {0}' -f $row) }
-    $sha = $row.Substring(0, $tab)
-    $subject = Read-Subject $row.Substring($tab + 1)
+    $entries.Add([pscustomobject]@{ Sha = $row.Substring(0, $tab); Subject = $row.Substring($tab + 1) })
+  }
+  return [pscustomobject]@{ Latest = $latest; Tag = $tag; Entries = $entries }
+}
+
+function Get-Range([string]$Base, $Messages) {
+  $log = Get-RangeLog $Base
+  $before = New-Object 'System.Collections.Generic.HashSet[string]'
+  foreach ($h in (Split-Words (Get-GitOutput @('rev-list', '--first-parent', (Get-CutOffSha))))) { [void]$before.Add($h) }
+  $commits = New-Object System.Collections.Generic.List[object]
+  for ($i = $log.Entries.Count - 1; $i -ge 0; $i--) {
+    $sha = $log.Entries[$i].Sha
+    $subject = Read-Subject $log.Entries[$i].Subject
     $parsed = New-Object System.Collections.Generic.List[object]
     if ($subject.Number -gt 0 -and $subject.Type -cne 'release' -and $Messages.ContainsKey([string]$subject.Number)) {
       foreach ($raw in $Messages[[string]$subject.Number]) { $parsed.Add((Read-Message $raw)) }
     }
     $commits.Add([pscustomobject]@{ Sha = $sha; Pre = $before.Contains($sha); Subject = $subject; Messages = $parsed })
   }
-  return [pscustomobject]@{ Latest = $latest; Tag = $tag; Commits = $commits }
+  return [pscustomobject]@{ Latest = $log.Latest; Tag = $log.Tag; Commits = $commits }
 }
 
 function Get-Level($range) {
@@ -753,7 +782,7 @@ function Write-Usage([string]$msg) {
   # Fixture runs would otherwise print every expected usage error to the log.
   if ($null -ne $script:Ctx.Out) { return }
   [Console]::Error.WriteLine($msg)
-  [Console]::Error.WriteLine('usage: changelog.ps1 notes|check -Mode tag|dry-run -Sha <commit> [-Output <file>] [-ChangelogPath <file>] | prs [-Base <hash>] | level [-Base <hash>] [-PrMessages <file>] | generate [-Base <hash>] [-Date <YYYY-MM-DD>] [-RepoUrl <url>] [-PrMessages <file>] [-Output <file>] [-SectionOutput <file>] [-ChangelogPath <file>] | next-version -Level <level> | -Label <bump:level> | pending-cut [-ChangelogPath <file>] | pr-body -Output <file> [-Base <hash>] [-RepoUrl <url>] [-PrMessages <file>] [-PrFiles <file>] [-Label <bump:level>] [-ChangelogPath <file>] | body-version -Body <file> -Label <bump:level> -Output <file> | fixtures -FixtureDir <dir>')
+  [Console]::Error.WriteLine('usage: changelog.ps1 notes|check -Mode tag|dry-run -Sha <commit> [-Output <file>] [-ChangelogPath <file>] | prs [-Base <hash>] | release-prs [-Base <hash>] | level [-Base <hash>] [-PrMessages <file>] | generate [-Base <hash>] [-Date <YYYY-MM-DD>] [-RepoUrl <url>] [-PrMessages <file>] [-Output <file>] [-SectionOutput <file>] [-ChangelogPath <file>] | next-version -Level <level> | -Label <bump:level> | pending-cut [-PrReleases <file>] | pr-body -Output <file> [-Base <hash>] [-RepoUrl <url>] [-PrMessages <file>] [-PrFiles <file>] [-Label <bump:level>] [-ChangelogPath <file>] | body-version -Body <file> -Label <bump:level> -Output <file> | fixtures -FixtureDir <dir>')
 }
 
 function Invoke-Run([string]$Command, [string]$Mode, [string]$Sha, [byte[]]$Bytes, [string]$OutPath, [string]$Display) {
@@ -809,10 +838,11 @@ function Invoke-GenerateRun([byte[]]$Bytes, [string]$Display, [string]$Base, [st
       $resolvedDate = $Date
       if ([string]::IsNullOrEmpty($resolvedDate)) { $resolvedDate = [datetime]::UtcNow.ToString('yyyy-MM-dd', [cultureinfo]::InvariantCulture) }
       $short = Get-Prefix $resolvedBase 12
+      $repo = Get-RepoUrl $lines $RepoUrl
+      $lines = [System.Collections.Generic.List[string]]::new((Remove-UntaggedSections $lines))
       foreach ($line in $lines) {
         if ($line.StartsWith('## [' + $short + ']', [System.StringComparison]::Ordinal)) { Stop-WithError ('the file already has a section for {0}' -f $short) }
       }
-      $repo = Get-RepoUrl $lines $RepoUrl
       $range = Get-Range $resolvedBase (Read-PrMessages $PrMessagesPath)
       $entries = Get-Entries $range $repo
       foreach ($w in $entries.Warnings) { Write-Line ('::warning::' + $w) }
@@ -835,40 +865,61 @@ function Invoke-NextVersionRun([string]$Level, [string]$Label) {
   return (Invoke-Guarded { Write-Line (Get-NextVersion $Level $Label) })
 }
 
-function Invoke-PendingCutRun([byte[]]$Bytes, [string]$Display) {
+function Get-ReleaseCandidates([string]$Base) {
+  $log = Get-RangeLog $Base
+  $candidates = New-Object System.Collections.Generic.List[object]
+  foreach ($e in $log.Entries) {
+    $m = $ReReleaseSubject.Match($e.Subject)
+    if ($m.Success) { $candidates.Add([pscustomobject]@{ Sha = $e.Sha; Number = [string]$m.Groups[1].Value }) }
+  }
+  return , $candidates
+}
+
+function Invoke-ReleasePrsRun([string]$Base) {
+  if (-not (Test-BaseArgument $Base)) { return 2 }
   return (Invoke-Guarded {
-      try { $Text = $Utf8Strict.GetString($Bytes) }
-      catch { Stop-WithError ('cannot read {0}: {1}' -f $Display, $_.Exception.Message) }
-      $heading = $null
-      foreach ($line in $Text.Split([char]10)) {
-        if ($ReHead.IsMatch($line)) { $heading = $line.TrimEnd("`r"); break }
+      $seen = New-Object 'System.Collections.Generic.HashSet[string]'
+      foreach ($c in (Get-ReleaseCandidates (Resolve-Base $Base))) {
+        if ($seen.Add($c.Number)) { Write-Line $c.Number }
       }
-      $m = $null
-      if ($null -ne $heading) { $m = $ReHashHead.Match($heading) }
-      if ($null -eq $m -or -not $m.Success) { Write-Line 'proceed'; return }
-      $h = $m.Groups[1].Value
-      $tip = Get-GitOutput @('rev-parse', 'origin/main')
-      $chain = Split-Words (Get-GitOutput @('rev-list', '--first-parent', 'origin/main'))
-      $idx = -1
-      $hits = 0
-      for ($i = 0; $i -lt $chain.Count; $i++) {
-        if ($chain[$i].StartsWith($h, [System.StringComparison]::Ordinal)) { if ($idx -lt 0) { $idx = $i }; $hits++ }
+    })
+}
+
+function Test-ValidReleaseCommit($entry, [string]$sha) {
+  if (-not $entry['found']) { return $false }
+  if ($entry['merged'] -isnot [bool] -or -not $entry['merged']) { return $false }
+  if ($entry['mergeCommitSha'] -cne $sha) { return $false }
+  if ($entry['baseRef'] -cne 'main' -or $entry['headRef'] -cne 'release/next') { return $false }
+  return ($null -ne $entry['headRepo'] -and $entry['headRepo'] -ceq $entry['baseRepo'])
+}
+
+function Test-FaithfulReleaseCommit($entry, [string]$sha) {
+  $info = (Get-GitOutput @('log', '-1', '--format=%P%x09%T', $sha)).Split([char]9)
+  if ($info.Count -ne 2) { return $false }
+  $parents = @(Split-Words $info[0])
+  if ($parents.Count -ne 1 -or $null -eq $entry['headParents'] -or $null -eq $entry['headTree']) { return $false }
+  $headParents = @($entry['headParents'])
+  return ($headParents.Count -eq 1 -and $headParents[0] -ceq $parents[0] -and $entry['headTree'] -ceq $info[1].Trim())
+}
+
+function Invoke-PendingCutRun([string]$PrReleasesPath) {
+  return (Invoke-Guarded {
+      $tip = Resolve-Base ''
+      $candidates = Get-ReleaseCandidates $tip
+      $releases = Read-PrReleases $PrReleasesPath
+      foreach ($c in $candidates) {
+        if (-not $releases.ContainsKey($c.Number)) { Stop-WithError ('no pull request data for #{0}, the release commit {1}' -f $c.Number, (Get-Prefix $c.Sha 12)) }
+        $entry = $releases[$c.Number]
+        if (-not (Test-ValidReleaseCommit $entry $c.Sha)) { continue }
+        $short = Get-Prefix $c.Sha 12
+        $faithful = Test-FaithfulReleaseCommit $entry $c.Sha
+        if ($faithful -and $c.Sha -ceq $tip) { Write-Line 'waiting'; return }
+        if (-not $faithful) { Write-Stderr ('release commit {0} (#{1}) abandoned: its parent or tree differs from the head of the pull request' -f $short, $c.Number) }
+        else { Write-Stderr ('release commit {0} (#{1}) abandoned: it has no release tag and is not the origin/main tip' -f $short, $c.Number) }
+        Write-Line 'abandoned'
+        return
       }
-      if ($hits -ne 1) {
-        Stop-WithError ('the newest CHANGELOG section {0} names {1}, which is not exactly one commit on the first-parent history of origin/main' -f $heading, $h)
-      }
-      if ($idx -eq 0) {
-        Stop-WithError ('the newest CHANGELOG section {0} names the origin/main tip itself, so no commit after it can be its cut' -f $heading)
-      }
-      $child = $chain[$idx - 1]
-      $shown = Invoke-Git @('show', ($child + ':CHANGELOG.md'))
-      if ($shown.Code -ne 0 -or -not (@($shown.Out.Split([char]10) | ForEach-Object { $_.TrimEnd("`r") }) -ccontains $heading)) {
-        Stop-WithError ('the commit {0} after {1} does not carry the CHANGELOG section {2}, so it is not that cut' -f (Get-Prefix $child 12), $h, $heading)
-      }
-      $tags = @((Split-Words (Get-GitOutput @('tag', '--points-at', $child))) | Where-Object { Test-ReleaseTag $_ })
-      if ($tags.Count -gt 0) { Write-Line 'proceed'; return }
-      if ($child -ceq $tip) { Write-Line 'waiting'; return }
-      Stop-WithError ('the cut {0} is merged on main as {1} but has no release tag, and main has moved on; re-run the failed `tag-release.yml` run' -f $heading, (Get-Prefix $child 12))
+      Write-Line 'proceed'
     })
 }
 
@@ -1018,7 +1069,6 @@ function Test-ToolResult($r, $expect, $problems) {
 }
 
 function Test-NotesCase($case, [string]$caseDir, [byte[]]$bytes, [string]$text, $problems, [string]$tmp) {
-  $script:Ctx.ShowText = $text.Replace("`r`n", "`n")
   $sha = $case['git']['sha']
   $expect = $case['expect']
   $r = Invoke-Captured 'notes' $case['mode'] $sha $bytes $tmp
@@ -1087,6 +1137,7 @@ function Test-ToolCase($case, [string]$command, $problems, [string]$tmp) {
     $r = switch ($command) {
       'level' { Invoke-Capture { Invoke-LevelRun $base $messagesArg } }
       'prs' { Invoke-Capture { Invoke-PrsRun $base } }
+      'release-prs' { Invoke-Capture { Invoke-ReleasePrsRun $base } }
       default { Invoke-Capture { Invoke-NextVersionRun (Get-CaseParam $case 'level') (Get-CaseParam $case 'label') } }
     }
     Test-ToolResult $r $case['expect'] $problems
@@ -1096,15 +1147,22 @@ function Test-ToolCase($case, [string]$command, $problems, [string]$tmp) {
   }
 }
 
-function Test-PendingCutCase($case, [byte[]]$bytes, $problems) {
-  $r = Invoke-Capture { Invoke-PendingCutRun $bytes 'CHANGELOG.md' }
-  Test-ToolResult $r $case['expect'] $problems
-}
-
 function Write-CaseJson($case, [string]$key, [string]$path) {
   if (-not ($case.ContainsKey('params') -and $case['params'].ContainsKey($key))) { return '' }
   [System.IO.File]::WriteAllText($path, (ConvertTo-Json $case['params'][$key] -Depth 6), $Utf8)
   return $path
+}
+
+function Test-PendingCutCase($case, $problems, [string]$tmp) {
+  $releases = $tmp + '.releases'
+  try {
+    $releasesArg = Write-CaseJson $case 'prReleases' $releases
+    $r = Invoke-Capture { Invoke-PendingCutRun $releasesArg }
+    Test-ToolResult $r $case['expect'] $problems
+  }
+  finally {
+    if ([System.IO.File]::Exists($releases)) { [System.IO.File]::Delete($releases) }
+  }
 }
 
 function Test-BodyResult($r, $case, [string]$caseDir, [string]$tmp, [string]$again, $problems) {
@@ -1180,12 +1238,18 @@ function Invoke-FixtureRun([string]$Dir) {
       }
       catch { $text = '' }
       $script:Ctx.Facts = @{}
+      $script:Ctx.TagChangelog = $null
       if ($case.ContainsKey('git')) { $script:Ctx.Facts = $case['git'] }
+      if ($case.ContainsKey('command') -and $case['command'] -ceq 'generate') {
+        $tagFile = Join-Path $caseDir 'tag-CHANGELOG.md'
+        if ([System.IO.File]::Exists($tagFile)) { $script:Ctx.TagChangelog = Convert-Eol $Utf8Strict.GetString([System.IO.File]::ReadAllBytes($tagFile)) $case['eol'] }
+        else { $script:Ctx.TagChangelog = $text }
+      }
       $command = 'notes'
       if ($case.ContainsKey('command')) { $command = $case['command'] }
       if ($command -ceq 'generate') { Test-GenerateCase $case $caseDir $bytes $problems $tmp }
-      elseif ($command -cin @('level', 'prs', 'next-version')) { Test-ToolCase $case $command $problems $tmp }
-      elseif ($command -ceq 'pending-cut') { Test-PendingCutCase $case $bytes $problems }
+      elseif ($command -cin @('level', 'prs', 'release-prs', 'next-version')) { Test-ToolCase $case $command $problems $tmp }
+      elseif ($command -ceq 'pending-cut') { Test-PendingCutCase $case $problems $tmp }
       elseif ($command -ceq 'pr-body') { Test-PrBodyCase $case $caseDir $bytes $problems $tmp }
       elseif ($command -ceq 'body-version') { Test-BodyVersionCase $case $caseDir $problems $tmp }
       else { Test-NotesCase $case $caseDir $bytes $text $problems $tmp }
@@ -1208,7 +1272,7 @@ if ($Command -ceq 'fixtures') {
   if ([string]::IsNullOrEmpty($FixtureDir)) { Write-Usage '-FixtureDir is required for fixtures'; exit 2 }
   exit (Invoke-FixtureRun $FixtureDir)
 }
-if ($Command -cnotin @('notes', 'check', 'prs', 'level', 'generate', 'next-version', 'pending-cut', 'pr-body', 'body-version')) { Write-Usage 'the first argument must be notes, check, prs, level, generate, next-version, pending-cut, pr-body, body-version or fixtures'; exit 2 }
+if ($Command -cnotin @('notes', 'check', 'prs', 'release-prs', 'level', 'generate', 'next-version', 'pending-cut', 'pr-body', 'body-version')) { Write-Usage 'the first argument must be notes, check, prs, release-prs, level, generate, next-version, pending-cut, pr-body, body-version or fixtures'; exit 2 }
 if ($Command -cin @('pr-body', 'body-version') -and [string]::IsNullOrEmpty($Output)) { Write-Usage ('-Output is required for ' + $Command); exit 2 }
 if ($Command -ceq 'body-version') {
   if ([string]::IsNullOrEmpty($Body)) { Write-Usage '-Body is required for body-version'; exit 2 }
@@ -1227,6 +1291,8 @@ if ($Command -ceq 'notes' -or $Command -ceq 'check') {
   if ($Command -ceq 'notes' -and [string]::IsNullOrEmpty($Output)) { Write-Usage '-Output is required for notes'; exit 2 }
 }
 if ($Command -ceq 'prs') { exit (Invoke-PrsRun $Base) }
+if ($Command -ceq 'release-prs') { exit (Invoke-ReleasePrsRun $Base) }
+if ($Command -ceq 'pending-cut') { exit (Invoke-PendingCutRun $PrReleases) }
 if ($Command -ceq 'level') { exit (Invoke-LevelRun $Base $PrMessages) }
 if ($Command -ceq 'next-version') { exit (Invoke-NextVersionRun $Level $Label) }
 
@@ -1237,7 +1303,6 @@ catch {
   Write-Line ('::error::cannot read {0}: {1}' -f $ChangelogPath, $_.Exception.Message)
   exit 1
 }
-if ($Command -ceq 'pending-cut') { exit (Invoke-PendingCutRun $bytes $ChangelogPath) }
 if ($Command -ceq 'pr-body') { exit (Invoke-PrBodyRun $bytes $ChangelogPath $Base $RepoUrl $PrMessages $PrFiles $Label (Resolve-FullPath $Output)) }
 if ($Command -ceq 'generate') {
   $target = $ChangelogPath

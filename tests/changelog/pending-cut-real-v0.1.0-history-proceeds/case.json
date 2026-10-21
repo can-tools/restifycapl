@@ -1,0 +1,83 @@
+{
+  "command": "pending-cut",
+  "eol": "lf",
+  "git": {
+    "allTags": [
+      "v0.1.0"
+    ],
+    "tip": "1d912d92a13da6c25879a65c8c4015b1410d7fcd",
+    "log": [
+      {
+        "sha": "1d912d92a13da6c25879a65c8c4015b1410d7fcd",
+        "subject": "docs/plan-6c-fix-recognition (#35)"
+      },
+      {
+        "sha": "bc4039ff58b5916320fe5ff89f40c4ddf942b2e1",
+        "subject": "chore/ci-release-pr-workflow (#32)"
+      },
+      {
+        "sha": "3844056247ad1407a7033334304a0aa11f99ff7d",
+        "subject": "docs/plan-6c-release-pr (#34)"
+      },
+      {
+        "sha": "4a116657f3fbd4d814845bbbf5c6bfc3461d7f8a",
+        "subject": "docs/plan-6c-files (#33)"
+      },
+      {
+        "sha": "4f846b3486524604928a299af35b9b0f5904648c",
+        "subject": "chore/ci-release-pr-bot (#31)"
+      },
+      {
+        "sha": "3c44f4355d0c8b5d282a54ab0577ae4e44bcff0f",
+        "subject": "chore/ci-feat-branch-prefix (#30)"
+      },
+      {
+        "sha": "1583e3a2631c51efd12298ada702c1ff149ebe6a",
+        "subject": "chore/ci-changelog-generate (#28)"
+      },
+      {
+        "sha": "df84cf03894e55c41d2197e344f6e21e492490aa",
+        "subject": "chore/ci-actionlint (#27)"
+      },
+      {
+        "sha": "e852238c7f8f0a45bad403665c9fca74662ee84b",
+        "subject": "docs/ci-flow-target-state (#26)"
+      },
+      {
+        "sha": "c5aeb7f938b2e73653219517a0299cfcf890f7d9",
+        "subject": "fix/release-show-version-errexit: capture next-version status under bash -e so a dry run with nothing to release no longer fails (#25)"
+      },
+      {
+        "sha": "84e27819b349f18912ac22e91003d936591dfb64",
+        "subject": "chore/ci-dispatch-release-mode: add workflow_dispatch to ci.yml and select the release mode by ref in release.yml (#23)"
+      },
+      {
+        "sha": "cb99e09c7ce34667cdb960ec9dece70367ced637",
+        "subject": "chore/ci-changelog-cut-next-version: add cut and next-version subcommands to scripts/ci/changelog.ps1 (#22)"
+      },
+      {
+        "sha": "6bb0a38db99426f682f16b962e52013d7d86a61d",
+        "subject": "chore/ci-changelog-parser: add scripts/ci/changelog.ps1 and replace the inline CHANGELOG parser in release.yml (#21)"
+      },
+      {
+        "sha": "250b6680b805776d03784aaebaddc999f89d0828",
+        "subject": "fix/auto-pr-canoe-check-checklist: add CANoe check item to PR checklist for exports.cpp branches, drop duplicate exports.cpp sentence (#20)"
+      },
+      {
+        "sha": "327d7d2b6fb61210d4d2e0f0f3e853367ce899fb",
+        "subject": "stage/14-release-pipeline (#17)"
+      },
+      {
+        "sha": "43f25f25a3e1c5562d0c1db3fec729490c69542e",
+        "subject": "docs/hum-41-readme-and-roadmap: update README.md and close out Stage 14 in master plan (#19)"
+      }
+    ],
+    "logRange": "v0.1.0..1d912d92a13da6c25879a65c8c4015b1410d7fcd"
+  },
+  "expect": {
+    "exit": 0,
+    "output": [
+      "proceed"
+    ]
+  }
+}

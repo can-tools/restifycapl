@@ -77,9 +77,12 @@ workflow; neither is on `main` yet, and until both are, no release is made.
      raises no level. A section with nothing to release besides Development is
      an error.
 3. The release pull request is squash-merged; nobody generates or merges a
-   section by hand. Do not use a rebase merge: the check in `validate` needs the
-   merge commit's first parent to be the `main` commit named in the heading,
-   which a squash merge guarantees and a rebase merge does not.
+   section by hand. The squash-merge commit is the release commit; only a
+   faithful one is tagged, and its first parent is then the base named in the
+   heading (the definition is in `docs/ci-pipeline.md`, "Content-free release
+   recognition"). Do not use a rebase merge or the merge-commit strategy: neither
+   produces a release commit, so nothing is tagged and the next release pull
+   request covers the full range again.
 4. The tagging workflow creates the tag `vX.Y.Z` on the squash-merge commit,
    from the last tag and the single `bump:*` label of the merged release pull
    request; the version exists only in the tag. The release workflow accepts an
@@ -110,26 +113,15 @@ computed, for instance when nothing is left to release. `validate` has
 Read, in the run's summaries: the export table, the `notes.md` preview, the
 `SHA256SUMS`, the `dumpbin /exports` output of both architectures, and the
 attestation step. The notes come from the first CHANGELOG section that has
-content; the `validate` summary names the section used. When that section is a
-hash heading, the dry run checks it against `origin/main` and ends in one of
-three ways:
-
-- Before the merge it fails unless the heading's hash equals the first 12
-  characters of the `origin/main` tip and the run's commit contains that tip.
-  It reports every failed condition; the release bot generates the section
-  again from the new tip on the next push to `main`.
-- Once the section is merged (the first-parent commit after the heading's hash
-  carries the heading) it passes, names that commit and says to re-run the
-  failed `tag-release.yml` run.
-- When that commit already carries a release tag (vX.Y.Z, no leading zeros, each
-  field at most 65535) it passes with a warning that the section was already
-  released; the notes are previewed again.
+content; the `validate` summary names the section used. The dry run is a pure
+preview: it does not compare that section with `origin/main` or with any tag,
+and it does not report whether the section was merged or released.
 
 ## Jobs
 
 | Job | Runs on | Purpose |
 |---|---|---|
-| `validate` | Linux | Tag mode: tag format `vX.Y.Z`, each field at most 65535, tagged commit is an ancestor of `origin/main`, no published release for the tag, the tagged commit has a parent, exactly one CHANGELOG hash heading matches that first parent, with non-empty notes. Dry run: the heading check against `origin/main` and the release preview, both described under Dry run. Both modes (tag and dry run): run the CHANGELOG fixtures first, where a red fixture fails `validate` and so blocks the release, then extract the notes body with `scripts/ci/changelog.ps1 notes`. |
+| `validate` | Linux | Tag mode: tag format `vX.Y.Z`, each field at most 65535, tagged commit is an ancestor of `origin/main`, no published release for the tag, the tagged commit has a parent, exactly one CHANGELOG hash heading matches that first parent, with non-empty notes (locating the notes). Dry run: the release preview described under Dry run. Both modes (tag and dry run): run the CHANGELOG fixtures first, where a red fixture fails `validate` and so blocks the release, then extract the notes body with `scripts/ci/changelog.ps1 notes`. |
 | `pipeline-x86`, `pipeline-x64` | Windows | `arch-pipeline.yml` with `release-version` set to `X.Y.Z` in tag mode, empty in a dry run. |
 | `export-table` | Linux | The same composite action `ci.yml` uses; uploads the generated markdown. |
 | `assemble` | Linux | `SHA256SUMS`, `notes.md` (at most 125,000 characters), both written to the job summary. No rebuild after this point. |
@@ -144,8 +136,8 @@ Every job that runs `make` and `validate` check out with `fetch-depth: 0`:
 the Makefile runs `git` on every call and the ancestor check needs
 `origin/main`. The other jobs download artifacts and need no checkout.
 
-The section selection, the hash-heading checks, the notes body and the
-generated section come from `scripts/ci/changelog.ps1` (`pwsh` 7);
+Locating the notes (the section selection and the hash-heading match), the
+notes body, the release-commit rule and the generated section come from `scripts/ci/changelog.ps1` (`pwsh` 7);
 `tests/changelog/` holds its fixtures.
 
 A hash heading has the form `## [<12 hex characters>] - YYYY-MM-DD`; the
@@ -184,18 +176,21 @@ than one `### Development` block, or an empty section after removing it, fails.
   GitHub to say it is withdrawn.
 - **The release went public but the job reports failure:** handled as a normal
   defect, like any other. There is no extra post-release check.
-- **A merged section that stays untagged:** nothing generates it a second time.
-  Re-run the failed `tag-release.yml` run ("Re-run jobs"). If the defect is in
-  the tagging workflow itself and a re-run cannot repair it, an ordinary pull
-  request fixes the workflow and also removes the generated, untagged section
-  from `CHANGELOG.md`; the next generation then covers the full range since the
-  last tag.
-- **Wrong or missing hash heading:** `validate` fails with the expected hash,
-  before anything is built or public. A heading whose hash is not a commit
-  matches no first parent, so it fails the same way ("found 0"); only a dry
-  run reports it as not a commit in the run's history. The tag is burned: the
-  fix goes through an ordinary pull request, and the release bot releases the
-  next version.
+- **A merged release commit that stays untagged:** while it is a faithful
+  release commit and the `main` tip, `release-pr.yml` reports "waiting for the
+  tag" and changes nothing; re-run the failed `tag-release.yml` run ("Re-run
+  jobs"). A release commit that is not faithful, or that is untagged and no
+  longer the `main` tip, is abandoned: it is never tagged, and the next run of
+  `release-pr.yml` opens a release pull request for the full range since the
+  last tag. `generate` drops the sections that the last tag does not carry, so
+  nobody removes an abandoned section by hand. If the defect is in the tagging
+  workflow itself and a re-run cannot repair it, an ordinary pull request fixes
+  it; its merge moves `main`, which abandons the release commit.
+- **Wrong or missing hash heading:** `validate` (locating the notes) fails with
+  the expected hash, before anything is built or public. A heading whose hash
+  is not a commit matches no first parent, so it fails the same way ("found
+  0"). The tag is burned: the fix goes through an ordinary pull request, and
+  the release bot releases the next version.
 
 Attestations created for builds that are never published are harmless and
 stay.

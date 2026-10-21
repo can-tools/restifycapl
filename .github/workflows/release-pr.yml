@@ -37,11 +37,58 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
-      - name: Wait for the tag of a merged cut
+      - name: Fetch the pull request data of the release commits
+        shell: bash
+        run: |
+          releases="$RUNNER_TEMP/pr-releases.json"
+          arg_file="$RUNNER_TEMP/pr-releases-arg.json"
+          pull="$RUNNER_TEMP/release-pull.json"
+          commit="$RUNNER_TEMP/release-commit.json"
+          entry="$RUNNER_TEMP/release-entry.json"
+          errfile="$RUNNER_TEMP/release-fetch.err"
+
+          code=0; out=$(pwsh -NoProfile -File scripts/ci/changelog.ps1 release-prs) || code=$?
+          if [ "$code" -ne 0 ]; then
+            echo "$out"
+            exit 1
+          fi
+          printf '{}' > "$releases"
+          while read -r n; do
+            [ -n "$n" ] || continue
+            code=0; gh api "repos/$GITHUB_REPOSITORY/pulls/$n" > "$pull" 2> "$errfile" || code=$?
+            if [ "$code" -ne 0 ]; then
+              if grep -q 'HTTP 404' "$errfile"; then
+                printf '{"found":false}' > "$entry"
+              else
+                echo "::error::could not read pull request #$n (exit $code): $(tr '\r\n' '  ' < "$errfile")"
+                exit 1
+              fi
+            else
+              head_sha=$(jq -r '.head.sha' "$pull")
+              if [[ ! "$head_sha" =~ ^[0-9a-f]{40}$ ]]; then
+                echo "::error::unexpected head commit of pull request #$n: $head_sha"
+                exit 1
+              fi
+              code=0; gh api "repos/$GITHUB_REPOSITORY/commits/$head_sha" > "$commit" 2> "$errfile" || code=$?
+              if [ "$code" -eq 0 ]; then
+                jq -c --slurpfile c "$commit" '{found: true, merged: .merged, mergeCommitSha: .merge_commit_sha, baseRef: .base.ref, baseRepo: .base.repo.full_name, headRef: .head.ref, headRepo: (.head.repo.full_name // null), headSha: .head.sha, headParents: [$c[0].parents[].sha], headTree: $c[0].commit.tree.sha}' "$pull" > "$entry"
+              elif grep -q 'HTTP 404\|HTTP 422' "$errfile"; then
+                jq -c '{found: true, merged: .merged, mergeCommitSha: .merge_commit_sha, baseRef: .base.ref, baseRepo: .base.repo.full_name, headRef: .head.ref, headRepo: (.head.repo.full_name // null), headSha: .head.sha, headParents: null, headTree: null}' "$pull" > "$entry"
+              else
+                echo "::error::could not read the head commit $head_sha of pull request #$n (exit $code): $(tr '\r\n' '  ' < "$errfile")"
+                exit 1
+              fi
+            fi
+            merged=$(jq -c --arg n "$n" --slurpfile e "$entry" '. + {($n): $e[0]}' "$releases")
+            printf '%s' "$merged" > "$arg_file"
+            mv "$arg_file" "$releases"
+          done <<< "$out"
+
+      - name: Wait for the tag of a merged release commit
         id: guard
         shell: bash
         run: |
-          code=0; out=$(pwsh -NoProfile -File scripts/ci/changelog.ps1 pending-cut) || code=$?
+          code=0; out=$(pwsh -NoProfile -File scripts/ci/changelog.ps1 pending-cut -PrReleases "$RUNNER_TEMP/pr-releases.json") || code=$?
           if [ "$code" -ne 0 ]; then
             echo "$out"
             exit 1
@@ -50,10 +97,15 @@ jobs:
             proceed)
               echo "proceed=true" >> "$GITHUB_OUTPUT"
               ;;
+            abandoned)
+              echo "proceed=true" >> "$GITHUB_OUTPUT"
+              echo "::notice::an untagged release commit was abandoned; a new release pull request covers the full range since the last tag"
+              printf "%s\n\n" "A release commit since the last tag is abandoned (not faithful, or untagged and no longer the main tip). It is never tagged; the release pull request is rebuilt for the full range." >> "$GITHUB_STEP_SUMMARY"
+              ;;
             waiting)
               echo "proceed=false" >> "$GITHUB_OUTPUT"
-              echo "::notice::waiting for tag: the newest CHANGELOG section is merged but not tagged yet"
-              printf "%s\n\n" "Waiting for tag: the merged release has no tag yet. Nothing was changed." >> "$GITHUB_STEP_SUMMARY"
+              echo "::notice::waiting for tag: the release commit is the main tip and has no tag yet; re-run the failed tag-release.yml run if it failed"
+              printf "%s\n\n" "Waiting for tag: the merged release commit is the main tip and has no tag yet. Nothing was changed. If the tagging run failed, re-run it." >> "$GITHUB_STEP_SUMMARY"
               ;;
             *)
               echo "::error::unexpected answer from pending-cut: $(printf '%s' "$out" | tr '\r\n' '  ')"

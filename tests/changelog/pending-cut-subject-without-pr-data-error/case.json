@@ -1,0 +1,31 @@
+{
+  "command": "pending-cut",
+  "eol": "lf",
+  "git": {
+    "allTags": [
+      "v0.1.0"
+    ],
+    "tip": "c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1",
+    "log": [
+      {
+        "sha": "c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1",
+        "subject": "release/next (#41)"
+      }
+    ],
+    "logRange": "v0.1.0..c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1",
+    "commitInfo": {
+      "c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1": {
+        "parents": [
+          "b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0"
+        ],
+        "tree": "7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a"
+      }
+    }
+  },
+  "expect": {
+    "exit": 1,
+    "output": [
+      "::error::no pull request data for #41, the release commit c1c1c1c1c1c1"
+    ]
+  }
+}

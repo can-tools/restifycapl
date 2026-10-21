@@ -1,0 +1,14 @@
+{
+  "mode": "dry-run",
+  "eol": "lf",
+  "git": {
+    "sha": "0e362df99ef1f843563e9b30b144eaf48c3f6d72"
+  },
+  "expect": {
+    "exit": 0,
+    "output": [],
+    "summary": [
+      "Release notes taken from the CHANGELOG section `## [0d0f52240d49] - 2026-10-09` (dry-run mode)."
+    ]
+  }
+}
