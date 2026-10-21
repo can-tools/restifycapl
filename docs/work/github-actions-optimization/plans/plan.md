@@ -141,7 +141,7 @@ Stages 0–5, 5a, 6a, 6b and 6c are done and merged on `main`; their text is kep
 - Description: README wording on how CHANGELOG sections are identified (commit hashes, not tags); `docs/capl-framework.md` setup steps name the GitHub release assets. On `fix/` branches with `fix:` commits, merged after stage 6d: they are the first releasable content, and no release PR may be merged before `tag-release.yml` is on `main` (R20).
 - Files: `README.md`, `docs/capl-framework.md`.
 - Owners: `docs-writer` (wording approved by the user) → `code-reviewer`.
-- Verification: `gate-x86` and `gate-x64` green. The first real generated section is checked in the release PR that `release-pr.yml` opens after stage 6c.
+- Verification: `gate-x86` and `gate-x64` green. The first real generated section is checked in the release PR that `release-pr.yml` opens after stage 6d.
 - Approval: the user approves the wording.
 
 ### Stage 6f — flow documents
@@ -158,7 +158,7 @@ Stages 0–5, 5a, 6a, 6b and 6c are done and merged on `main`; their text is kep
 - Approval: checkpoint before merging the release PR.
 
 ## 5. Risks
-- Required checks from a dispatch on the bot's branch: confirmed on an ordinary branch; on the release PR only after stage 6c. If not accepted, the PR cannot be merged (safe).
+- Required checks from a dispatch on the bot's branch: confirmed on an ordinary branch; on the release PR only once the first release PR exists (after stage 6e). If not accepted, the PR cannot be merged (safe).
 - A skipped required check counts as passed: `actionlint` is never required; `bump label` decides by exit code, never by `if:`.
 - Label override: every run that is not skipped (R13) resets a human-changed label to the computed level and comments on the replacement; an identical push leaves it alone; the label is set as the last step before merging.
 - Body race: the `labels` job (own concurrency group) reads the PR body and writes it back with only the version line rewritten; a `build` rebuild or a reviewer's checklist tick in that seconds-wide window is overwritten by the stale body (a lost tick must be re-ticked; a stale body can carry old ticks onto a new head) until the next rebuild that is not skipped, or at once by a manual dispatch. Accepted, same class as "one change behind; the next rebuild corrects it" in `docs/ci-pipeline.md`; a fix (e.g. re-checking the head SHA before editing) is not planned unless stage 7 shows the race in practice.
