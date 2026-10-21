@@ -1,14 +1,14 @@
 <#
 .SYNOPSIS
-Reads and generates CHANGELOG.md for the release workflow: selects and validates the release notes, computes the release level from the commits since the last tag, generates the release section, computes the next version.
+Reads and generates CHANGELOG.md for the release workflow: locates the release notes, computes the release level from the commits since the last tag, generates the release section, computes the next version.
 
 .DESCRIPTION
 Subcommands (first argument):
   notes     -Mode tag|dry-run -Sha <commit> -Output <file> [-ChangelogPath <file>]
-            select the section, validate it, write the notes body (LF, UTF-8, no BOM)
+            locate the section, write the notes body (LF, UTF-8, no BOM)
             and append the "taken from" line to $GITHUB_STEP_SUMMARY
   check     -Mode tag|dry-run -Sha <commit> [-ChangelogPath <file>]
-            the same selection and validation, but writes no notes file and no
+            the same selection, but writes no notes file and no
             "taken from" line
   prs       [-Base <40-hex>]
             print the pull request numbers ("(#N)" at the end of a subject) of the commits
@@ -33,7 +33,7 @@ Subcommands (first argument):
             copy a release pull request description, replacing only the text between the version markers
   fixtures  -FixtureDir <dir>
             run every <dir>/*/case.json against a simulated git history
-Exit codes: 0 success; 1 a validation failed, git failed or CHANGELOG.md could not
+Exit codes: 0 success; 1 a check failed, git failed or CHANGELOG.md could not
 be read (a file that is not valid UTF-8 included); 2 usage error (missing or invalid
 -Mode, -Sha, -Output, -Base, -Date, -RepoUrl, -Level, -Label, -FixtureDir, or an unknown subcommand);
 a parameter PowerShell itself cannot bind (one given twice, for instance) fails before the script runs
@@ -337,7 +337,7 @@ function Invoke-MockGit([string[]]$GitArgs) {
   if ($a.Count -eq 2 -and $a[0] -ceq 'show' -and $a[1].EndsWith(':CHANGELOG.md', [System.StringComparison]::Ordinal)) {
     $c = $a[1].Substring(0, $a[1].Length - ':CHANGELOG.md'.Length)
     if ($f.ContainsKey('showTexts') -and $f['showTexts'].ContainsKey($c)) { return & $ok ([string]$f['showTexts'][$c]) }
-    if ($null -ne $script:Ctx.TagChangelog) { return & $ok $script:Ctx.TagChangelog }
+    if (-not $f.ContainsKey('showTexts') -and $null -ne $script:Ctx.TagChangelog) { return & $ok $script:Ctx.TagChangelog }
     return & $no 128
   }
   if ($a.Count -eq 4 -and $a[0] -ceq 'log' -and $a[1] -ceq '-1' -and $a[2] -ceq '--format=%P%x09%T') {
@@ -536,6 +536,9 @@ function Read-PrReleases([string]$path) {
     $e = $json[$key]
     if ($e -isnot [hashtable] -or $e['found'] -isnot [bool]) { Stop-WithError ('{0}: the value of "{1}" must be an object with a boolean "found"' -f $path, $key) }
     if ($e['found']) {
+      foreach ($name in 'mergeCommitSha', 'headRepo', 'headParents', 'headTree') {
+        if (-not $e.ContainsKey($name)) { Stop-WithError ('{0}: "{1}" of "{2}" is missing' -f $path, $name, $key) }
+      }
       foreach ($name in 'baseRef', 'baseRepo', 'headRef', 'headSha') {
         if ($e[$name] -isnot [string]) { Stop-WithError ('{0}: "{1}" of "{2}" must be a string' -f $path, $name, $key) }
       }
@@ -836,11 +839,11 @@ function Invoke-GenerateRun([byte[]]$Bytes, [string]$Display, [string]$Base, [st
       $resolvedDate = $Date
       if ([string]::IsNullOrEmpty($resolvedDate)) { $resolvedDate = [datetime]::UtcNow.ToString('yyyy-MM-dd', [cultureinfo]::InvariantCulture) }
       $short = Get-Prefix $resolvedBase 12
+      $repo = Get-RepoUrl $lines $RepoUrl
       $lines = [System.Collections.Generic.List[string]]::new((Remove-UntaggedSections $lines))
       foreach ($line in $lines) {
         if ($line.StartsWith('## [' + $short + ']', [System.StringComparison]::Ordinal)) { Stop-WithError ('the file already has a section for {0}' -f $short) }
       }
-      $repo = Get-RepoUrl $lines $RepoUrl
       $range = Get-Range $resolvedBase (Read-PrMessages $PrMessagesPath)
       $entries = Get-Entries $range $repo
       foreach ($w in $entries.Warnings) { Write-Line ('::warning::' + $w) }
