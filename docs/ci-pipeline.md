@@ -378,8 +378,8 @@ head commit (`head.sha`).
   other data files. The script stays offline. No permission beyond the job's
   `contents`, `pull-requests` and `actions` is needed. A 404 for the pull
   request is recorded as `{"found": false}`; a 404 or 422 for the head commit
-  records null parents and tree (not faithful); any other API error fails the
-  run.
+  records null parents and tree (not faithful); a merged pull request without
+  `merge_commit_sha` fails the run; any other API error fails the run.
 - `changelog.ps1 pending-cut -PrReleases <file>` looks at the newest valid
   release commit only: none gives `proceed`; faithful and the `origin/main`
   tip gives `waiting` (the run changes nothing; re-run the failed tagging run);

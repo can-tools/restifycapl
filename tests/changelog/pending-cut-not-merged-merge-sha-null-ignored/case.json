@@ -5,7 +5,7 @@
     "prReleases": {
       "41": {
         "found": true,
-        "merged": true,
+        "merged": false,
         "mergeCommitSha": null,
         "baseRef": "main",
         "baseRepo": "example/repo",

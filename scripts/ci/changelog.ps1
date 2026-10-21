@@ -90,10 +90,12 @@ pending-cut looks at the newest valid release commit only. With none it prints p
 the origin/main tip prints waiting (re-run the failed tag-release.yml run if it failed). Any other one is
 abandoned: it prints abandoned, with the reason on stderr, and the caller proceeds. -PrReleases names a JSON
 file the workflow builds from "gh api pulls/N" and "gh api commits/<head.sha>": an object whose keys are pull
-request numbers and whose values are {"found": false} or an object with found (true) and every key below (a missing key fails with exit 1), merged (bool),
-mergeCommitSha (string or null), baseRef, baseRepo, headRef (strings), headRepo (string or null), headSha
-(string), headParents (array of strings, or null when the head commit was not fetchable) and headTree (string
-or null). A release-commit subject whose number has no key, when it is evaluated, fails with exit 1.
+request numbers and whose values are {"found": false} or an object with found (true) and these keys: merged
+(bool), mergeCommitSha (string, or null when merged is false), baseRef, baseRepo, headRef (strings), headRepo
+(string or null), headSha (string), headParents (array of strings, or null when the head commit was not
+fetchable) and headTree (string or null). A missing key, a value of another type, or a null mergeCommitSha
+with merged true fails with exit 1, as does a release-commit subject whose number has no key, when it is
+evaluated.
 pr-body: the description opens with "Version preview: <!-- version -->vX.Y.Z (vA.B.C + level)<!-- /version -->",
 the version being the next version for -Label, else for the level computed from the commits. A "> [!CAUTION]"
 block lists the breaking changes when there are any. Then come the release notes preview (the generated
@@ -542,6 +544,7 @@ function Read-PrReleases([string]$path) {
         if ($null -ne $e[$name] -and $e[$name] -isnot [string]) { Stop-WithError ('{0}: "{1}" of "{2}" must be a string or null' -f $path, $name, $key) }
       }
       if ($e['merged'] -isnot [bool]) { Stop-WithError ('{0}: "merged" of "{1}" must be a boolean' -f $path, $key) }
+      if ($e['merged'] -and $null -eq $e['mergeCommitSha']) { Stop-WithError ('{0}: "mergeCommitSha" of "{1}" must not be null when "merged" is true' -f $path, $key) }
       $parents = $e['headParents']
       if ($null -ne $parents -and ($parents -is [string] -or $parents -isnot [System.Collections.IEnumerable] -or @($parents | Where-Object { $_ -isnot [string] }).Count -gt 0)) {
         Stop-WithError ('{0}: "headParents" of "{1}" must be an array of strings or null' -f $path, $key)
