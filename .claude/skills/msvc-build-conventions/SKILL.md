@@ -66,7 +66,7 @@ vcpkg's own package format, not a version source — it feeds nothing here (not
 `version.rc`, not the Makefile's `VER_*`, not `/VERSION:`); the product
 version is derived solely from the Git tag below.
 
-**Release builds (GitHub Actions, triggered by pushing a tag).**
+**Release builds (GitHub Actions, run on a tag ref, from a tag push or a dispatch on the tag).**
 The tag format is `vX.Y.Z` (e.g. `v2.5.0`) — this is the dominant
 convention across the Git/GitHub ecosystem, not specific to C++. The
 workflow extracts `X.Y.Z` from the tag (`github.ref_name`, stripping the

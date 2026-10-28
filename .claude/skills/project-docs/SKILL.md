@@ -141,8 +141,9 @@ A function without parameters is written `long restifyFoo()`.
   tag (see `conventional-commits` and `docs/release-process.md`). Sections:
   Breaking changes, Added, Fixed, Development, in that order.
 - The hash is the base commit of the cut, taken from git, never typed. The tag
-  goes on the squash-merge commit, whose first parent is that commit; the release
-  workflow checks this. No version is written into a heading (see
+  goes on the squash-merge commit of the release pull request only when its parent
+  and tree equal those of the reviewed pull request head; its first parent is then
+  that commit, and the release workflow checks this. No version is written into a heading (see
   `msvc-build-conventions`).
 - Development entries (chore/ and docs/ PRs) stay in CHANGELOG.md and are removed
   from the GitHub release notes. No stage or task IDs in CHANGELOG.md.
