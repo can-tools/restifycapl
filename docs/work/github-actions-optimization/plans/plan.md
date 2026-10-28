@@ -147,7 +147,7 @@ Stages 0–5, 5a, 6a, 6b, 6c and 6c-fix are done and merged on `main`; their tex
     - Permissions: `contents: write`, `pull-requests: read`, `actions: write`. No secret or PAT.
     - Concurrency group `tag-release`, `cancel-in-progress: false`.
     - Checkout: full history and tags; credentials kept for the tag push.
-    - For `tag`, in this order:
+    - For `tag`, in this order, unless the highest valid `vX.Y.Z` tag already points at the commit (a re-run after the tag push), in which case the job continues as for `tagged`:
       1. Live check that `main` still points at the commit. If not: green with `::warning::` that the commit is abandoned; no tag, no dispatch.
       2. Live labels: exactly one of `bump:major|minor|patch`, otherwise red without a tag.
       3. Next version.
