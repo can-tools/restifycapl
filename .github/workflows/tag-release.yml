@@ -92,9 +92,25 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
+      - name: Reuse the tag already on the release commit
+        id: guard
+        if: env.OUTCOME == 'tag'
+        shell: bash
+        run: |
+          highest=""
+          while IFS= read -r name; do
+            if [[ "$name" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then highest="$name"; fi
+          done < <(git tag --list | sort -V)
+          outcome=tag
+          if [ -n "$highest" ] && [ "$(git rev-parse "refs/tags/$highest^{commit}")" = "$GITHUB_SHA" ]; then
+            outcome=tagged
+            printf "%s\n\n" "The latest tag $highest already points at ${GITHUB_SHA:0:12}. Reusing it." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "outcome=$outcome" >> "$GITHUB_OUTPUT"
+
       - name: Check that main still points at the release commit
         id: tip
-        if: env.OUTCOME == 'tag'
+        if: (steps.guard.outputs.outcome || env.OUTCOME) == 'tag'
         shell: bash
         run: |
           errfile="$RUNNER_TEMP/tip.err"
@@ -114,7 +130,7 @@ jobs:
 
       - name: Read the bump label of the release pull request
         id: label
-        if: env.OUTCOME == 'tag' && steps.tip.outputs.proceed == 'true'
+        if: (steps.guard.outputs.outcome || env.OUTCOME) == 'tag' && steps.tip.outputs.proceed == 'true'
         shell: bash
         run: |
           if [[ ! "$PR_NUMBER" =~ ^[0-9]+$ ]]; then
@@ -152,7 +168,7 @@ jobs:
 
       - name: Compute the next version
         id: version
-        if: env.OUTCOME == 'tag' && steps.tip.outputs.proceed == 'true'
+        if: (steps.guard.outputs.outcome || env.OUTCOME) == 'tag' && steps.tip.outputs.proceed == 'true'
         shell: bash
         env:
           LABEL: ${{ steps.label.outputs.label }}
@@ -171,7 +187,7 @@ jobs:
 
       - name: Create and push the annotated tag
         id: create
-        if: env.OUTCOME == 'tag' && steps.tip.outputs.proceed == 'true'
+        if: (steps.guard.outputs.outcome || env.OUTCOME) == 'tag' && steps.tip.outputs.proceed == 'true'
         shell: bash
         env:
           TAG: ${{ steps.version.outputs.tag }}
@@ -187,7 +203,7 @@ jobs:
 
       - name: Find the existing tag of the release commit
         id: existing
-        if: env.OUTCOME == 'tagged'
+        if: (steps.guard.outputs.outcome || env.OUTCOME) == 'tagged'
         shell: bash
         run: |
           tag=""
