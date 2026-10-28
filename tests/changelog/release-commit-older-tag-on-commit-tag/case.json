@@ -1,0 +1,51 @@
+{
+  "command": "release-commit",
+  "eol": "lf",
+  "params": {
+    "prReleases": {
+      "41": {
+        "found": true,
+        "merged": true,
+        "mergeCommitSha": "c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1",
+        "baseRef": "main",
+        "baseRepo": "example/repo",
+        "headRef": "release/next",
+        "headRepo": "example/repo",
+        "headSha": "f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1",
+        "headParents": [
+          "b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0"
+        ],
+        "headTree": "7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a"
+      }
+    }
+  },
+  "git": {
+    "sha": "c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1",
+    "allTags": [
+      "v0.0.9",
+      "v0.1.0"
+    ],
+    "subjects": {
+      "c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1": "release/next (#41)"
+    },
+    "pointsAt": {
+      "c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1": [
+        "v0.0.9"
+      ]
+    },
+    "commitInfo": {
+      "c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1": {
+        "parents": [
+          "b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0"
+        ],
+        "tree": "7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a"
+      }
+    }
+  },
+  "expect": {
+    "exit": 0,
+    "output": [
+      "tag"
+    ]
+  }
+}
