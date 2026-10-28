@@ -371,11 +371,16 @@ head ref `release/next` in the same repository as the base. It is faithful when
 its single parent and its tree equal the parent and tree of the pull request's
 head commit (`head.sha`).
 
+- `scripts/ci/fetch-pr-releases.sh` is the fetch shared by `release-pr.yml` and
+  `tag-release.yml`. It reads pull request numbers on stdin, runs
+  `gh api repos/<repo>/pulls/<N>` and `gh api repos/<repo>/commits/<head.sha>`
+  for each and writes `pr-releases.json` (the path is its argument), built with
+  `jq --slurpfile` like the other data files. This definition of a release
+  commit and of faithfulness stays only in this document; the other documents
+  point here.
 - `release-pr.yml` (job `build`) asks `changelog.ps1 release-prs` for the pull
-  request numbers of those subjects, reads `gh api repos/<repo>/pulls/<N>` and
-  `gh api repos/<repo>/commits/<head.sha>` for each and writes
-  `pr-releases.json` in `$RUNNER_TEMP`, built with `jq --slurpfile` like the
-  other data files. The script stays offline. No permission beyond the job's
+  request numbers of those subjects and passes them to that script. The
+  `changelog.ps1` script stays offline. No permission beyond the job's
   `contents`, `pull-requests` and `actions` is needed. A 404 for the pull
   request is recorded as `{"found": false}`; a 404 or 422 for the head commit
   records null parents and tree (not faithful); a merged pull request without
@@ -391,12 +396,80 @@ head commit (`head.sha`).
 - The dry run of `release.yml` is a pure preview and checks nothing about the
   section it takes the notes from.
 
-Known limitation: if a release commit is merged and another pull request is
-merged before the tagging run has created the tag, the release commit is no
-longer the `main` tip, so the `release-pr.yml` run of the second push treats it
-as abandoned although it is tagged moments later. The release pull request that
-run opens can then list changes that are already released; the next rebuild
-(a push to `main` or a manual dispatch) corrects it. Not handled in code.
+A second merge while the tagging run is in progress is narrowed in two places.
+If `main` moves before the live tip check of `tag-release.yml` (see "Tagging
+bot"), the release commit is abandoned: that run ends green with a warning,
+creates no tag and dispatches nothing, and the `release-pr.yml` run of the
+second push opens a release pull request for the full range. Nothing is released
+twice. If `main` moves after the check but before the tag push, that
+`release-pr.yml` run may still list changes that are already released; the
+`release-pr.yml` dispatch after the tag rebuilds the pull request. A failed
+dispatch is not retried; "Re-run jobs" repeats it.
+
+## Tagging bot (decided during github-actions-optimization Stage 6d)
+
+`tag-release.yml` (name `Tag Release`) runs on `push` to `main` only and has no
+dispatch inputs. Its top-level permission is `contents: read`. It has two jobs.
+
+- `classify` (`ubuntu-latest`; `contents: read` and `pull-requests: read`; no
+  concurrency). It checks out the pushed commit with `fetch-depth: 0`,
+  `fetch-tags: true` and `persist-credentials: false`, fetches the pull request
+  data with `scripts/ci/fetch-pr-releases.sh` (only when the subject is
+  `release/next (#N)`) and runs `changelog.ps1 release-commit -Sha
+  "$GITHUB_SHA"`. It outputs `outcome` and the pull request number.
+- `tag` (`ubuntu-latest`; `contents: write`, `pull-requests: read` and
+  `actions: write`; no secret or PAT; concurrency group `tag-release` with
+  `cancel-in-progress: false`). It runs only when the outcome is `tag` or
+  `tagged`, and checks out the pushed commit with full history and tags,
+  keeping the credentials for the tag push.
+
+Outcomes of `classify`:
+
+| Outcome | Run result | Effect |
+|---|---|---|
+| `not-release` | green | One summary line; job `tag` is skipped. |
+| `not-faithful` | green | `::warning::` and a summary line; no tag. |
+| PR data inconsistent, or any API error | red | No tag. |
+| `tag` or `tagged` | green | Job `tag` runs. |
+
+The checks run in this order and the first failing one decides: the subject is
+not `release/next (#N)` (`not-release`); the pull request is missing, not
+merged, has another `merge_commit_sha` or a base other than `main` (red); the
+head ref is not `release/next` or the head repository is not this repository
+(`not-release`); the commit is not faithful (`not-faithful`); otherwise `tagged`
+when the highest valid `vX.Y.Z` tag points at the commit and `tag` when it does
+not. The definitions are in "Content-free release recognition".
+
+Job `tag` for `tag`, in this order:
+
+1. A live check that `main` on the remote still points at the commit. If it does
+   not, the run is green with `::warning::` that the commit is abandoned, and no
+   tag and no dispatch follow.
+2. A live read of the labels of the release pull request through the API (never
+   the event payload): exactly one `bump:*` label, and it is `bump:major`,
+   `bump:minor` or `bump:patch`; otherwise the run ends red without a tag.
+3. `changelog.ps1 next-version -Label`, from the last tag and that label.
+4. An annotated tag on `GITHUB_SHA`, made by `github-actions[bot]` and pushed
+   without force.
+
+For `tagged`, those four steps are skipped and the labels are not read; the job
+takes the existing `vX.Y.Z` tag of the commit and goes on to the dispatches.
+
+After that, in both cases: the job dispatches `release-pr.yml` on `main`, then
+dispatches `Release` (`release.yml`) on the tag, unless a published release
+already exists for the tag. A published release is looked up through the API; a
+404 means none, and any other error ends red. Neither dispatch is retried; a
+failed one ends the job red, and "Re-run jobs" of the run repeats it. A re-run
+of a run that created the tag classifies as `tagged`, so it only repeats the
+dispatches.
+
+Events created with `GITHUB_TOKEN` start no workflow runs except
+`workflow_dispatch`, so the tag pushed by this job starts no `Release` run on
+its own; the dispatch is what starts it, and it is why `actions: write` is
+needed. First-run facts (that the dispatch of `release.yml` on a tag created
+seconds earlier succeeds on the first attempt, which workflow file version
+"Re-run jobs" uses) are not yet observed and are confirmed in the first
+automated release.
 
 ## `ci.yml` never calls `scripts/setup-dev-env.ps1` (found during Stage 6/7, BPE-24)
 
