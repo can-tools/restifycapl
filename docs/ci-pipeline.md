@@ -377,14 +377,15 @@ head commit (`head.sha`).
   for each and writes `pr-releases.json` (the path is its argument), built with
   `jq --slurpfile` like the other data files. This definition of a release
   commit and of faithfulness stays only in this document; the other documents
-  point here.
+  point here. A 404 for the pull request is recorded as `{"found": false}`; a
+  404 or 422 for the head commit records null parents and tree (not faithful);
+  a merged pull request without `merge_commit_sha` fails the run; any other API
+  error fails the run. An unfetchable head means not faithful, so `abandoned`
+  for `pending-cut` and no tag for the bot.
 - `release-pr.yml` (job `build`) asks `changelog.ps1 release-prs` for the pull
   request numbers of those subjects and passes them to that script. The
   `changelog.ps1` script stays offline. No permission beyond the job's
-  `contents`, `pull-requests` and `actions` is needed. A 404 for the pull
-  request is recorded as `{"found": false}`; a 404 or 422 for the head commit
-  records null parents and tree (not faithful); a merged pull request without
-  `merge_commit_sha` fails the run; any other API error fails the run.
+  `contents`, `pull-requests` and `actions` is needed.
 - `changelog.ps1 pending-cut -PrReleases <file>` looks at the newest valid
   release commit only: none gives `proceed`; faithful and the `origin/main`
   tip gives `waiting` (the run changes nothing; re-run the failed tagging run);
@@ -459,9 +460,11 @@ After that, in both cases: the job dispatches `release-pr.yml` on `main`, then
 dispatches `Release` (`release.yml`) on the tag, unless a published release
 already exists for the tag. A published release is looked up through the API; a
 404 means none, and any other error ends red. Neither dispatch is retried; a
-failed one ends the job red, and "Re-run jobs" of the run repeats it. A re-run
-of a run that created the tag classifies as `tagged`, so it only repeats the
-dispatches.
+failed one ends the job red, and "Re-run jobs" of the run repeats it. Every
+re-run (all jobs, failed jobs, or a single job) reuses the tag already on the
+commit, because job `tag` checks for the highest valid `vX.Y.Z` tag on the
+commit before it does anything else; it then skips the four steps above like
+`tagged` and only repeats the dispatches.
 
 Events created with `GITHUB_TOKEN` start no workflow runs except
 `workflow_dispatch`, so the tag pushed by this job starts no `Release` run on

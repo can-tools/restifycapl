@@ -183,10 +183,13 @@ than one `### Development` block, or an empty section after removing it, fails.
   release commit and the `main` tip, `release-pr.yml` reports "waiting for the
   tag" and changes nothing; re-run the failed `tag-release.yml` run ("Re-run
   jobs"). If the tag already exists, the re-run only repeats the dispatches of
-  `release-pr.yml` and `Release`. A release commit that is not faithful, or that is untagged and no
-  longer the `main` tip, is abandoned: it is never tagged, and the next run of
-  `release-pr.yml` opens a release pull request for the full range since the
-  last tag. `generate` drops the sections that the last tag does not carry, so
+  `release-pr.yml` and `Release`. Every re-run (all jobs, failed jobs, or a
+  single job) reuses the tag already on the commit and never creates a second
+  one, because job `tag` checks for the highest valid `vX.Y.Z` tag on the commit
+  before it does anything else. A release commit that is not faithful, or that
+  is untagged and no longer the `main` tip, is abandoned: it is never tagged,
+  and the next run of `release-pr.yml` opens a release pull request for the
+  full range since the last tag. `generate` drops the sections that the last tag does not carry, so
   nobody removes an abandoned section by hand. If the defect is in the tagging
   workflow itself and a re-run cannot repair it, an ordinary pull request fixes
   it; its merge moves `main`, which abandons the release commit.
