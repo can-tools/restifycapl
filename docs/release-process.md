@@ -85,8 +85,11 @@ workflow; neither is on `main` yet, and until both are, no release is made.
    request covers the full range again.
 4. The tagging workflow creates the tag `vX.Y.Z` on the squash-merge commit,
    from the last tag and the single `bump:*` label of the merged release pull
-   request; the version exists only in the tag. The release workflow accepts an
-   annotated or a lightweight tag and reads nothing from its annotation.
+   request, read live; the version exists only in the tag. The tag is annotated
+   and made by `github-actions[bot]`, only on a faithful release commit that is
+   still the `main` tip, and a re-run reuses a tag already on the commit. The
+   release workflow accepts an annotated or a lightweight tag and reads nothing
+   from its annotation. The steps are in `docs/ci-pipeline.md`, "Tagging bot".
 
 The release mode depends on the ref, not on the event: a tag ref publishes,
 whether the run came from a tag push or from a `workflow_dispatch` on the tag,
@@ -179,10 +182,14 @@ than one `### Development` block, or an empty section after removing it, fails.
 - **A merged release commit that stays untagged:** while it is a faithful
   release commit and the `main` tip, `release-pr.yml` reports "waiting for the
   tag" and changes nothing; re-run the failed `tag-release.yml` run ("Re-run
-  jobs"). A release commit that is not faithful, or that is untagged and no
-  longer the `main` tip, is abandoned: it is never tagged, and the next run of
-  `release-pr.yml` opens a release pull request for the full range since the
-  last tag. `generate` drops the sections that the last tag does not carry, so
+  jobs"). If the tag already exists, the re-run only repeats the dispatches of
+  `release-pr.yml` and `Release`. Every re-run (all jobs, failed jobs, or a
+  single job) reuses the tag already on the commit and never creates a second
+  one, because job `tag` checks for the highest valid `vX.Y.Z` tag on the commit
+  before it does anything else. A release commit that is not faithful, or that
+  is untagged and no longer the `main` tip, is abandoned: it is never tagged,
+  and the next run of `release-pr.yml` opens a release pull request for the
+  full range since the last tag. `generate` drops the sections that the last tag does not carry, so
   nobody removes an abandoned section by hand. If the defect is in the tagging
   workflow itself and a re-run cannot repair it, an ordinary pull request fixes
   it; its merge moves `main`, which abandons the release commit.

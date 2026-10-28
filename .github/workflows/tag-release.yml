@@ -1,0 +1,256 @@
+# tag-release.yml -- the tagging bot: tags a merged, faithful release commit on main and dispatches the release. See docs/release-process.md.
+
+name: Tag Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  classify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      outcome: ${{ steps.classify.outputs.outcome }}
+      number: ${{ steps.subject.outputs.number }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout the pushed commit (full history and tags)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+
+      - name: Fetch the pull request data of the pushed commit
+        id: subject
+        shell: bash
+        run: |
+          subject=$(git log -1 --format=%s "$GITHUB_SHA")
+          number=""
+          if [[ "$subject" =~ ^release/next\ \(#([0-9]+)\)$ ]]; then
+            number="${BASH_REMATCH[1]}"
+            printf '%s\n' "$number" | bash scripts/ci/fetch-pr-releases.sh "$RUNNER_TEMP/pr-releases.json"
+          else
+            printf '{}' > "$RUNNER_TEMP/pr-releases.json"
+          fi
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+
+      - name: Classify the pushed commit
+        id: classify
+        shell: bash
+        run: |
+          code=0; out=$(pwsh -NoProfile -File scripts/ci/changelog.ps1 release-commit -Sha "$GITHUB_SHA" -PrReleases "$RUNNER_TEMP/pr-releases.json") || code=$?
+          if [ "$code" -ne 0 ]; then
+            echo "$out"
+            exit 1
+          fi
+          case "$out" in
+            tag|tagged)
+              ;;
+            not-release)
+              printf "%s\n\n" "Not a release commit. Nothing to tag." >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            not-faithful)
+              echo "::warning::the release commit ${GITHUB_SHA:0:12} is not faithful (its content differs from the generated release pull request); it is not tagged"
+              printf "%s\n\n" "Release commit ${GITHUB_SHA:0:12} is not faithful. No tag was created." >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            *)
+              echo "::error::unexpected answer from release-commit: $(printf '%s' "$out" | tr '\r\n' '  ')"
+              exit 1
+              ;;
+          esac
+          echo "outcome=$out" >> "$GITHUB_OUTPUT"
+
+  tag:
+    needs: classify
+    if: needs.classify.outputs.outcome == 'tag' || needs.classify.outputs.outcome == 'tagged'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: read
+      actions: write
+    concurrency:
+      group: tag-release
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      OUTCOME: ${{ needs.classify.outputs.outcome }}
+      PR_NUMBER: ${{ needs.classify.outputs.number }}
+    steps:
+      - name: Checkout the pushed commit (full history and tags)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Reuse the tag already on the release commit
+        id: guard
+        if: env.OUTCOME == 'tag'
+        shell: bash
+        run: |
+          highest=""
+          while IFS= read -r name; do
+            if [[ "$name" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then highest="$name"; fi
+          done < <(git tag --list | sort -V)
+          outcome=tag
+          if [ -n "$highest" ] && [ "$(git rev-parse "refs/tags/$highest^{commit}")" = "$GITHUB_SHA" ]; then
+            outcome=tagged
+            printf "%s\n\n" "The latest tag $highest already points at ${GITHUB_SHA:0:12}. Reusing it." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "outcome=$outcome" >> "$GITHUB_OUTPUT"
+
+      - name: Check that main still points at the release commit
+        id: tip
+        if: (steps.guard.outputs.outcome || env.OUTCOME) == 'tag'
+        shell: bash
+        run: |
+          errfile="$RUNNER_TEMP/tip.err"
+          code=0; out=$(git ls-remote origin refs/heads/main 2>"$errfile") || code=$?
+          if [ "$code" -ne 0 ]; then
+            echo "::error::could not read main on the remote (exit $code): $(tr '\r\n' '  ' < "$errfile")"
+            exit 1
+          fi
+          tip=$(printf '%s' "$out" | cut -f1)
+          if [ "$tip" != "$GITHUB_SHA" ]; then
+            echo "::warning::release commit abandoned: main moved from ${GITHUB_SHA:0:12} to ${tip:0:12}; no tag was created and nothing was dispatched"
+            printf "%s\n\n" "Release commit ${GITHUB_SHA:0:12} abandoned: main moved. No tag, no dispatch." >> "$GITHUB_STEP_SUMMARY"
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Read the bump label of the release pull request
+        id: label
+        if: (steps.guard.outputs.outcome || env.OUTCOME) == 'tag' && steps.tip.outputs.proceed == 'true'
+        shell: bash
+        run: |
+          if [[ ! "$PR_NUMBER" =~ ^[0-9]+$ ]]; then
+            echo "::error::unexpected pull request number: $PR_NUMBER"
+            exit 1
+          fi
+          errfile="$RUNNER_TEMP/labels.err"
+          code=0; names=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '.labels[].name' 2>"$errfile") || code=$?
+          if [ "$code" -ne 0 ]; then
+            echo "::error::could not read the labels of pull request #$PR_NUMBER (exit $code): $(tr '\r\n' '  ' < "$errfile")"
+            exit 1
+          fi
+          count=0; label=""
+          while IFS= read -r name; do
+            case "$name" in
+              bump:*)
+                count=$((count + 1))
+                label="$name"
+                ;;
+            esac
+          done <<< "$names"
+          if [ "$count" -ne 1 ]; then
+            echo "::error::pull request #$PR_NUMBER has $count bump:* labels, exactly one is required; no tag was created"
+            exit 1
+          fi
+          case "$label" in
+            bump:major|bump:minor|bump:patch)
+              ;;
+            *)
+              echo "::error::the label $label of pull request #$PR_NUMBER is not bump:major, bump:minor or bump:patch; no tag was created"
+              exit 1
+              ;;
+          esac
+          echo "label=$label" >> "$GITHUB_OUTPUT"
+
+      - name: Compute the next version
+        id: version
+        if: (steps.guard.outputs.outcome || env.OUTCOME) == 'tag' && steps.tip.outputs.proceed == 'true'
+        shell: bash
+        env:
+          LABEL: ${{ steps.label.outputs.label }}
+        run: |
+          code=0; out=$(pwsh -NoProfile -File scripts/ci/changelog.ps1 next-version -Label "$LABEL") || code=$?
+          if [ "$code" -ne 0 ]; then
+            echo "$out"
+            exit 1
+          fi
+          tag="v$out"
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::unexpected version from changelog.ps1: $(printf '%s' "$out" | tr '\r\n' '  ')"
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Create and push the annotated tag
+        id: create
+        if: (steps.guard.outputs.outcome || env.OUTCOME) == 'tag' && steps.tip.outputs.proceed == 'true'
+        shell: bash
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::unexpected tag name: $TAG"
+            exit 1
+          fi
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' tag -a "$TAG" -m "$TAG" "$GITHUB_SHA"
+          git push origin "refs/tags/$TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          printf "%s\n\n" "Tagged ${GITHUB_SHA:0:12} as $TAG." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Find the existing tag of the release commit
+        id: existing
+        if: (steps.guard.outputs.outcome || env.OUTCOME) == 'tagged'
+        shell: bash
+        run: |
+          tag=""
+          while IFS= read -r name; do
+            if [[ "$name" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then tag="$name"; fi
+          done < <(git tag --points-at "$GITHUB_SHA" | sort -V)
+          if [ -z "$tag" ]; then
+            echo "::error::no vX.Y.Z tag points at ${GITHUB_SHA:0:12}"
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch the release pull request workflow on main
+        if: steps.tip.outputs.proceed != 'false'
+        shell: bash
+        run: |
+          errfile="$RUNNER_TEMP/dispatch.err"
+          code=0; out=$(gh workflow run release-pr.yml --ref main 2>"$errfile") || code=$?
+          if [ "$code" -ne 0 ]; then
+            echo "::error::could not dispatch release-pr.yml on main (exit $code): $(printf '%s' "$out" | tr '\r\n' '  ') $(tr '\r\n' '  ' < "$errfile")"
+            exit 1
+          fi
+          printf "%s\n\n" "Dispatched release-pr.yml on main." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Dispatch the release on the tag
+        if: steps.tip.outputs.proceed != 'false'
+        shell: bash
+        env:
+          TAG: ${{ steps.create.outputs.tag || steps.existing.outputs.tag }}
+        run: |
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::unexpected tag name: $TAG"
+            exit 1
+          fi
+          errfile="$RUNNER_TEMP/release.err"
+          code=0; gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" > /dev/null 2>"$errfile" || code=$?
+          if [ "$code" -eq 0 ]; then
+            printf "%s\n\n" "A published release for $TAG exists. Release not dispatched." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if ! grep -q 'HTTP 404' "$errfile"; then
+            echo "::error::could not look up the release of $TAG (exit $code): $(tr '\r\n' '  ' < "$errfile")"
+            exit 1
+          fi
+          code=0; out=$(gh workflow run release.yml --ref "$TAG" 2>"$errfile") || code=$?
+          if [ "$code" -ne 0 ]; then
+            echo "::error::could not dispatch release.yml on $TAG (exit $code): $(printf '%s' "$out" | tr '\r\n' '  ') $(tr '\r\n' '  ' < "$errfile")"
+            exit 1
+          fi
+          printf "%s\n\n" "Dispatched release.yml on $TAG." >> "$GITHUB_STEP_SUMMARY"

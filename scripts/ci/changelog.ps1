@@ -27,6 +27,10 @@ Subcommands (first argument):
   pending-cut  [-PrReleases <file>]
             print proceed (no release commit since the last tag), waiting (the newest release commit
             is faithful and is the origin/main tip) or abandoned (it is not); abandoned also means proceed
+  release-commit  -Sha <commit> -PrReleases <file>
+            print not-release, not-faithful, tag (a faithful release commit with no tag) or tagged (the
+            highest vX.Y.Z tag is on it); a release/next (#N) commit whose pull request data is missing,
+            not merged, merged as another commit or based on another branch fails with exit 1
   pr-body   -Output <file> [-Base <40-hex>] [-RepoUrl <url>] [-PrMessages <file>] [-PrFiles <file>] [-Label bump:major|bump:minor|bump:patch] [-ChangelogPath <file>]
             write the release pull request description for the commits since the last tag
   body-version  -Body <file> -Label bump:major|bump:minor|bump:patch -Output <file>
@@ -96,6 +100,15 @@ request numbers and whose values are {"found": false} or an object with found (t
 fetchable) and headTree (string or null). A missing key, a value of another type, or a null mergeCommitSha
 with merged true fails with exit 1, as does a release-commit subject whose number has no key, when it is
 evaluated.
+release-commit looks at -Sha only. In this order, the first failing check decides: a subject that is not
+"release/next (#N)" prints not-release; no data for N, a pull request not found, not merged, merged as another
+commit or with a base other than main fails with exit 1 (a missing key included); a head ref other than
+release/next, or a head repository that is null or not the base repository, prints not-release; a commit whose
+parent or tree differs from headParents or headTree (null counts as different) prints not-faithful; otherwise
+tagged when the highest valid vX.Y.Z tag points at the commit, and tag when it does not. A fixture case with
+"command": "release-commit" takes the commit from git.sha, its subject from git.subjects and the tags on it
+from git.pointsAt (objects keyed by commit).
+
 pr-body: the description opens with "Version preview: <!-- version -->vX.Y.Z (vA.B.C + level)<!-- /version -->",
 the version being the next version for -Label, else for the level computed from the commits. A "> [!CAUTION]"
 block lists the breaking changes when there are any. Then come the release notes preview (the generated
@@ -113,9 +126,9 @@ request numbers and whose values are arrays of changed files, each a path string
 A fixture case may declare "match": "error" instead of exact output; the run must then
 exit non-zero and print at least one ::error:: line.
 A fixture case with "command": "generate", "level", "prs", "release-prs", "next-version", "pending-cut",
-"pr-body" or "body-version" runs that subcommand instead of notes and check. "params" holds base, date,
+"release-commit", "pr-body" or "body-version" runs that subcommand instead of notes and check. "params" holds base, date,
 repoUrl, prMessages, prFiles and prReleases (objects, each written to a file for the run) (generate,
-pr-body, pending-cut), level or label (next-version, pr-body, body-version); a body-version case reads
+pr-body, pending-cut, release-commit), level or label (next-version, pr-body, body-version); a body-version case reads
 body.md and expects expected-body.md, a pr-body case expects expected-body.md; "git" may carry "tip" (the
 answer for the default -Base), "allTags" (every tag name), "log" (objects with "sha" and "subject", newest
 first, the answer for the commit range), "logRange" (the range the log is for; any other range fails),
@@ -132,7 +145,7 @@ must be byte-identical. A case for level, prs, release-prs, pending-cut or next-
 carriage return (git would normalise a file with mixed endings).
 
 .PARAMETER Command
-The subcommand: notes, check, prs, release-prs, level, generate, next-version, pending-cut, pr-body, body-version or fixtures.
+The subcommand: notes, check, prs, release-prs, level, generate, next-version, pending-cut, release-commit, pr-body, body-version or fixtures.
 
 .PARAMETER Mode
 tag (the run is for a pushed tag) or dry-run (a manual run that never publishes); required by notes and check.
@@ -344,6 +357,14 @@ function Invoke-MockGit([string[]]$GitArgs) {
       return & $ok ((@($info['parents']) -join ' ') + "`t" + $info['tree'] + "`n")
     }
     return & $no 128
+  }
+  if ($a.Count -eq 4 -and $a[0] -ceq 'log' -and $a[1] -ceq '-1' -and $a[2] -ceq '--format=%s') {
+    if ($f.ContainsKey('subjects') -and $f['subjects'].ContainsKey($a[3])) { return & $ok ($f['subjects'][$a[3]] + "`n") }
+    return & $no 128
+  }
+  if ($a.Count -eq 3 -and $a[0] -ceq 'tag' -and $a[1] -ceq '--points-at') {
+    $t = @(); if ($f.ContainsKey('pointsAt') -and $f['pointsAt'].ContainsKey($a[2])) { $t = @($f['pointsAt'][$a[2]]) }
+    return & $ok (($t -join "`n") + "`n")
   }
   if ($a.Count -eq 2 -and $a[0] -ceq 'tag' -and $a[1] -ceq '--list') {
     $t = @(); if ($f.ContainsKey('allTags')) { $t = @($f['allTags']) }
@@ -782,7 +803,7 @@ function Write-Usage([string]$msg) {
   # Fixture runs would otherwise print every expected usage error to the log.
   if ($null -ne $script:Ctx.Out) { return }
   [Console]::Error.WriteLine($msg)
-  [Console]::Error.WriteLine('usage: changelog.ps1 notes|check -Mode tag|dry-run -Sha <commit> [-Output <file>] [-ChangelogPath <file>] | prs [-Base <hash>] | release-prs [-Base <hash>] | level [-Base <hash>] [-PrMessages <file>] | generate [-Base <hash>] [-Date <YYYY-MM-DD>] [-RepoUrl <url>] [-PrMessages <file>] [-Output <file>] [-SectionOutput <file>] [-ChangelogPath <file>] | next-version -Level <level> | -Label <bump:level> | pending-cut [-PrReleases <file>] | pr-body -Output <file> [-Base <hash>] [-RepoUrl <url>] [-PrMessages <file>] [-PrFiles <file>] [-Label <bump:level>] [-ChangelogPath <file>] | body-version -Body <file> -Label <bump:level> -Output <file> | fixtures -FixtureDir <dir>')
+  [Console]::Error.WriteLine('usage: changelog.ps1 notes|check -Mode tag|dry-run -Sha <commit> [-Output <file>] [-ChangelogPath <file>] | prs [-Base <hash>] | release-prs [-Base <hash>] | level [-Base <hash>] [-PrMessages <file>] | generate [-Base <hash>] [-Date <YYYY-MM-DD>] [-RepoUrl <url>] [-PrMessages <file>] [-Output <file>] [-SectionOutput <file>] [-ChangelogPath <file>] | next-version -Level <level> | -Label <bump:level> | pending-cut [-PrReleases <file>] | release-commit -Sha <commit> -PrReleases <file> | pr-body -Output <file> [-Base <hash>] [-RepoUrl <url>] [-PrMessages <file>] [-PrFiles <file>] [-Label <bump:level>] [-ChangelogPath <file>] | body-version -Body <file> -Label <bump:level> -Output <file> | fixtures -FixtureDir <dir>')
 }
 
 function Invoke-Run([string]$Command, [string]$Mode, [string]$Sha, [byte[]]$Bytes, [string]$OutPath, [string]$Display) {
@@ -885,12 +906,20 @@ function Invoke-ReleasePrsRun([string]$Base) {
     })
 }
 
+function Get-ReleaseCommitFault($entry, [string]$sha) {
+  $inconsistent = { param($r) [pscustomobject]@{ Kind = 'inconsistent'; Reason = $r } }
+  $foreign = { param($r) [pscustomobject]@{ Kind = 'foreign'; Reason = $r } }
+  if (-not $entry['found']) { return & $inconsistent 'the pull request was not found' }
+  if ($entry['merged'] -isnot [bool] -or -not $entry['merged']) { return & $inconsistent 'the pull request is not merged' }
+  if ($entry['mergeCommitSha'] -cne $sha) { return & $inconsistent 'the pull request was merged as another commit' }
+  if ($entry['baseRef'] -cne 'main') { return & $inconsistent 'the base of the pull request is not main' }
+  if ($entry['headRef'] -cne 'release/next') { return & $foreign 'the head of the pull request is not release/next' }
+  if ($null -eq $entry['headRepo'] -or $entry['headRepo'] -cne $entry['baseRepo']) { return & $foreign 'the head repository of the pull request is not this repository' }
+  return $null
+}
+
 function Test-ValidReleaseCommit($entry, [string]$sha) {
-  if (-not $entry['found']) { return $false }
-  if ($entry['merged'] -isnot [bool] -or -not $entry['merged']) { return $false }
-  if ($entry['mergeCommitSha'] -cne $sha) { return $false }
-  if ($entry['baseRef'] -cne 'main' -or $entry['headRef'] -cne 'release/next') { return $false }
-  return ($null -ne $entry['headRepo'] -and $entry['headRepo'] -ceq $entry['baseRepo'])
+  return ($null -eq (Get-ReleaseCommitFault $entry $sha))
 }
 
 function Test-FaithfulReleaseCommit($entry, [string]$sha) {
@@ -920,6 +949,26 @@ function Invoke-PendingCutRun([string]$PrReleasesPath) {
         return
       }
       Write-Line 'proceed'
+    })
+}
+
+function Invoke-ReleaseCommitRun([string]$Sha, [string]$PrReleasesPath) {
+  if ([string]::IsNullOrEmpty($Sha)) { Write-Usage '-Sha is required (GITHUB_SHA is not set)'; return 2 }
+  return (Invoke-Guarded {
+      $match = $ReReleaseSubject.Match((Get-GitOutput @('log', '-1', '--format=%s', $Sha)))
+      if (-not $match.Success) { Write-Line 'not-release'; return }
+      $number = [string]$match.Groups[1].Value
+      $releases = Read-PrReleases $PrReleasesPath
+      if (-not $releases.ContainsKey($number)) { Stop-WithError ('no pull request data for #{0}, the subject of {1}' -f $number, (Get-Prefix $Sha 12)) }
+      $entry = $releases[$number]
+      $fault = Get-ReleaseCommitFault $entry $Sha
+      if ($null -ne $fault -and $fault.Kind -ceq 'inconsistent') { Stop-WithError ('{0} is a release/next (#{1}) commit, but {2}' -f (Get-Prefix $Sha 12), $number, $fault.Reason) }
+      if ($null -ne $fault) { Write-Line 'not-release'; return }
+      if (-not (Test-FaithfulReleaseCommit $entry $Sha)) { Write-Line 'not-faithful'; return }
+      $latest = Get-LastVersion
+      $tag = 'v{0}.{1}.{2}' -f $latest[0], $latest[1], $latest[2]
+      $onCommit = Split-Words (Get-GitOutput @('tag', '--points-at', $Sha))
+      if ($onCommit -ccontains $tag) { Write-Line 'tagged' } else { Write-Line 'tag' }
     })
 }
 
@@ -1165,6 +1214,18 @@ function Test-PendingCutCase($case, $problems, [string]$tmp) {
   }
 }
 
+function Test-ReleaseCommitCase($case, $problems, [string]$tmp) {
+  $releases = $tmp + '.releases'
+  try {
+    $releasesArg = Write-CaseJson $case 'prReleases' $releases
+    $r = Invoke-Capture { Invoke-ReleaseCommitRun $case['git']['sha'] $releasesArg }
+    Test-ToolResult $r $case['expect'] $problems
+  }
+  finally {
+    if ([System.IO.File]::Exists($releases)) { [System.IO.File]::Delete($releases) }
+  }
+}
+
 function Test-BodyResult($r, $case, [string]$caseDir, [string]$tmp, [string]$again, $problems) {
   $expect = $case['expect']
   Test-ToolResult $r $expect $problems
@@ -1250,6 +1311,7 @@ function Invoke-FixtureRun([string]$Dir) {
       if ($command -ceq 'generate') { Test-GenerateCase $case $caseDir $bytes $problems $tmp }
       elseif ($command -cin @('level', 'prs', 'release-prs', 'next-version')) { Test-ToolCase $case $command $problems $tmp }
       elseif ($command -ceq 'pending-cut') { Test-PendingCutCase $case $problems $tmp }
+      elseif ($command -ceq 'release-commit') { Test-ReleaseCommitCase $case $problems $tmp }
       elseif ($command -ceq 'pr-body') { Test-PrBodyCase $case $caseDir $bytes $problems $tmp }
       elseif ($command -ceq 'body-version') { Test-BodyVersionCase $case $caseDir $problems $tmp }
       else { Test-NotesCase $case $caseDir $bytes $text $problems $tmp }
@@ -1272,7 +1334,7 @@ if ($Command -ceq 'fixtures') {
   if ([string]::IsNullOrEmpty($FixtureDir)) { Write-Usage '-FixtureDir is required for fixtures'; exit 2 }
   exit (Invoke-FixtureRun $FixtureDir)
 }
-if ($Command -cnotin @('notes', 'check', 'prs', 'release-prs', 'level', 'generate', 'next-version', 'pending-cut', 'pr-body', 'body-version')) { Write-Usage 'the first argument must be notes, check, prs, release-prs, level, generate, next-version, pending-cut, pr-body, body-version or fixtures'; exit 2 }
+if ($Command -cnotin @('notes', 'check', 'prs', 'release-prs', 'level', 'generate', 'next-version', 'pending-cut', 'release-commit', 'pr-body', 'body-version')) { Write-Usage 'the first argument must be notes, check, prs, release-prs, level, generate, next-version, pending-cut, release-commit, pr-body, body-version or fixtures'; exit 2 }
 if ($Command -cin @('pr-body', 'body-version') -and [string]::IsNullOrEmpty($Output)) { Write-Usage ('-Output is required for ' + $Command); exit 2 }
 if ($Command -ceq 'body-version') {
   if ([string]::IsNullOrEmpty($Body)) { Write-Usage '-Body is required for body-version'; exit 2 }
@@ -1293,6 +1355,7 @@ if ($Command -ceq 'notes' -or $Command -ceq 'check') {
 if ($Command -ceq 'prs') { exit (Invoke-PrsRun $Base) }
 if ($Command -ceq 'release-prs') { exit (Invoke-ReleasePrsRun $Base) }
 if ($Command -ceq 'pending-cut') { exit (Invoke-PendingCutRun $PrReleases) }
+if ($Command -ceq 'release-commit') { exit (Invoke-ReleaseCommitRun $Sha $PrReleases) }
 if ($Command -ceq 'level') { exit (Invoke-LevelRun $Base $PrMessages) }
 if ($Command -ceq 'next-version') { exit (Invoke-NextVersionRun $Level $Label) }
 
