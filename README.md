@@ -391,7 +391,7 @@ Planned, non-conditional work:
 
 ## Changelog
 
-See [`CHANGELOG.md`](CHANGELOG.md) for a dated, tag-linked history of changes.
+See [`CHANGELOG.md`](CHANGELOG.md) for a dated history of changes. Each release section is headed by the hash of the `main` commit the release was cut from, not by a version or tag.
 
 ## Support
 
