@@ -276,7 +276,6 @@ not a required check, so a red result does not block the merge.
 
 - The `name:` of `gate-x86` is `build + test (x86)`. The `name:` of `gate-x64` is `build + test (x64)`.
 - `gate-x86` has `needs: pipeline-x86` and `gate-x64` has `needs: pipeline-x64`. Both have `if: always()` and run on `ubuntu-latest`.
-- The file's comment above the gates reads: "if: always() runs the gate even when its pipeline failed or was skipped; a skipped required check counts as passing, so the gate must fail explicitly on anything but success."
 - Each gate has one step, "Require a successful pipeline", with `shell: bash`.
 - The step sets the environment variable `PIPELINE_RESULT` to `needs.pipeline-x86.result` (`gate-x86`) or `needs.pipeline-x64.result` (`gate-x64`).
 - The script of `gate-x86`:
@@ -306,7 +305,6 @@ not a required check, so a red result does not block the merge.
 ### Job `actionlint`
 
 - The job has `if: github.event_name != 'workflow_dispatch'`, so it is skipped on a dispatch. It runs on `ubuntu-latest`.
-- The file's comment above the job reads: "Never make this a required check: it is skipped on a dispatch, and a skipped required check counts as passing."
 - The job sets `ACTIONLINT_VERSION` to `1.7.12`. The archive's SHA-256 is pinned in `ACTIONLINT_SHA256`.
 - Step 1 is `actions/checkout`, pinned by SHA.
 - Step 2, "Download actionlint and verify its SHA-256", has `shell: bash` and does three things in order. After each command, a non-zero exit code is turned into the error annotation below, followed by `exit 1`.
@@ -356,7 +354,6 @@ In the messages quoted in this section, a PowerShell variable or expression (for
 #### Step "Checkout (full history)"
 
 - The step uses `actions/checkout` with `fetch-depth: 0`.
-- The file's comment above the checkout reads: "Full history: the Makefile runs git describe and git rev-list on every call."
 
 #### Step "Provision build environment"
 
@@ -434,7 +431,6 @@ In the messages quoted in this section, a PowerShell variable or expression (for
 
 ### Step "Pin VCPKG_ROOT to a CI-only path (avoid VS-bundled vcpkg collision)"
 
-- The file's comment above the step reads: "The step above just clobbered VCPKG_ROOT with VS's own bundled vcpkg. Re-pin to a CI-only, per-runner path; every later step reads VCPKG_ROOT from here."
 - It appends three lines to `$GITHUB_ENV`, each with `echo "..." >> $env:GITHUB_ENV`.
 - The first line is `VCPKG_ROOT=$env:RUNNER_TEMP\vcpkg`.
 - The second line is `VCPKG_PINNED_TAG=2026.07.29`.
@@ -442,7 +438,6 @@ In the messages quoted in this section, a PowerShell variable or expression (for
 
 ### Step "Expose runner image version for cache keying"
 
-- The file's comment above the step reads: "Runner-image env vars aren't exposed to the `env` expression context until written to GITHUB_ENV explicitly".
 - The step runs `echo "IMAGE_VERSION=$env:ImageVersion" >> $env:GITHUB_ENV`.
 
 ### Step "Ensure make is available"
@@ -452,7 +447,6 @@ In the messages quoted in this section, a PowerShell variable or expression (for
 
 ### Step "Cache vcpkg tool checkout"
 
-- The file's comment above the step reads: "Not keyed on the triplet -- vcpkg.exe isn't triplet-specific, so all jobs (build and test, both architectures) share one entry".
 - The step has the id `vcpkg-tool-cache`. It uses `actions/cache`, pinned by SHA with the label `# v6.1.0`.
 - The cache path is `${{ env.VCPKG_ROOT }}`.
 - The cache key is `vcpkg-tool-${{ env.VCPKG_PINNED_TAG }}-${{ runner.os }}-${{ env.IMAGE_VERSION }}`.
@@ -460,7 +454,6 @@ In the messages quoted in this section, a PowerShell variable or expression (for
 ### Step "Bootstrap vcpkg (full clone, pinned tool tag)"
 
 - The step runs only if `steps.vcpkg-tool-cache.outputs.cache-hit != 'true'`.
-- The file's comment above the clone reads: "Full clone, NOT --depth 1 -- manifest-mode version resolution needs full registry history".
 - It runs `git clone https://github.com/microsoft/vcpkg.git "$env:VCPKG_ROOT"`. If the exit code is not 0, it throws `git clone of vcpkg failed (exit $LASTEXITCODE)`.
 - It runs `git -C "$env:VCPKG_ROOT" checkout --quiet "$env:VCPKG_PINNED_TAG"`. If the exit code is not 0, it throws `git checkout $env:VCPKG_PINNED_TAG failed (exit $LASTEXITCODE)`.
 - It reads the checked-out commit with `git -C "$env:VCPKG_ROOT" rev-parse HEAD` and prints `vcpkg tool pinned at $env:VCPKG_PINNED_TAG ($actualCommit)`.
@@ -484,14 +477,12 @@ In the messages quoted in this section, a PowerShell variable or expression (for
 
 ### Step "Cache vcpkg install root (${{ inputs.arch }}-windows-static)"
 
-- The file's comment above the step reads: "Keyed on vcpkg.json + triplet + image version -- x86/x64 must never share an entry".
 - The step has the id `vcpkg-installed-cache`. It uses `actions/cache`, pinned by SHA with the label `# v6.1.0`.
 - The cache path is `${{ env.VCPKG_INSTALL_ROOT }}`.
 - The cache key is `vcpkg-installed-${{ inputs.arch }}-windows-static-${{ hashFiles('vcpkg.json') }}-${{ env.IMAGE_VERSION }}`.
 
 ### Step "vcpkg install (${{ inputs.arch }}-windows-static)"
 
-- The file's comment above the step reads: "Always run, even on a cache hit -- manifest-mode install is idempotent; verifies the lib dir exists rather than trusting exit code alone."
 - The step has `working-directory: ${{ github.workspace }}`.
 - It runs `& "$env:VCPKG_ROOT\vcpkg.exe" install "--triplet=$env:ARCH-windows-static" "--x-install-root=$env:VCPKG_INSTALL_ROOT"`.
 - If the exit code is not 0, it throws `vcpkg install --triplet=$env:ARCH-windows-static failed (exit $LASTEXITCODE)`.
@@ -502,9 +493,7 @@ In the messages quoted in this section, a PowerShell variable or expression (for
 
 - The source directories are `<VCPKG_INSTALL_ROOT>\<arch>-windows-static\lib`, its subdirectory `manual-link`, `<VCPKG_INSTALL_ROOT>\<arch>-windows-static\include\gtest` and `<VCPKG_INSTALL_ROOT>\<arch>-windows-static\include\curl`.
 - The destination directories are `lib\<arch>`, `lib\gtest\<arch>`, `include\vendor\gtest` and `include\vendor\curl`. The script creates them with `New-Item -ItemType Directory -Force`.
-- The file's comment above the first loop reads: "Product-linked -- must match the Makefile's LIBS variable exactly."
 - The loop covers `libcurl.lib` and `zs.lib`. It copies each file from the source `lib` directory to `lib\<arch>` with `-Force`. If a file is missing, it throws `Expected product lib not found: $src`.
-- The file's comment above the gtest copy reads: "Test-only -- gtest_main.lib is relocated to manual-link/ by the vcpkg gtest port's own patch."
 - `gtest.lib` comes from the source `lib` directory and `gtest_main.lib` from `manual-link`. Both are copied to `lib\gtest\<arch>`.
 - If a file is missing, the step throws `Expected gtest.lib not found: $gtestLibSrc` or `Expected gtest_main.lib not found: $gtestMainLibSrc`.
 - The step copies the content of the gtest header directory recursively to `include\vendor\gtest`. If the directory is missing, it throws `Expected gtest header directory not found: $srcGtestInclude`.
