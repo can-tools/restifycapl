@@ -142,7 +142,7 @@ Five branch prefixes are working branches: `feat/`, `stage/`, `chore/`, `fix/` a
 
 - The only event is `push`, for the branches `feat/**`, `stage/**`, `chore/**`, `fix/**` and `docs/**`. There is no path filter, no tag filter and no other event.
 - The workflow has no concurrency group.
-- The workflow has `contents: read` and `pull-requests: write`. Its one job, `open draft PR`, runs on `ubuntu-latest` with `GH_TOKEN` set to `secrets.GITHUB_TOKEN`. The file's header comment says that the workflow requires the repository setting "Allow GitHub Actions to create and approve pull requests" to be on.
+- The workflow has `contents: read` and `pull-requests: write`. Its one job, `open draft PR`, runs on `ubuntu-latest` with `GH_TOKEN` set to `secrets.GITHUB_TOKEN`.
 - The job also sets `GH_REPO` to `github.repository` and `BRANCH` to `github.ref_name`.
 - The job has four steps, in this order: "Guard 1: branch ahead of main?", "Guard 2: PR already open for this branch?", "Compose PR body" and "Create draft PR".
 
