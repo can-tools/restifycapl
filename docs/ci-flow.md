@@ -407,3 +407,117 @@ In the messages quoted in this section, a PowerShell variable or expression (for
 - "Provision build environment" uses `./.github/actions/provision` with the input `arch: ${{ inputs.arch }}`, like the same step in `build`.
 - "make test (ARCH=${{ inputs.arch }})" runs with `shell: pwsh` and sets `ARCH` to `inputs.arch`. It runs `make test "ARCH=$env:ARCH"`. If the exit code is not 0, it throws `make test ARCH=$env:ARCH failed (exit $LASTEXITCODE)`.
 - The job does not use `release-version`; it runs the same way for a development and a release call.
+
+## Composite action `provision`
+
+### Header
+
+- The action is in `.github/actions/provision/action.yml`. Its `name:` is `Provision build environment`.
+- Its `description:` reads: "Activates MSVC, provisions the pinned vcpkg tool and the static dependencies, and places them where the Makefile expects them."
+- It has one input, `arch`. The input is required and has no default. Its description reads: "Target architecture, x86 or x64."
+- `runs.using` is `composite`.
+- The action has twelve steps, in this order: "Validate arch input", "Activate MSVC developer environment (${{ inputs.arch }})", "Pin VCPKG_ROOT to a CI-only path (avoid VS-bundled vcpkg collision)", "Expose runner image version for cache keying", "Ensure make is available", "Cache vcpkg tool checkout", "Bootstrap vcpkg (full clone, pinned tool tag)", "Verify vcpkg tool pin matches vcpkg.json's builtin-baseline", "Cache vcpkg install root (${{ inputs.arch }}-windows-static)", "vcpkg install (${{ inputs.arch }}-windows-static)", "Place libs where the Makefile expects them" and "Verify /MT provenance (dumpbin /directives)".
+- The jobs `build` and `test` of `arch-pipeline.yml` use the action, each with `arch: ${{ inputs.arch }}`.
+- The first step throws `arch must be x86 or x64, got '$env:ARCH'` unless `arch` is exactly `x86` or `x64` (case-sensitive).
+- The steps "Ensure make is available", "Bootstrap vcpkg (full clone, pinned tool tag)", "Verify vcpkg tool pin matches vcpkg.json's builtin-baseline", "vcpkg install (${{ inputs.arch }}-windows-static)", "Place libs where the Makefile expects them" and "Verify /MT provenance (dumpbin /directives)" set `$ErrorActionPreference = 'Stop'`.
+- The steps "Validate arch input", "Pin VCPKG_ROOT to a CI-only path (avoid VS-bundled vcpkg collision)", "vcpkg install (${{ inputs.arch }}-windows-static)", "Place libs where the Makefile expects them" and "Verify /MT provenance (dumpbin /directives)" set `ARCH` to `inputs.arch`.
+- In the messages quoted in this section, a PowerShell variable or expression (for example `$env:ARCH`, `$lib` or `$LASTEXITCODE`) stands for its value at run time.
+
+### Step "Validate arch input"
+
+- It runs `if ($env:ARCH -cne 'x86' -and $env:ARCH -cne 'x64') { throw "arch must be x86 or x64, got '$env:ARCH'" }`.
+
+### Step "Activate MSVC developer environment (${{ inputs.arch }})"
+
+- The step uses `ilammy/msvc-dev-cmd`, pinned by SHA with the label `# v1.13.0`.
+- It passes `arch: ${{ inputs.arch }}`.
+
+### Step "Pin VCPKG_ROOT to a CI-only path (avoid VS-bundled vcpkg collision)"
+
+- The file's comment above the step reads: "The step above just clobbered VCPKG_ROOT with VS's own bundled vcpkg. Re-pin to a CI-only, per-runner path; every later step reads VCPKG_ROOT from here."
+- It appends three lines to `$GITHUB_ENV`, each with `echo "..." >> $env:GITHUB_ENV`.
+- The first line is `VCPKG_ROOT=$env:RUNNER_TEMP\vcpkg`.
+- The second line is `VCPKG_PINNED_TAG=2026.07.29`.
+- The third line is `VCPKG_INSTALL_ROOT=${{ github.workspace }}\vcpkg_installed-$env:ARCH`.
+
+### Step "Expose runner image version for cache keying"
+
+- The file's comment above the step reads: "Runner-image env vars aren't exposed to the `env` expression context until written to GITHUB_ENV explicitly".
+- The step runs `echo "IMAGE_VERSION=$env:ImageVersion" >> $env:GITHUB_ENV`.
+
+### Step "Ensure make is available"
+
+- It runs `choco install make -y --no-progress` only if `Get-Command make -ErrorAction SilentlyContinue` finds no `make`.
+- It then always runs `make --version`.
+
+### Step "Cache vcpkg tool checkout"
+
+- The file's comment above the step reads: "Not keyed on the triplet -- vcpkg.exe isn't triplet-specific, so all jobs (build and test, both architectures) share one entry".
+- The step has the id `vcpkg-tool-cache`. It uses `actions/cache`, pinned by SHA with the label `# v6.1.0`.
+- The cache path is `${{ env.VCPKG_ROOT }}`.
+- The cache key is `vcpkg-tool-${{ env.VCPKG_PINNED_TAG }}-${{ runner.os }}-${{ env.IMAGE_VERSION }}`.
+
+### Step "Bootstrap vcpkg (full clone, pinned tool tag)"
+
+- The step runs only if `steps.vcpkg-tool-cache.outputs.cache-hit != 'true'`.
+- The file's comment above the clone reads: "Full clone, NOT --depth 1 -- manifest-mode version resolution needs full registry history".
+- It runs `git clone https://github.com/microsoft/vcpkg.git "$env:VCPKG_ROOT"`. If the exit code is not 0, it throws `git clone of vcpkg failed (exit $LASTEXITCODE)`.
+- It runs `git -C "$env:VCPKG_ROOT" checkout --quiet "$env:VCPKG_PINNED_TAG"`. If the exit code is not 0, it throws `git checkout $env:VCPKG_PINNED_TAG failed (exit $LASTEXITCODE)`.
+- It reads the checked-out commit with `git -C "$env:VCPKG_ROOT" rev-parse HEAD` and prints `vcpkg tool pinned at $env:VCPKG_PINNED_TAG ($actualCommit)`.
+- It runs `& "$env:VCPKG_ROOT\bootstrap-vcpkg.bat" -disableMetrics`. If the exit code is not 0, it throws `bootstrap-vcpkg.bat failed (exit $LASTEXITCODE)`.
+- If `$env:VCPKG_ROOT\vcpkg.exe` does not exist, it throws `bootstrap-vcpkg.bat ran but vcpkg.exe still not found under $env:VCPKG_ROOT`.
+
+### Step "Verify vcpkg tool pin matches vcpkg.json's builtin-baseline"
+
+- The step has no `if:`, so it also runs on a cache hit.
+- The step reads `builtin-baseline` from `vcpkg.json` and compares it with the commit checked out in `VCPKG_ROOT`.
+- If they differ, the step throws a four-line message. Lines 1, 2 and 4 read:
+
+  ```
+  vcpkg.json's builtin-baseline ($baseline) does not match the pinned vcpkg TOOL's checked-out commit ($toolCommit, from VCPKG_PINNED_TAG=$env:VCPKG_PINNED_TAG).
+  These are two independent pins (WHICH port versions resolve vs. WHICH vcpkg.exe resolves them) that must name the same commit -- otherwise version resolution reads baseline versions from one commit but checks them against a version database pinned at a different (often older) commit, producing 'no version database entry' errors.
+  Fix by re-deriving the commit VCPKG_PINNED_TAG dereferences to (git ls-remote --tags https://github.com/microsoft/vcpkg.git <tag>) and setting vcpkg.json's builtin-baseline to that exact commit.
+  ```
+
+- Line 3 points to a section of a project document.
+- If they are equal, the step prints `vcpkg tool pin ($toolCommit) matches vcpkg.json's builtin-baseline.`
+
+### Step "Cache vcpkg install root (${{ inputs.arch }}-windows-static)"
+
+- The file's comment above the step reads: "Keyed on vcpkg.json + triplet + image version -- x86/x64 must never share an entry".
+- The step has the id `vcpkg-installed-cache`. It uses `actions/cache`, pinned by SHA with the label `# v6.1.0`.
+- The cache path is `${{ env.VCPKG_INSTALL_ROOT }}`.
+- The cache key is `vcpkg-installed-${{ inputs.arch }}-windows-static-${{ hashFiles('vcpkg.json') }}-${{ env.IMAGE_VERSION }}`.
+
+### Step "vcpkg install (${{ inputs.arch }}-windows-static)"
+
+- The file's comment above the step reads: "Always run, even on a cache hit -- manifest-mode install is idempotent; verifies the lib dir exists rather than trusting exit code alone."
+- The step has `working-directory: ${{ github.workspace }}`.
+- It runs `& "$env:VCPKG_ROOT\vcpkg.exe" install "--triplet=$env:ARCH-windows-static" "--x-install-root=$env:VCPKG_INSTALL_ROOT"`.
+- If the exit code is not 0, it throws `vcpkg install --triplet=$env:ARCH-windows-static failed (exit $LASTEXITCODE)`.
+- It then checks that the directory `<VCPKG_INSTALL_ROOT>\<arch>-windows-static\lib` exists.
+- If the directory does not exist, it throws `vcpkg install exited 0 but expected lib directory not found: $tripletLibDir -- do not trust exit code alone (see scripts/setup-dev-env.ps1's Install-ManifestTriplet).`
+
+### Step "Place libs where the Makefile expects them"
+
+- The source directories are `<VCPKG_INSTALL_ROOT>\<arch>-windows-static\lib`, its subdirectory `manual-link`, `<VCPKG_INSTALL_ROOT>\<arch>-windows-static\include\gtest` and `<VCPKG_INSTALL_ROOT>\<arch>-windows-static\include\curl`.
+- The destination directories are `lib\<arch>`, `lib\gtest\<arch>`, `include\vendor\gtest` and `include\vendor\curl`. The script creates them with `New-Item -ItemType Directory -Force`.
+- The file's comment above the first loop reads: "Product-linked -- must match the Makefile's LIBS variable exactly."
+- The loop covers `libcurl.lib` and `zs.lib`. It copies each file from the source `lib` directory to `lib\<arch>` with `-Force`. If a file is missing, it throws `Expected product lib not found: $src`.
+- The file's comment above the gtest copy reads: "Test-only -- gtest_main.lib is relocated to manual-link/ by the vcpkg gtest port's own patch."
+- `gtest.lib` comes from the source `lib` directory and `gtest_main.lib` from `manual-link`. Both are copied to `lib\gtest\<arch>`.
+- If a file is missing, the step throws `Expected gtest.lib not found: $gtestLibSrc` or `Expected gtest_main.lib not found: $gtestMainLibSrc`.
+- The step copies the content of the gtest header directory recursively to `include\vendor\gtest`. If the directory is missing, it throws `Expected gtest header directory not found: $srcGtestInclude`.
+- The step copies the content of the curl header directory recursively to `include\vendor\curl`. If the directory is missing, it throws `Expected curl header directory not found: $srcCurlInclude`.
+- It prints `Placed: $libDest\libcurl.lib, $libDest\zs.lib, $gtestLibDest\gtest.lib, $gtestLibDest\gtest_main.lib, headers under $gtestIncludeDest and $curlIncludeDest`.
+
+### Step "Verify /MT provenance (dumpbin /directives)"
+
+- It checks four files: `lib\<arch>\libcurl.lib`, `lib\<arch>\zs.lib`, `lib\gtest\<arch>\gtest.lib` and `lib\gtest\<arch>\gtest_main.lib`.
+- For each file it runs `dumpbin /nologo /directives "$lib"` and joins the output lines with a line break.
+- A file passes the first check when the output matches `/DEFAULTLIB:LIBCMT` and does not match `/DEFAULTLIB:LIBCMTD`.
+- If the first check fails, the step prints `::error::$lib does not declare /DEFAULTLIB:LIBCMT (release static CRT) -- expected for /MT. A lib declaring only /DEFAULTLIB:LIBCMTD (debug static CRT) also fails this check.` and records the failure.
+- Independently of the first check, if the output matches `/DEFAULTLIB:MSVCRT`, the step prints `::error::$lib declares /DEFAULTLIB:MSVCRT -- built with /MD, not /MT. Never mix /MT and /MD in one link (see msvc-build-conventions).` and records the failure.
+- The loop goes through all four files before the step fails.
+- If a failure was recorded, the step throws `/MT provenance check failed for one or more provisioned libs.`
+- Otherwise it prints `All provisioned libs confirmed /DEFAULTLIB:LIBCMT, no MSVCRT.`
