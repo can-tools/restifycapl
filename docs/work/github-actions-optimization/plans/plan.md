@@ -184,6 +184,13 @@ Stages 0–5, 5a, 6a, 6b, 6c and 6c-fix are done and merged on `main`; their tex
 - Rollback: re-run (R17); a defect is handled per R18.
 - Approval: checkpoint before merging the release PR.
 
+### Stage 7a — draft listing delay in `release.yml`
+- Description: observed in stage 7 (v0.1.1): "Verify the draft" in job `publish` ran about 1 s after the draft was created and did not find it in the releases list; "Re-run failed jobs" published it. The step re-reads the list up to 10 times, 3 s apart, only while it finds no draft, and on failure prints the count and each listed draft's `id`, `tag_name` and `name`. "Delete a leftover draft" and "Make the release public" do not change; a retry there is added only once a failure there is observed. Takes effect from the next tag on, because `release.yml` runs from the tag ref. On a `chore/` branch; level none.
+- Files: `.github/workflows/release.yml`, `docs/release-process.md`.
+- Owners: `build-pipeline-engineer` → `code-reviewer`.
+- Verification: `actionlint` clean; `gate-x86` and `gate-x64` green; a `Release` dry run on the branch publishes nothing (`publish` is skipped for a branch ref, so the loop first runs at the next release); the next release publishes without a re-run, and its log shows how many attempts the step needed.
+- Approval: checkpoint before merge (release path).
+
 ## 5. Risks
 - Required checks from a dispatch on the bot's branch: confirmed on an ordinary branch; on the release PR only once the first release PR exists (after stage 6e). If not accepted, the PR cannot be merged (safe).
 - A skipped required check counts as passed: `actionlint` is never required; `bump label` decides by exit code, never by `if:`.
