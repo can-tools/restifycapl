@@ -117,7 +117,7 @@ Five branch prefixes are working branches: `feat/`, `stage/`, `chore/`, `fix/` a
 - The level comes from the branch prefix, not from the commit types. A `feat/`, `stage/` or `fix/` pull request that has only `chore:` commits still releases. It is listed by its branch name, with a warning.
 - The bot computes the level with `changelog.ps1 level`. If it is major, minor or patch, the job rebuilds `release/next` and opens or updates the release pull request. If it is none, the job closes every open release pull request with a comment and deletes `release/next` if the branch exists.
 - The bot labels the release pull request `bump:<level>`. A person can change the label, but the next rebuild that is not skipped puts the computed label back and comments. The `bump label` check and the tagging require exactly one `bump:*` label; the tagging also requires it to be `bump:major`, `bump:minor` or `bump:patch`.
-- A change of type `unknown` raises no level of its own. The generator lists it under Development and gives a warning.
+- A change of type `unknown` raises no level of its own. The generator gives a warning for it and, unless it has a breaking marker, lists it under Development.
 
 ### Reserved branch `release/next`
 
@@ -132,7 +132,7 @@ Five branch prefixes are working branches: `feat/`, `stage/`, `chore/`, `fix/` a
 - The marker is read from the commit messages of the pull request named by ` (#N)` in the squash subject. A subject without ` (#N)` is not read, and the generator gives a warning.
 - A breaking change gives minor while the major version of the last tag is 0, and major from 1.0.0.
 - While the major version of the last tag is 0, the level is never major; version 1.0.0 is reached only with the `bump:major` label.
-- A breaking change is listed under "Breaking changes" in the release notes. A `chore/`, `docs/` or `unknown` pull request with a breaking marker is not listed twice under Development.
+- A breaking change is listed under "Breaking changes" in the release notes. A `chore/`, `docs/` or `unknown` pull request with a breaking marker is listed only under "Breaking changes", not under Development.
 
 ## Auto PR (`auto-pr.yml`)
 
