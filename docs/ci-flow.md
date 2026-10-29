@@ -567,3 +567,93 @@ In the messages quoted in this section, a PowerShell variable or expression (for
 - If `FIXTURES_OUTCOME` is not `success`, the line is preceded by `The export-table fixture run did not succeed; see the "Run export-table fixtures" step.` and a blank line.
 - If `export-table.md` exists, its content follows.
 - The text is appended to `$env:GITHUB_STEP_SUMMARY` as UTF-8 without BOM.
+
+## Bump label (`bump-label.yml`)
+
+### Permissions
+
+- The workflow has `contents: read` and `pull-requests: read`.
+
+### Job
+
+- The job has the id `bump-label` and the `name:` `bump label`. It runs on `ubuntu-latest`.
+- The job sets these environment variables:
+  - `GH_TOKEN` is `secrets.GITHUB_TOKEN`.
+  - `GH_REPO` is `github.repository`.
+  - `REPO_OWNER` is `github.repository_owner`.
+  - `HEAD_REF` is `github.head_ref || github.ref_name`.
+  - `PR_NUMBER` is `github.event.pull_request.number`.
+- On a dispatch, `HEAD_REF` is the dispatched ref (`release/next` when the bot dispatches it) and `PR_NUMBER` is empty, so the step looks the number up (`github.head_ref` and `github.event.pull_request` are set only for pull request events).
+- In the messages quoted in this section, a shell variable (for example `$HEAD_REF` or `${number}`) stands for its value at run time.
+
+### Step "Require exactly one bump label on release/next"
+
+The step runs with `shell: bash`. It runs these parts in order.
+
+#### Other head branches
+
+- The step stores the path `$RUNNER_TEMP/bump-label.err` in `errfile`. The two `gh api` calls write their standard error to this file.
+- If `HEAD_REF` is not `release/next` (exact comparison), the step prints the message below and ends with exit code 0.
+
+  ```
+  Head branch '$HEAD_REF' is not release/next: no bump label required.
+  ```
+
+#### The pull request number
+
+- The step takes the number from `PR_NUMBER`.
+- If `PR_NUMBER` is not empty and does not match `^[0-9]+$`, the step prints the message below and ends with exit code 1.
+
+  ```
+  ::error::unexpected pull request number: $number
+  ```
+
+- If `PR_NUMBER` is empty, the step looks the number up. It runs `gh api "repos/${GH_REPO}/pulls?state=open&head=${REPO_OWNER}:${HEAD_REF}" --jq '.[].number'`.
+- If the command fails, the step prints the message below and ends with exit code 1. In the log, `$(tr '\r\n' '  ' < "$errfile")` is replaced by the content of `errfile` with each carriage return and line feed turned into a space. `$code` is the exit code of the command.
+
+  ```
+  ::error::could not list the pull requests of release/next (exit $code): $(tr '\r\n' '  ' < "$errfile")
+  ```
+
+- If the command prints nothing, the step prints the message below and ends with exit code 1.
+
+  ```
+  ::error::release/next has no open pull request, so its bump label cannot be checked
+  ```
+
+- If the output has more than one line, the step prints the message below and ends with exit code 1.
+
+  ```
+  ::error::release/next has more than one open pull request
+  ```
+
+- If the output contains a character that is not a digit, the step prints the message below and ends with exit code 1.
+
+  ```
+  ::error::unexpected output from the pull request lookup: $number
+  ```
+
+#### The labels
+
+- The step reads the labels of the pull request with `gh api repos/<repo>/pulls/<N>`, where `<repo>` is `GH_REPO` and `<N>` is the number. It lists the names with `--jq '.labels[].name'`.
+- If the command fails, the step prints the message below and ends with exit code 1. The end of the message is the content of `errfile`, as above.
+
+  ```
+  ::error::could not read the labels of pull request #${number} (exit $code): $(tr '\r\n' '  ' < "$errfile")
+  ```
+
+- The step reads the names line by line. Every label whose name starts with `bump:` counts. For each one, the step adds 1 to `count` and appends a space and the name to `selected`.
+
+#### The result
+
+- If `count` is not 1, the step prints the message below and ends with exit code 1. With no matching label, the message ends with `found 0:`.
+
+  ```
+  ::error::pull request #${number} from release/next must carry exactly one bump:* label, found ${count}:${selected}
+  ```
+
+- If `count` is 1, the step prints the message below and ends with exit code 0.
+
+  ```
+  Pull request #${number} carries exactly one bump label:${selected}
+  ```
