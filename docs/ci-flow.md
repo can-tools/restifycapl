@@ -326,7 +326,7 @@ not a required check, so a red result does not block the merge.
 ### Inputs
 
 - `arch` has the type `string` and is required. It has no default. Its description reads: "Target architecture, x86 or x64."
-- The file does not check `arch`; the value is used in the make targets, the DLL path and the artifact name.
+- `arch-pipeline.yml` does not check `arch`; the value is used in the make targets, the DLL path and the artifact name.
 - `release-version` has the type `string` and is optional, with default `''`. Its description reads: "X.Y.Z to build and verify as a release; empty for a development build."
 
 ### Permissions
