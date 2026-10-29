@@ -198,9 +198,29 @@ than one `### Development` block, or an empty section after removing it, fails.
   is not a commit matches no first parent, so it fails the same way ("found
   0"). The tag is burned: the fix goes through an ordinary pull request, and
   the release bot releases the next version.
+- **Draft not yet listed:** right after it is created, a draft can be missing
+  from the releases list for a few seconds. "Verify the draft" reads the
+  list up to 10 times, 3 s apart, while it finds no draft; two or more drafts,
+  wrong assets or a checksum mismatch fail at once. If it still finds none, the
+  run ends red and prints the listed drafts; nothing is public, and "Re-run
+  failed jobs" repairs it: the leftover draft is deleted and a new one is
+  created.
 
 Attestations created for builds that are never published are harmless and
 stay.
+
+## Draft missing from the releases list right after creation (found during github-actions-optimization Stage 7)
+
+At v0.1.1, "Verify the draft" ran about 1 s after `gh release create --draft`
+and did not find the draft in the releases list; the same code found it on
+"Re-run failed jobs" minutes later. Whether the draft was missing from the list
+or listed with another `tag_name` was not logged. The GitHub REST documentation
+does not describe this delay; other projects report the same symptom and use
+waits of 10–30 s. The step therefore retries only an empty result, for about
+30 s, and prints the listed drafts when it gives up. Verifying by release id
+was not adopted: `gh release create --draft` prints only an `untagged-…` URL,
+not the id; the cleanup and verify steps find drafts by listing releases, and
+the publish step finds the draft by its tag.
 
 ## Verifying a download
 
