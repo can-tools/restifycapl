@@ -105,7 +105,7 @@ Pre-built binary releases are published on [GitHub Releases](https://github.com/
 - `restifycapl-x86.dll` — 32-bit DLL for 32-bit CANoe installations.
 - `SHA256SUMS` — SHA-256 checksums for both DLLs.
 
-Asset file names do not carry a version string (`restifycapl-x64.dll`, not `restifycapl-v0.1.0-x64.dll`) because CANoe scripts and the CAPL framework master include (`capl/includes/includes.cin`) load the DLL by its static file name. To check the version of a downloaded DLL, inspect its file properties in Windows Explorer, verify its build attestation, or call `restifyReadVersion` from CAPL.
+Asset file names carry no version (always `restifycapl-x64.dll` and `restifycapl-x86.dll`) because CANoe scripts and the CAPL framework master include (`capl/includes/includes.cin`) load the DLL by its static file name. To check the version of a downloaded DLL, inspect its file properties in Windows Explorer, verify its build attestation, or call `restifyReadVersion` from CAPL.
 
 ### Verifying the download
 
@@ -386,7 +386,7 @@ See [`CLAUDE.md`](CLAUDE.md) for the full directory layout and project conventio
 
 Planned, non-conditional work:
 
-- Repository cleanup, test coverage audit, and consistency pass across documentation and export contracts (Stage 15).
+- Repository cleanup, test coverage audit, and consistency pass across documentation and export contracts.
 - Runtime verification in a live CANoe measurement session against test HTTP endpoints.
 
 ## Changelog
