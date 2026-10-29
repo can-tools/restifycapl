@@ -4,9 +4,7 @@
 
 name: CI
 
-# Branch filter avoids racing the release workflow's (release.yml) tag push -- see
-# docs/ci-pipeline.md. Keep in sync with auto-pr.yml's branch filter and
-# the stage-branch skill's naming convention.
+# Keep in sync with auto-pr.yml's branch filter and the stage-branch skill's naming convention.
 on:
   push:
     branches: [main, "feat/**", "stage/**", "chore/**", "fix/**", "docs/**"]
