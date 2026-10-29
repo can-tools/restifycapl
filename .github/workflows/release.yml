@@ -410,10 +410,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          draft=$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases" \
-            | jq -c --arg tag "$TAG" '[.[][] | select(.draft and .tag_name == $tag)]')
-          if [ "$(echo "$draft" | jq 'length')" -ne 1 ]; then
-            echo "::error::expected exactly one draft for $TAG"
+          # A just-created draft can be missing from the releases list for a few seconds.
+          for attempt in $(seq 1 10); do
+            all=$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases")
+            draft=$(echo "$all" | jq -c --arg tag "$TAG" '[.[][] | select(.draft and .tag_name == $tag)]')
+            count=$(echo "$draft" | jq 'length')
+            [ "$count" -eq 0 ] || break
+            if [ "$attempt" -lt 10 ]; then echo "no draft for $TAG listed yet (attempt $attempt of 10)"; sleep 3; fi
+          done
+          if [ "$count" -ne 1 ]; then
+            echo "::error::expected exactly one draft for $TAG, found $count; listed drafts: $(echo "$all" | jq -c '[.[][] | select(.draft) | {id, tag_name, name}]')"
             exit 1
           fi
 
