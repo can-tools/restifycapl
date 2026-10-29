@@ -133,3 +133,121 @@ Five branch prefixes are working branches: `feat/`, `stage/`, `chore/`, `fix/` a
 - A breaking change gives minor while the major version of the last tag is 0, and major from 1.0.0.
 - While the major version of the last tag is 0, the level is never major; version 1.0.0 is reached only with the `bump:major` label.
 - A breaking change is listed under "Breaking changes" in the release notes. A `chore/`, `docs/` or `unknown` pull request with a breaking marker is not listed twice under Development.
+
+## Auto PR (`auto-pr.yml`)
+
+`auto-pr.yml` has the `name:` Auto PR. It opens a draft pull request for a pushed working branch when the branch is ahead of `main` and has no open pull request.
+
+### Trigger and permissions
+
+- The only event is `push`, for the branches `feat/**`, `stage/**`, `chore/**`, `fix/**` and `docs/**`. There is no path filter, no tag filter and no other event.
+- The workflow has no concurrency group.
+- The workflow has `contents: read` and `pull-requests: write`. Its one job, `open draft PR`, runs on `ubuntu-latest` with `GH_TOKEN` set to `secrets.GITHUB_TOKEN`. The file's header comment says that the workflow requires the repository setting "Allow GitHub Actions to create and approve pull requests" to be on.
+- The job also sets `GH_REPO` to `github.repository` and `BRANCH` to `github.ref_name`.
+- The job has four steps, in this order: "Guard 1: branch ahead of main?", "Guard 2: PR already open for this branch?", "Compose PR body" and "Create draft PR".
+
+### Step "Guard 1: branch ahead of main?"
+
+- The step has the id `ahead` and no `if:`.
+- It calls `gh api "repos/${GH_REPO}/compare/main...${BRANCH}"` and writes the whole response to `$RUNNER_TEMP/compare.json`. "Compose PR body" reads this file instead of calling the API again.
+- It reads `.ahead_by` from the file and prints "Branch '<branch>' is ahead of main by N commit(s)."
+- If `ahead_by` is 0, it prints "No commits ahead of main -- nothing to open a PR for. Exiting." and writes `proceed=false` to `$GITHUB_OUTPUT`. Otherwise it writes `proceed=true`. In both cases the step succeeds.
+- The file gives the reason for the guard: `gh pr create` fails with "No commits between main and <branch>" on a branch that was just cut, so the workflow skips the creation instead.
+- The script runs with `set -euo pipefail`. If the API call or `jq` fails, the step fails, the later steps are skipped and no pull request is created.
+
+### Step "Guard 2: PR already open for this branch?"
+
+- The step has the id `existing` and runs only if `steps.ahead.outputs.proceed == 'true'`.
+- It runs `gh pr list --head "${BRANCH}" --state open --json number --jq '.[0].number // empty'`. Only an open pull request with this head branch counts.
+- If a number is returned, it prints "Open PR #N already exists for '<branch>' -- nothing to do. Exiting." and writes `proceed=false`. Otherwise it prints "No open PR found for '<branch>' -- will create one." and writes `proceed=true`. In both cases the step succeeds.
+- The file says why the guard exists: the workflow runs on every push, and only the first push that carries a commit should create a pull request.
+
+### Step "Compose PR body"
+
+- The step runs only if `steps.ahead.outputs.proceed == 'true' && steps.existing.outputs.proceed == 'true'`. It writes `$RUNNER_TEMP/pr-body.md` and has no output.
+- Its inputs are `compare.json` and the `BRANCH` variable.
+- The body is composed once, when the pull request is created; later pushes do not change it.
+- If the step fails, "Create draft PR" is skipped.
+
+#### What the step reads from the compare file
+
+| Value | Rule |
+|---|---|
+| `plan_only` | True when the compare lists at least one file and every file name matches `^docs/work/[^/]+/plans/.*\.md$`. False when the list of files is empty. |
+| `exports_touched` | True when one of the files is `src/module/exports.cpp`. |
+| Commit subjects | The first line of the message of each commit in the compare, one per line, in `$RUNNER_TEMP/subjects.txt`. |
+
+#### The TODO line
+
+The last line of the checklist depends on the branch prefix. `--` is two ASCII hyphens.
+
+| Branch | TODO line |
+|---|---|
+| `stage/<N>-...`, where `<N>` is digits or two groups of digits joined by `-` | `Stage <N> -- TODO: task IDs (e.g. CPP/TEST/REV/HUM)` |
+| Any other `stage/` branch, for example `stage/7a-x` | `Stage stage/7a-x -- TODO: task IDs (e.g. CPP/TEST/REV/HUM)`: the whole branch name, with `stage/`, takes the place of `<N>` |
+| `chore/<id>-...`, where `<id>` is lower-case letters, `-` and digits, optionally followed by more `-<digits>` groups, for example `chore/rev-12-...` | `<ID> -- TODO: any additional REV/HUM IDs`, with `<ID>` in upper case |
+| Any other `chore/` branch, for example `chore/ci-verify-draft-retry` | `TODO: stage and task IDs` |
+| `feat/`, `fix/` and `docs/` | `TODO: stage and task IDs` |
+
+#### The body
+
+The body is built in this order.
+
+1. The heading `## Merge checklist` and a blank line.
+2. The plan-only paragraph, only if `plan_only` is true.
+3. The first block of three items, always.
+4. The CANoe item, only if `exports_touched` is true.
+5. The second block of three items, always.
+6. A blank line and the TODO line, always.
+7. A separator and the exports.cpp warning, only if `exports_touched` is true.
+8. A separator, the heading `### Commits on this branch` and one `- <subject>` line per commit, only if the list of subjects is not empty. The subjects are written with `printf -- '- %s\n'`.
+
+The text that the file writes for the plan-only paragraph (item 2):
+
+```
+Plan-only branch: the `code-reviewer` and human-gate items below do not
+apply. CI green and up-to-date-with-`main` still apply.
+```
+
+The text that the file writes for the first block (item 3):
+
+```
+- [ ] CI green on both legs (`build + test (x86)`, `build + test (x64)`)
+- [ ] `code-reviewer` clean on this branch (`git diff main...HEAD`), zero Must-fix
+- [ ] Human gate passed against the PR CI artifact, if this branch has one
+```
+
+The text that the file writes for the CANoe item (item 4):
+
+```
+- [ ] CANoe check: the CAPL nodes in capl/ compile in CANoe against the DLL from this PR's CI artifact (author before Ready for review, or reviewer before approval)
+```
+
+The text that the file writes for the second block (item 5):
+
+```
+- [ ] Commit messages follow the Conventional Commits skill
+- [ ] Branch up to date with `main`
+- [ ] Plan folded into `plan.md`, incl. any task-ID/section renumbering (last commit before marking Ready for review)
+```
+
+The text that the file writes for the exports.cpp warning (item 7), after a blank line, a line `---` and a blank line:
+
+```
+⚠️ This branch touches `src/module/exports.cpp`. Never have two open PRs that
+both touch this file. Also confirm the `export-table` check is green: it is
+not a required check, so a red result does not block the merge.
+```
+
+### Step "Create draft PR"
+
+- The step runs under the same condition as "Compose PR body": both guards answered `true`.
+- It runs `gh pr create --draft --base main --head "${BRANCH}" --title "${BRANCH}" --body-file "$RUNNER_TEMP/pr-body.md"`. The pull request is a draft, its base is `main`, its head is the pushed branch, its title is the branch name and its body is the composed file.
+- The step has no `|| true`. If the creation fails, the step and the job fail, and no pull request exists.
+
+### Later pushes and failures
+
+- Second push to a branch whose pull request is open: Guard 1 passes, Guard 2 finds the open pull request and answers `false`, and "Compose PR body" and "Create draft PR" are skipped. The title, the body and the draft state stay as they are.
+- If the branch's pull request was closed, the next push to the branch opens a new one, provided the branch is still ahead of `main`.
+- If the creation fails, no pull request exists, and the next push to the branch tries again with a newly composed body.
+- The workflow does not change the title, the body or the draft state.
