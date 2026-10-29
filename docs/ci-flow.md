@@ -259,7 +259,7 @@ not a required check, so a red result does not block the merge.
 - The workflow has `permissions: contents: read`.
 - `export-table`, `changelog-fixtures` and `actionlint` each have their own block, `permissions: contents: read`.
 - `pipeline-x86`, `pipeline-x64`, `gate-x86` and `gate-x64` have no `permissions:` block of their own.
-- The only third-party action in the file is `actions/checkout`, used in three jobs and pinned by SHA with the label `# v7.0.1`.
+- The only third-party action in `ci.yml` is `actions/checkout`, used in three jobs and pinned by SHA with the label `# v7.0.1`.
 
 ### Job dependencies
 
