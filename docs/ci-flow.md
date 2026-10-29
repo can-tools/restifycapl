@@ -81,7 +81,7 @@ The job `build` of `release-pr.yml` has `contents: write`, `pull-requests: write
 
 ### What starts CI on a working branch
 
-A pull request opened by Auto PR does not start a `pull_request` run of CI (a consequence of the platform rule). The CI of a working branch comes from the developer's push, which matches the push filter of `ci.yml`.
+A pull request opened by Auto PR does not start a `pull_request` run of CI (a consequence of the platform rule). The first CI run of a working branch comes from the developer's push, which matches the push filter of `ci.yml`. Each later push to a branch with an open pull request starts both a `push` run and a `pull_request` run: `ci.yml` also starts on `pull_request` with base `main` and the default types (this follows from the GitHub rule that a push to the head branch of an open pull request is a `synchronize` event).
 
 ## Branches, pull request titles and release levels
 
