@@ -8,6 +8,35 @@ is prepared and are not written by hand; the oldest section predates the
 generator. Headings are the first 12 characters of
 the commit hash the release is based on, and there are no version numbers in files.
 
+## [e5edcea4b23a] - 2026-10-28
+
+### Fixed
+
+- README no longer calls the CHANGELOG sections tag-linked ([#39](https://github.com/can-tools/restifycapl/pull/39))
+- CAPL framework setup names the release assets as the DLL source ([#39](https://github.com/can-tools/restifycapl/pull/39))
+
+### Development
+
+- docs/hum-41-readme-and-roadmap: update README.md and close out Stage 14 in master plan ([#19](https://github.com/can-tools/restifycapl/pull/19))
+- stage/14-release-pipeline ([#17](https://github.com/can-tools/restifycapl/pull/17))
+- fix/auto-pr-canoe-check-checklist: add CANoe check item to PR checklist for exports.cpp branches, drop duplicate exports.cpp sentence ([#20](https://github.com/can-tools/restifycapl/pull/20))
+- chore/ci-changelog-parser: add scripts/ci/changelog.ps1 and replace the inline CHANGELOG parser in release.yml ([#21](https://github.com/can-tools/restifycapl/pull/21))
+- chore/ci-changelog-cut-next-version: add cut and next-version subcommands to scripts/ci/changelog.ps1 ([#22](https://github.com/can-tools/restifycapl/pull/22))
+- chore/ci-dispatch-release-mode: add workflow_dispatch to ci.yml and select the release mode by ref in release.yml ([#23](https://github.com/can-tools/restifycapl/pull/23))
+- fix/release-show-version-errexit: capture next-version status under bash -e so a dry run with nothing to release no longer fails ([#25](https://github.com/can-tools/restifycapl/pull/25))
+- docs/ci-flow-target-state ([#26](https://github.com/can-tools/restifycapl/pull/26))
+- chore/ci-actionlint ([#27](https://github.com/can-tools/restifycapl/pull/27))
+- chore/ci-changelog-generate ([#28](https://github.com/can-tools/restifycapl/pull/28))
+- chore/ci-feat-branch-prefix ([#30](https://github.com/can-tools/restifycapl/pull/30))
+- chore/ci-release-pr-bot ([#31](https://github.com/can-tools/restifycapl/pull/31))
+- docs/plan-6c-files ([#33](https://github.com/can-tools/restifycapl/pull/33))
+- docs/plan-6c-release-pr ([#34](https://github.com/can-tools/restifycapl/pull/34))
+- chore/ci-release-pr-workflow ([#32](https://github.com/can-tools/restifycapl/pull/32))
+- docs/plan-6c-fix-recognition ([#35](https://github.com/can-tools/restifycapl/pull/35))
+- chore/ci-release-recognition ([#36](https://github.com/can-tools/restifycapl/pull/36))
+- docs/plan-6d-tag-release ([#37](https://github.com/can-tools/restifycapl/pull/37))
+- chore/ci-tag-release ([#38](https://github.com/can-tools/restifycapl/pull/38))
+
 ## [0d0f52240d49] - 2026-10-09
 
 The export table contract covers rows 0–29 in [src/module/exports.cpp](https://github.com/can-tools/restifycapl/blob/0d0f52240d4976240efcd619384e770c09abda2c/src/module/exports.cpp).
@@ -130,4 +159,5 @@ Reference documentation: [docs/capl-sync-surface.md](https://github.com/can-tool
 - Every action `uses:` in workflows and composite actions is pinned to a full
   40-character commit SHA with a trailing version comment.
 
+[e5edcea4b23a]: https://github.com/can-tools/restifycapl/commit/e5edcea4b23a78c3e940d47b5b5db62d4b6bf802
 [0d0f52240d49]: https://github.com/can-tools/restifycapl/commit/0d0f52240d4976240efcd619384e770c09abda2c

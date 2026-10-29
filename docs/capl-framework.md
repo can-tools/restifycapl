@@ -32,9 +32,18 @@ stays pure ASCII. `key` is a CAPL keyword; never use it as an identifier.
 
 ## One-time setup
 
-1. Copy `build\x64\restifycapl-x64.dll` to `capl\includes\dll\win-x64\`.
-2. Copy `restifycapl-x86.dll` to `capl\includes\dll\win-x86\`: from a local x86
-   build (`build\x86\`) or from the CI artifact `restifycapl-x86`.
+1. Get the DLLs. Download `restifycapl-x64.dll` and `restifycapl-x86.dll` from
+   a GitHub release, and take `capl/` from the same tag (its source archive, or
+   a clone at that tag). To check a pull request, take them from its CI
+   artifacts `restifycapl-x64` and `restifycapl-x86`; to build locally, use
+   `build\x64\restifycapl-x64.dll` and `build\x86\restifycapl-x86.dll`. The
+   release also carries `SHA256SUMS`; the README section "Installation and
+   download" shows how to check a download against it.
+2. Copy `restifycapl-x64.dll` to `capl\includes\dll\win-x64\` and
+   `restifycapl-x86.dll` to `capl\includes\dll\win-x86\`. CANoe loads only a
+   DLL of its own bitness: 64-bit CANoe the x64 DLL, 32-bit CANoe the x86 DLL.
+   `includes.cin` selects between them with `#if X64` (see "Bitness and the
+   library version argument").
 3. Attach `capl/restify-verify-http.can` and `capl/restify-verify-json.can` as
    nodes of a CANoe configuration, in Measurement Setup (or as a test node):
    the sync keys call blocking functions that must not run in Simulation Setup
