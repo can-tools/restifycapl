@@ -52,7 +52,7 @@ Open: none.
 
 ## 4. Stages
 
-Stages 0–5, 5a, 6a, 6b, 6c and 6c-fix are done and merged on `main`; their text is kept as the record.
+Stages 0–5, 5a, 6a, 6b, 6c, 6c-fix, 6d, 6e and 7a are done and merged on `main`; their text is kept as the record. Stage 7 has produced its first release (the first release after v0.1.0); its remaining checks and stage 6f are open.
 
 ### Stage 0 — baseline
 - Description: confirm that the revert of abf5d6a is complete (13 files in their pre-commit state); remove untracked leftovers in the working tree (`scripts/cut-changelog.ps1`, `scripts/cut-changelog.py`, `scripts/__pycache__/`); report discrepancies between `docs/ci-flow.md` / `docs/ci-optimized-flow.md` and reality (fixes go into the stage that changes the behavior in question).
