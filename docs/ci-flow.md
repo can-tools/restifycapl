@@ -314,3 +314,96 @@ not a required check, so a red result does not block the merge.
   2. It checks the archive against `ACTIONLINT_SHA256` with `sha256sum --check`. On failure: `::error::actionlint archive does not match the pinned SHA-256: $out`.
   3. It extracts the member `actionlint` into `$RUNNER_TEMP` with `tar --extract --gzip`. On failure: `::error::actionlint extraction failed (exit $code): $out`.
 - Step 3, "Lint the workflows", has `shell: bash`. It runs `"$RUNNER_TEMP/actionlint" -color`, echoes its standard output, and exits with the exit code of `actionlint`.
+
+## Architecture pipeline (`arch-pipeline.yml`)
+
+### Trigger and callers
+
+- The only event is `workflow_call`.
+- `ci.yml` calls the workflow twice, from `pipeline-x86` and `pipeline-x64`, and passes only `arch`.
+- `release.yml` calls it twice, from `pipeline-x86` (`arch: x86`) and `pipeline-x64` (`arch: x64`). Both jobs have `needs: validate` and pass `release-version: ${{ needs.validate.outputs.version }}`.
+
+### Inputs
+
+- `arch` has the type `string` and is required. It has no default. Its description reads: "Target architecture, x86 or x64."
+- The file does not check `arch`; the value is used in the make targets, the DLL path and the artifact name.
+- `release-version` has the type `string` and is optional, with default `''`. Its description reads: "X.Y.Z to build and verify as a release; empty for a development build."
+
+### Permissions
+
+- The workflow has `permissions: contents: read`.
+- The jobs `build` and `test` each repeat `permissions: contents: read`.
+
+### Jobs
+
+- The workflow has two jobs, `build` and `test`. Both have the `name:` equal to the job id and run on `windows-latest`.
+- `build` and `test` have no `needs:`, so they run in parallel.
+- `test` downloads no artifact and builds on its own via `make test`.
+- Third-party actions in the file: `actions/checkout`, pinned by SHA with the label `# v7.0.1`, and `actions/upload-artifact`, pinned by SHA with the label `# v7.0.2`.
+
+### What `release-version` changes
+
+- When `release-version` is empty, the build step passes no `VER_*` variables to `make`, and the step "Check version resource against release-version" is skipped.
+- When it is not empty, the build step validates it, passes the version variables to `make`, and the step "Check version resource against release-version" runs.
+- The steps "Check DLL exports (dumpbin /exports)" and "Upload DLL artifact", the artifact name and the job `test` do not use the value.
+
+### Job `build`
+
+The job has six steps, in this order: "Checkout (full history)", "Provision build environment", "make build-${{ inputs.arch }}", "Check version resource against release-version", "Check DLL exports (dumpbin /exports)" and "Upload DLL artifact".
+
+In the messages quoted in this section, a PowerShell variable or expression (for example `$env:RELEASE_VERSION`, `$dll` or `$($info.FileVersion)`) stands for its value at run time.
+
+#### Step "Checkout (full history)"
+
+- The step uses `actions/checkout` with `fetch-depth: 0`.
+- The file's comment above the checkout reads: "Full history: the Makefile runs git describe and git rev-list on every call."
+
+#### Step "Provision build environment"
+
+- The step uses the local composite action `./.github/actions/provision` with the input `arch: ${{ inputs.arch }}`. It has no `if:`.
+
+#### Step "make build-${{ inputs.arch }}"
+
+- The step has no `if:`. It runs with `shell: pwsh` and sets `RELEASE_VERSION` to `inputs.release-version` and `ARCH` to `inputs.arch`.
+- The script sets `$ErrorActionPreference = 'Stop'` and starts with an empty list of version arguments.
+- If `RELEASE_VERSION` is not empty, it must match this regular expression: `^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\z`. Otherwise the step throws `release-version must be X.Y.Z without leading zeros, got '$env:RELEASE_VERSION'`.
+- The script splits the value on `.`. A field is rejected when its length is greater than 5 or its integer value is greater than 65535. The step then throws `release-version field '$field' exceeds 65535 (version resource fields are 16-bit)`.
+- For a valid value the version arguments are `VER_MAJOR`, `VER_MINOR` and `VER_BUILD`, set to the first, second and third field, and `VER_REV=0`.
+- The step then runs `make "build-$env:ARCH"` with the version arguments. If the exit code is not 0, it throws `make build-$env:ARCH failed (exit $LASTEXITCODE)`.
+
+#### Step "Check version resource against release-version"
+
+- The step runs only if `inputs.release-version != ''`. It runs with `shell: pwsh` and sets `RELEASE_VERSION` and `ARCH` like the build step.
+- The step checks the format of `release-version` again, with the same regular expression and the same error text as the build step, but not the 65535 limit.
+- It reads the version resource of `build\<arch>\restifycapl-<arch>.dll` with `[System.Diagnostics.FileVersionInfo]::GetVersionInfo`. `$dll` is the resolved full path.
+- The expected numeric version is `<major>.<minor>.<patch>.0`, built from the three fields. The expected string is `v` followed by `release-version`.
+- The step makes three comparisons and collects a message for each one that fails:
+  - The actual numeric version (`FileMajorPart`, `FileMinorPart`, `FileBuildPart` and `FilePrivatePart`, joined by `.`) is compared with `-ne` to the expected numeric version. The message is `numeric version is $actualNumeric, expected $expectedNumeric`.
+  - `FileVersion` is compared with `-cne` (case-sensitive) to the expected string. The message is `FileVersion is '$($info.FileVersion)', expected '$expectedString'`.
+  - `ProductVersion` is compared with `-cne` to the expected string. The message is `ProductVersion is '$($info.ProductVersion)', expected '$expectedString'`.
+- If there is at least one message, the step throws `Version resource of $dll does not match release-version ${env:RELEASE_VERSION}:` followed by the messages, one per line.
+- If there is none, the step prints `Version resource of $dll matches $expectedNumeric / $expectedString.`
+
+#### Step "Check DLL exports (dumpbin /exports)"
+
+- The step has no `if:` and runs for every build, development builds included. It runs with `shell: pwsh` and sets `ARCH`.
+- It runs `dumpbin /nologo /exports` on `build\<arch>\restifycapl-<arch>.dll`. If the exit code is not 0, it throws `dumpbin /exports $dll failed (exit $LASTEXITCODE)`.
+- It writes the dumpbin output to the job summary before it checks the exports. The summary has the heading `### dumpbin /exports <dll>` and the output in a fenced block.
+- It reads the exported names from the dumpbin table and the count from the "number of functions" line.
+- If there is no "number of functions" line, the step throws `No 'number of functions' line found in the dumpbin output for $dll`.
+- The step throws unless the count is 1, exactly one name was read, and that name is `caplDllGetTable4` (case-sensitive comparison). The message is `$dll must export exactly one function, caplDllGetTable4; found $functionCount function(s), named: $($names -join ', ')`.
+- If the check passes, the step prints `$dll exports exactly caplDllGetTable4.`
+
+#### Step "Upload DLL artifact"
+
+- The step has no `if:`. It uses `actions/upload-artifact`.
+- The artifact name is `restifycapl-<arch>` and the path is `build/<arch>/restifycapl-<arch>.dll`.
+- The step sets `if-no-files-found: error` and `overwrite: true`.
+
+### Job `test`
+
+- The job has three steps, in this order: "Checkout (full history)", "Provision build environment" and "make test (ARCH=${{ inputs.arch }})".
+- "Checkout (full history)" uses `actions/checkout` with `fetch-depth: 0`, like the same step in `build`.
+- "Provision build environment" uses `./.github/actions/provision` with the input `arch: ${{ inputs.arch }}`, like the same step in `build`.
+- "make test (ARCH=${{ inputs.arch }})" runs with `shell: pwsh` and sets `ARCH` to `inputs.arch`. It runs `make test "ARCH=$env:ARCH"`. If the exit code is not 0, it throws `make test ARCH=$env:ARCH failed (exit $LASTEXITCODE)`.
+- The job does not use `release-version`; it runs the same way for a development and a release call.
