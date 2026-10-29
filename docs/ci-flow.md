@@ -251,3 +251,66 @@ not a required check, so a red result does not block the merge.
 - If the branch's pull request was closed, the next push to the branch opens a new one, provided the branch is still ahead of `main`.
 - If the creation fails, no pull request exists, and the next push to the branch tries again with a newly composed body.
 - The workflow does not change the title, the body or the draft state.
+
+## CI (`ci.yml`)
+
+### Permissions
+
+- The workflow has `permissions: contents: read`.
+- `export-table`, `changelog-fixtures` and `actionlint` each have their own block, `permissions: contents: read`.
+- `pipeline-x86`, `pipeline-x64`, `gate-x86` and `gate-x64` have no `permissions:` block of their own.
+- The only third-party action in the file is `actions/checkout`, used in three jobs and pinned by SHA with the label `# v7.0.1`.
+
+### Job dependencies
+
+- The only `needs:` in the file are those of the two gates; each gate waits only for its own pipeline. No job has `needs:` on `export-table`, `changelog-fixtures` or `actionlint`.
+- `pipeline-x86` and `pipeline-x64` have no `needs:`, so they run in parallel.
+
+### Jobs `pipeline-x86` and `pipeline-x64`
+
+- Each job calls `./.github/workflows/arch-pipeline.yml` and passes one input: `arch: x86` for `pipeline-x86`, `arch: x64` for `pipeline-x64`.
+- `release-version` is not passed; its default in `arch-pipeline.yml` is `''`.
+- The two jobs have no `name:`.
+
+### Jobs `gate-x86` and `gate-x64`
+
+- The `name:` of `gate-x86` is `build + test (x86)`. The `name:` of `gate-x64` is `build + test (x64)`.
+- `gate-x86` has `needs: pipeline-x86` and `gate-x64` has `needs: pipeline-x64`. Both have `if: always()` and run on `ubuntu-latest`.
+- The file's comment above the gates reads: "if: always() runs the gate even when its pipeline failed or was skipped; a skipped required check counts as passing, so the gate must fail explicitly on anything but success."
+- Each gate has one step, "Require a successful pipeline", with `shell: bash`.
+- The step sets the environment variable `PIPELINE_RESULT` to `needs.pipeline-x86.result` (`gate-x86`) or `needs.pipeline-x64.result` (`gate-x64`).
+- The script of `gate-x86`:
+
+  ```bash
+  if [ "$PIPELINE_RESULT" != "success" ]; then
+    echo "::error::pipeline-x86 finished with result '$PIPELINE_RESULT', expected 'success'"
+    exit 1
+  fi
+  ```
+
+- The script of `gate-x64` is the same, with `pipeline-x64` in the message.
+- Any other result prints the error message and ends the step with `exit 1`.
+
+### Job `export-table`
+
+- The job runs on `ubuntu-latest`.
+- Step 1 is `actions/checkout`, pinned by SHA.
+- Step 2 is the local composite action `./.github/actions/export-table`.
+
+### Job `changelog-fixtures`
+
+- The job runs on `ubuntu-latest`.
+- Step 1 is `actions/checkout`, pinned by SHA.
+- Step 2, "Run the CHANGELOG fixtures", has `shell: bash` and runs `pwsh -NoProfile -File scripts/ci/changelog.ps1 fixtures -FixtureDir tests/changelog`.
+
+### Job `actionlint`
+
+- The job has `if: github.event_name != 'workflow_dispatch'`, so it is skipped on a dispatch. It runs on `ubuntu-latest`.
+- The file's comment above the job reads: "Never make this a required check: it is skipped on a dispatch, and a skipped required check counts as passing."
+- The job sets `ACTIONLINT_VERSION` to `1.7.12`. The archive's SHA-256 is pinned in `ACTIONLINT_SHA256`.
+- Step 1 is `actions/checkout`, pinned by SHA.
+- Step 2, "Download actionlint and verify its SHA-256", has `shell: bash` and does three things in order. After each command, a non-zero exit code is turned into the error annotation below, followed by `exit 1`.
+  1. It downloads `https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz` to `$RUNNER_TEMP/actionlint.tar.gz` with `curl --fail --silent --show-error --location --output`. On failure: `::error::actionlint download failed (exit $code): $out`.
+  2. It checks the archive against `ACTIONLINT_SHA256` with `sha256sum --check`. On failure: `::error::actionlint archive does not match the pinned SHA-256: $out`.
+  3. It extracts the member `actionlint` into `$RUNNER_TEMP` with `tar --extract --gzip`. On failure: `::error::actionlint extraction failed (exit $code): $out`.
+- Step 3, "Lint the workflows", has `shell: bash`. It runs `"$RUNNER_TEMP/actionlint" -color`, echoes its standard output, and exits with the exit code of `actionlint`.
