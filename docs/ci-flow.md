@@ -521,3 +521,60 @@ In the messages quoted in this section, a PowerShell variable or expression (for
 - The loop goes through all four files before the step fails.
 - If a failure was recorded, the step throws `/MT provenance check failed for one or more provisioned libs.`
 - Otherwise it prints `All provisioned libs confirmed /DEFAULTLIB:LIBCMT, no MSVCRT.`
+
+## Composite action `export-table`
+
+### Header
+
+- The action is in `.github/actions/export-table/action.yml`. Its `name:` is `export-table`.
+- Its `description:` reads: "Runs the export-table fixtures, checks src/module/exports.cpp and writes the job summary."
+- The action has one output, `markdown-path`, set only when `export-table.md` exists after the check.
+- The description of the output reads: "Path of the generated export table markdown. Set only when the file exists after the check ran (the table could be parsed); not set otherwise, so consumers read an empty string."
+- `runs.using` is `composite`.
+- The action has three steps, in this order: "Run export-table fixtures" (id `fixtures`), "Check src/module/exports.cpp" (id `table`) and "Write job summary".
+- All three steps run with `shell: pwsh`.
+- The job `export-table` of `ci.yml` uses the action as a step with `uses: ./.github/actions/export-table`.
+- The job `export-table` of `release.yml` uses the action in the step "Check the export table" (id `table`); a later step of that job reads the output `markdown-path`.
+
+### Step "Run export-table fixtures"
+
+- The step has the id `fixtures` and sets `FIXTURE_DIR` to `tests/export-table`.
+- It runs `./scripts/list-export-table.ps1 -FixtureDir $env:FIXTURE_DIR`, which runs every `*.fixture` file in that directory, and then `exit $LASTEXITCODE`.
+
+### Step "Check src/module/exports.cpp"
+
+- The step has the id `table`, has `if: always()` and sets `EXPORTS_CPP` to `src/module/exports.cpp`.
+- It creates the directory `export-table` under `$env:RUNNER_TEMP` with `New-Item -ItemType Directory -Force`. `$md` is `export-table.md` in that directory.
+- It runs `./scripts/list-export-table.ps1 -Path $env:EXPORTS_CPP -MarkdownPath $md | Tee-Object -FilePath (Join-Path $dir 'output.txt')`.
+- The script checks the table and, with `-MarkdownPath`, writes it as markdown to that file.
+- For `-Path`, the script prints `export-table passed: <n> functions in <m> categories, checks 1-12 clean.` or `export-table: <n> of 12 checks failed.`
+- The step keeps `$LASTEXITCODE` in `$code`.
+- If `$md` exists, the step appends `markdown-path=$md` to `$env:GITHUB_OUTPUT`.
+- The step ends with `exit $code`.
+
+### Step "Write job summary"
+
+- The step has `if: always()` and sets `FIXTURES_OUTCOME` to the outcome of the step `fixtures`.
+- It takes the last line of `output.txt` (written by the `Tee-Object` in "Check src/module/exports.cpp") that matches `^export-table( passed)?:` and writes one result line to the job summary. If `output.txt` does not exist, the third text below is written.
+- In the result texts below, `$($Matches[1])` and `$($Matches[2])` stand for the first and second number matched in that line.
+- If the line matches `^export-table passed: (\d+) functions in (\d+) categories`, the result line is:
+
+  ```
+  export-table passed: $($Matches[1]) functions in $($Matches[2]) categories, checks 1-12 clean. Not a required check; read it on any branch that touches src/module/exports.cpp.
+  ```
+
+- If the line matches `^export-table: (\d+) of 12 checks failed`, the result line is:
+
+  ```
+  export-table FAILED: $($Matches[1]) of 12 checks failed in src/module/exports.cpp. This check is not required and does not block the merge, but a failing table cannot be released: release.yml requires it. Fix it before merging any change that touches src/module/exports.cpp.
+  ```
+
+- Otherwise the result line is:
+
+  ```
+  export-table FAILED: no result was produced for src/module/exports.cpp; see the step log.
+  ```
+
+- If `FIXTURES_OUTCOME` is not `success`, the line is preceded by `The export-table fixture run did not succeed; see the "Run export-table fixtures" step.` and a blank line.
+- If `export-table.md` exists, its content follows.
+- The text is appended to `$env:GITHUB_STEP_SUMMARY` as UTF-8 without BOM.
