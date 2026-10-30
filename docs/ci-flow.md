@@ -808,6 +808,181 @@ Version preview: <!-- version -->vX.Y.Z (vA.B.C + level)<!-- /version -->
 - A JSON input file that cannot be read, or that has the wrong shape, ends with an `::error::` that names the file, and exit code 1.
 - A failing `git` command ends with an `::error::` and exit code 1.
 
+## Recognising a release commit (`changelog.ps1` and `fetch-pr-releases.sh`)
+
+In the messages of `changelog.ps1` quoted in this section, `<...>` stands for a value at run time. In the messages and commands of `fetch-pr-releases.sh` quoted in this section, a shell variable (`$n`, `$code`, `$head_sha` or `$GITHUB_REPOSITORY`) stands for its value at run time, and `$(tr '\r\n' '  ' < "$errfile")` stands for the content of the script's error file, in which each carriage return and line feed is turned into a space.
+
+This section describes how `changelog.ps1` decides whether a commit is a release commit. The subject of the commit and the pull request data decide this: the pull request whose number is in the subject must be merged as that commit, into `main`, from `release/next` of the same repository.
+
+The callers:
+
+- Two steps of the job `build` of `release-pr.yml`: "Fetch the pull request data of the release commits" and "Wait for the tag of a merged release commit". They are described in the section on the Release PR.
+- The job `classify` of `tag-release.yml`. It is described in the section on Tag Release.
+
+Both callers set `GH_TOKEN` to `github.token`.
+
+### Release subject and candidates
+
+- A release subject is a subject that matches `^release/next \(#([1-9][0-9]{0,8})\)$`: the text `release/next`, a space and the number `N` in parentheses after `#`. `N` has one to nine digits and no leading zero. This pattern is separate from the type `release` of the section on range and change types.
+- The candidates are the commits of the range whose subject is a release subject. The range and `-Base` are as in the section on range and change types. The candidates are in the order of the `git log` output, which is git's order, newest first.
+- `changelog.ps1 release-prs` prints the number of every candidate on standard output, one per line and once each, in the order of the candidates. It takes `-Base`.
+- The end of the range is `-Base` for `release-prs`. Without `-Base`, and always for `pending-cut`, it is the result of `git rev-parse origin/main`, the tip of `origin/main`. If that result is not a full commit hash, the run ends with this error and exit code 1:
+
+  ```
+  ::error::git rev-parse origin/main did not print a full commit hash: <output>
+  ```
+
+### Pull request data file
+
+`-PrReleases` of `pending-cut` and `release-commit` names a JSON file. The file is an object from the pull request number, as a string key, to the data of that pull request.
+
+- An empty or omitted `-PrReleases` is an empty table.
+- Every entry of the file is checked, whether a command uses it or not.
+- An entry is an object with a boolean `found`. For an entry with `found` false, only `found` is checked.
+- An entry with `found` true has these keys:
+
+| Key | Type | Taken from the API field |
+|---|---|---|
+| `found` | boolean | set by `fetch-pr-releases.sh`: false on `HTTP 404`, otherwise true |
+| `merged` | boolean | `merged` of the pull request |
+| `mergeCommitSha` | string or null | `merge_commit_sha` of the pull request |
+| `baseRef` | string | `base.ref` of the pull request |
+| `baseRepo` | string | `base.repo.full_name` of the pull request |
+| `headRef` | string | `head.ref` of the pull request |
+| `headRepo` | string or null | `head.repo.full_name` of the pull request |
+| `headSha` | string | `head.sha` of the pull request |
+| `headParents` | array of strings, or null | the parents of the head commit |
+| `headTree` | string or null | the tree of the head commit |
+
+- The run ends as in the section on errors in general, with an `::error::` that names the file as given in `-PrReleases` (and, for an entry, its key and the field), and exit code 1: when the file cannot be read, is not valid UTF-8 or is not valid JSON; when it is not a JSON object; when an entry is not an object with a boolean `found`; and, for an entry with `found` true, when `mergeCommitSha`, `headRepo`, `headParents` or `headTree` is missing, when `baseRef`, `baseRepo`, `headRef` or `headSha` is missing or not a string, when `mergeCommitSha`, `headRepo` or `headTree` is neither a string nor null, when `merged` is missing or not a boolean, when `mergeCommitSha` is null and `merged` is true, or when `headParents` is neither an array of strings nor null.
+
+### fetch-pr-releases.sh
+
+`scripts/ci/fetch-pr-releases.sh <output-file>` writes the pull request data file. It reads the pull request numbers from standard input, one per line. It uses the environment variables `RUNNER_TEMP` and `GITHUB_REPOSITORY`, and the commands `gh` and `jq`.
+
+- Without exactly one argument, the script writes `usage: fetch-pr-releases.sh <output-file>` to standard error and ends with exit code 2.
+- The script first writes `{}` to the output file. The file stays `{}` when the input has no number.
+- It skips empty lines.
+- For each number `$n`, it runs `gh api repos/$GITHUB_REPOSITORY/pulls/$n`.
+  - If the command fails and its error output holds the text `HTTP 404`, the entry is `{"found":false}`.
+  - If the command fails otherwise, the script ends with exit code 1 and this error:
+
+    ```
+    ::error::could not read pull request #$n (exit $code): $(tr '\r\n' '  ' < "$errfile")
+    ```
+
+  - If the command succeeds and `.head.sha` of the result is not 40 lowercase hexadecimal characters, the script ends with exit code 1 and this error:
+
+    ```
+    ::error::unexpected head commit of pull request #$n: $head_sha
+    ```
+
+  - Otherwise the script runs `gh api repos/$GITHUB_REPOSITORY/commits/$head_sha`.
+    - If it succeeds, the entry is `found` true with the keys of the table above, where `headParents` and `headTree` come from the parents and the tree of that commit.
+    - If it fails and its error output holds `HTTP 404` or `HTTP 422`, the entry is the same, with `headParents` and `headTree` null.
+    - If it fails otherwise, the script ends with exit code 1 and this error:
+
+      ```
+      ::error::could not read the head commit $head_sha of pull request #$n (exit $code): $(tr '\r\n' '  ' < "$errfile")
+      ```
+
+- The entry is added to the file under the key `$n`.
+
+### Valid release commit
+
+A candidate is a valid release commit when its pull request data passes the checks below. The data is the entry under the number of the candidate.
+
+| # | Check | `pending-cut` when it fails | `release-commit` when it fails |
+|---|---|---|---|
+| 1 | `found` is true | skips the candidate | error |
+| 2 | `merged` is the boolean true | skips the candidate | error |
+| 3 | `mergeCommitSha` equals the hash of the commit (for `release-commit`, the value of `-Sha`) | skips the candidate | error |
+| 4 | `baseRef` is `main` | skips the candidate | error |
+| 5 | `headRef` is `release/next` | skips the candidate | answers `not-release` |
+| 6 | `headRepo` is not null and equals `baseRepo` | skips the candidate | answers `not-release` |
+
+- The checks run in the order of the table. The first check that fails decides.
+- All comparisons are case-sensitive.
+- Row 6 holds when the two full names in the data are equal.
+- For the rows 1 to 4, `release-commit` prints this error and ends with exit code 1. `<reason>` is the text of the failed row: `the pull request was not found`, `the pull request is not merged`, `the pull request was merged as another commit` or `the base of the pull request is not main`.
+
+  ```
+  ::error::<first 12 characters of the hash> is a release/next (#<N>) commit, but <reason>
+  ```
+
+### Faithful release commit
+
+A valid release commit is faithful when all of these hold:
+
+- `git log -1 --format=%P%x09%T <sha>` gives exactly one parent.
+- `headParents` and `headTree` of the data are not null.
+- `headParents` has exactly one entry, and it equals that parent.
+- `headTree` equals the tree of the commit.
+
+`headParents` and `headTree` are the parents and the tree of the head commit of the pull request. A valid release commit that does not meet all of these is not faithful.
+
+### pending-cut
+
+`changelog.ps1 pending-cut` takes `-PrReleases` only.
+
+- The range is `<last tag>..<tip>`, where `<tip>` is the tip of `origin/main`. Git leaves the commit of the last tag out of this range, so the last tag is on no candidate.
+- The command reads the candidates first, then the data file. The file is read and checked even when there is no candidate.
+- It walks the candidates newest first.
+  - A candidate whose number has no key in the file ends the run with exit code 1 and this error:
+
+    ```
+    ::error::no pull request data for #<N>, the release commit <first 12 characters of the hash>
+    ```
+
+  - A candidate that is not a valid release commit is skipped.
+  - The walk ends at the first valid release commit, and the answer is decided by it.
+- The answer is printed on standard output:
+
+| Answer | Condition |
+|---|---|
+| `proceed` | no candidate is a valid release commit |
+| `waiting` | the first valid release commit is faithful and is the tip of `origin/main` |
+| `abandoned` | the first valid release commit is not faithful, or it is faithful and is not the tip of `origin/main` |
+
+- With `abandoned`, the command also writes a line to standard error. When the commit is not faithful:
+
+  ```
+  release commit <first 12 characters of the hash> (#<N>) abandoned: its parent or tree differs from the head of the pull request
+  ```
+
+  When it is faithful and is not the tip:
+
+  ```
+  release commit <first 12 characters of the hash> (#<N>) abandoned: it has no release tag and is not the origin/main tip
+  ```
+
+- The exit code is 0 for all three answers. A failure ends with exit code 1.
+- The step that runs the command is "Wait for the tag of a merged release commit", in the section on the Release PR.
+
+### release-commit
+
+`changelog.ps1 release-commit` takes `-Sha` and `-PrReleases`. `-Sha` defaults to `$GITHUB_SHA`. If `-Sha` is empty, the run ends with exit code 2 and the usage text `-Sha is required (GITHUB_SHA is not set)`.
+
+The section on release subjects and candidates defines a candidate, a commit of the range with a release subject, for `release-prs` and `pending-cut`. `release-commit` judges the one commit that `-Sha` names.
+
+The outcome, in the order of the checks:
+
+| Condition | Standard output | Exit code |
+|---|---|---|
+| The subject of the commit is not a release subject. The command answers before it reads the data file. | `not-release` | 0 |
+| The data file cannot be read or has the wrong shape (see the section on the pull request data file). | an `::error::` that names the file | 1 |
+| The file has no key for the number in the subject. | `::error::no pull request data for #<N>, the subject of <first 12 characters of the hash>` | 1 |
+| A check of rows 1 to 4 of the table in the section on a valid release commit fails. | the error quoted there, with the `<reason>` of the failed row | 1 |
+| A check of row 5 or 6 fails. | `not-release` | 0 |
+| The commit is valid and not faithful. | `not-faithful` | 0 |
+| The commit is faithful and no tag is left as the last tag. | the error for no tag in the section on range and change types | 1 |
+| The commit is faithful and the list of `git tag --points-at <sha>` includes the last tag. | `tagged` | 0 |
+| The commit is faithful and the list does not include the last tag. | `tag` | 0 |
+
+- `<sha>` is the value of `-Sha`. The last tag is the one of the section on range and change types.
+- A failing `git` command ends with an `::error::` and exit code 1, as in the section on errors in general.
+- The job `classify` of `tag-release.yml` uses the answers; see the section on Tag Release.
+
 ## Release PR (`release-pr.yml`)
 
 ### Jobs
