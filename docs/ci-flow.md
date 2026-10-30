@@ -1400,3 +1400,246 @@ All steps except the first run with `shell: bash`.
   ```
   Pull request #$PR_NUMBER: version preview rewritten for label $LABEL.
   ```
+
+## Tag Release (`tag-release.yml`)
+
+The workflow has the permission `contents: read`. The triggers of the workflow and the concurrency of the job `tag` are in the section on triggers of each workflow. The permissions of the job `tag` are in the section on dispatches made by the bots.
+
+In the messages and commands quoted in this section, a shell variable (for example `$out`, `$code`, `$PR_NUMBER` or `$TAG`) stands for its value at run time, and `${GITHUB_SHA:0:12}` and `${tip:0:12}` stand for the first 12 characters of `GITHUB_SHA` and of `tip`. `$(tr '\r\n' '  ' < "$errfile")` stands for the content of the step's error file, and `$(printf '%s' "$out" | tr '\r\n' '  ')` for `$out`; in both, each carriage return and line feed is turned into a space.
+
+All steps except the first of each job run with `shell: bash`.
+
+### Jobs
+
+- The workflow has two jobs, `classify` and `tag`. Both run on `ubuntu-latest`.
+- The job `classify` has three steps, in this order: "Checkout the pushed commit (full history and tags)", "Fetch the pull request data of the pushed commit" and "Classify the pushed commit".
+- The job `tag` has nine steps, in this order: "Checkout the pushed commit (full history and tags)", "Reuse the tag already on the release commit", "Check that main still points at the release commit", "Read the bump label of the release pull request", "Compute the next version", "Create and push the annotated tag", "Find the existing tag of the release commit", "Dispatch the release pull request workflow on main" and "Dispatch the release on the tag".
+
+### Job `classify`
+
+- The permissions are `contents: read` and `pull-requests: read`.
+- The job sets the environment variable `GH_TOKEN` to `github.token`.
+- The job has two outputs: `outcome` is the output `outcome` of the step `classify`, and `number` is the output `number` of the step `subject`.
+
+#### Step "Checkout the pushed commit (full history and tags)"
+
+- The step uses `actions/checkout`, pinned by SHA with the label `# v7.0.1`.
+- It checks out `github.sha` with `fetch-depth: 0`, `fetch-tags: true` and `persist-credentials: false`.
+
+#### Step "Fetch the pull request data of the pushed commit"
+
+- The step has the id `subject`.
+- It reads the subject of the pushed commit with `git log -1 --format=%s "$GITHUB_SHA"`.
+- If the subject is `release/next`, a space, `(#`, one or more digits and `)`, the digits are the pull request number, called `number` below. The step then runs `printf '%s\n' "$number" | bash scripts/ci/fetch-pr-releases.sh "$RUNNER_TEMP/pr-releases.json"`. The errors of the script are described in the section on fetch-pr-releases.sh.
+- Otherwise the step writes `{}` to `$RUNNER_TEMP/pr-releases.json`.
+- In both cases the step writes `number=$number` to `$GITHUB_OUTPUT`. `number` is empty when the subject did not match.
+
+#### Step "Classify the pushed commit"
+
+- The step has the id `classify`.
+- It runs `pwsh -NoProfile -File scripts/ci/changelog.ps1 release-commit -Sha "$GITHUB_SHA" -PrReleases "$RUNNER_TEMP/pr-releases.json"`. If the command fails, the step prints its output and ends with exit code 1.
+- For the answers `tag`, `tagged`, `not-release` and `not-faithful` the step writes `outcome=$out` to `$GITHUB_OUTPUT`, where `$out` is the answer. The step then succeeds. For `not-release` and `not-faithful` it first writes the texts below.
+- The summary line for `not-release`:
+
+  ```
+  Not a release commit. Nothing to tag.
+  ```
+
+- The warning for `not-faithful`:
+
+  ```
+  ::warning::the release commit ${GITHUB_SHA:0:12} is not faithful (its content differs from the generated release pull request); it is not tagged
+  ```
+
+- The summary line for `not-faithful`:
+
+  ```
+  Release commit ${GITHUB_SHA:0:12} is not faithful. No tag was created.
+  ```
+
+- Any other answer ends with the error below and exit code 1, where `$out` is the answer:
+
+  ```
+  ::error::unexpected answer from release-commit: $(printf '%s' "$out" | tr '\r\n' '  ')
+  ```
+
+- What the answers mean is described in the section on release-commit.
+
+### Job `tag`
+
+- The job `tag` has `needs: classify` and runs only if `needs.classify.outputs.outcome == 'tag' || needs.classify.outputs.outcome == 'tagged'`.
+- The job sets these environment variables:
+  - `GH_TOKEN` is `github.token`.
+  - `OUTCOME` is `needs.classify.outputs.outcome`.
+  - `PR_NUMBER` is `needs.classify.outputs.number`.
+- Five steps test a name against `^v[0-9]+\.[0-9]+\.[0-9]+$`, called the tag pattern below: "Reuse the tag already on the release commit", "Compute the next version", "Create and push the annotated tag", "Find the existing tag of the release commit" and "Dispatch the release on the tag".
+- Several steps test `steps.guard.outputs.outcome || env.OUTCOME`, called the effective outcome below. When `OUTCOME` is `tag`, the step "Reuse the tag already on the release commit" runs and the effective outcome is the `outcome` it writes. When `OUTCOME` is `tagged`, that step is skipped and the effective outcome is `tagged`.
+- The two dispatch steps test `steps.tip.outputs.proceed != 'false'`. They run when the step "Check that main still points at the release commit" wrote `proceed=true`, and when that step was skipped.
+- Each row of the table is for a run in which no step ends with exit code 1. The last column names the steps after the checkout that run, by these short names: Reuse ("Reuse the tag already on the release commit"), Check main ("Check that main still points at the release commit"), Read label ("Read the bump label of the release pull request"), Compute version ("Compute the next version"), Create and push ("Create and push the annotated tag"), Find existing tag ("Find the existing tag of the release commit"), Dispatch release PR ("Dispatch the release pull request workflow on main") and Dispatch release ("Dispatch the release on the tag").
+
+| `OUTCOME` | Effective outcome | `proceed` | Steps after the checkout that run |
+|---|---|---|---|
+| `tag` | `tag` | `true` | Reuse, Check main, Read label, Compute version, Create and push, Dispatch release PR, Dispatch release |
+| `tag` | `tag` | `false` | Reuse, Check main |
+| `tag` | `tagged` | not written | Reuse, Find existing tag, Dispatch release PR, Dispatch release |
+| `tagged` | `tagged` | not written | Find existing tag, Dispatch release PR, Dispatch release |
+
+#### Step "Checkout the pushed commit (full history and tags)"
+
+- The step uses `actions/checkout`, pinned by SHA with the label `# v7.0.1`.
+- It checks out `github.sha` with `fetch-depth: 0` and `fetch-tags: true`.
+
+#### Step "Reuse the tag already on the release commit"
+
+- The step has the id `guard` and runs only if `env.OUTCOME == 'tag'`.
+- It lists the tags with `git tag --list`, sorted with `sort -V`, and keeps the last name that matches the tag pattern as `highest`.
+- If `highest` is not empty and `git rev-parse "refs/tags/$highest^{commit}"` equals `$GITHUB_SHA`, the outcome is `tagged` and the step appends the summary line below. Otherwise the outcome is `tag`.
+- The step writes `outcome=$outcome` to `$GITHUB_OUTPUT`.
+- The summary line, where `$highest` is the name kept:
+
+  ```
+  The latest tag $highest already points at ${GITHUB_SHA:0:12}. Reusing it.
+  ```
+
+#### Step "Check that main still points at the release commit"
+
+- The step has the id `tip` and runs only if `(steps.guard.outputs.outcome || env.OUTCOME) == 'tag'`.
+- It runs `git ls-remote origin refs/heads/main` and keeps the standard error in `$RUNNER_TEMP/tip.err`. If the command fails, the step ends with exit code 1 and this error:
+
+  ```
+  ::error::could not read main on the remote (exit $code): $(tr '\r\n' '  ' < "$errfile")
+  ```
+
+- The step takes `tip` from the output with `cut -f1`.
+- If `tip` is not `$GITHUB_SHA`, the step prints the warning below and appends the summary line below. It writes `proceed=false` to `$GITHUB_OUTPUT`. The step then succeeds.
+- Otherwise it writes `proceed=true`.
+- The warning:
+
+  ```
+  ::warning::release commit abandoned: main moved from ${GITHUB_SHA:0:12} to ${tip:0:12}; no tag was created and nothing was dispatched
+  ```
+
+- The summary line:
+
+  ```
+  Release commit ${GITHUB_SHA:0:12} abandoned: main moved. No tag, no dispatch.
+  ```
+
+#### Step "Read the bump label of the release pull request"
+
+- The step has the id `label` and runs only if `(steps.guard.outputs.outcome || env.OUTCOME) == 'tag' && steps.tip.outputs.proceed == 'true'`.
+- If `PR_NUMBER` does not match `^[0-9]+$`, the step ends with exit code 1 and this error:
+
+  ```
+  ::error::unexpected pull request number: $PR_NUMBER
+  ```
+
+- It runs `gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '.labels[].name'` and keeps the standard error in `$RUNNER_TEMP/labels.err`. If the command fails, the step ends with exit code 1 and this error:
+
+  ```
+  ::error::could not read the labels of pull request #$PR_NUMBER (exit $code): $(tr '\r\n' '  ' < "$errfile")
+  ```
+
+- The step reads the names line by line. Every label whose name starts with `bump:` counts. `count` is the number of those labels.
+- If `count` is not 1, the step ends with exit code 1 and this error:
+
+  ```
+  ::error::pull request #$PR_NUMBER has $count bump:* labels, exactly one is required; no tag was created
+  ```
+
+- If `count` is 1 and that label, `$label`, is not `bump:major`, `bump:minor` or `bump:patch`, the step ends with exit code 1 and this error:
+
+  ```
+  ::error::the label $label of pull request #$PR_NUMBER is not bump:major, bump:minor or bump:patch; no tag was created
+  ```
+
+- The step ends by writing `label=$label` to `$GITHUB_OUTPUT`.
+
+#### Step "Compute the next version"
+
+- The step has the id `version` and runs only if `(steps.guard.outputs.outcome || env.OUTCOME) == 'tag' && steps.tip.outputs.proceed == 'true'`. It sets `LABEL` to `steps.label.outputs.label`.
+- It runs `pwsh -NoProfile -File scripts/ci/changelog.ps1 next-version -Label "$LABEL"`. What `next-version` computes is described in the section on next version. If the command fails, the step prints its output and ends with exit code 1.
+- The tag is `v` followed by the output. If it does not match the tag pattern, the step ends with exit code 1 and this error:
+
+  ```
+  ::error::unexpected version from changelog.ps1: $(printf '%s' "$out" | tr '\r\n' '  ')
+  ```
+
+- The step writes `tag=$tag` to `$GITHUB_OUTPUT`.
+
+#### Step "Create and push the annotated tag"
+
+- The step has the id `create` and runs only if `(steps.guard.outputs.outcome || env.OUTCOME) == 'tag' && steps.tip.outputs.proceed == 'true'`. It sets `TAG` to `steps.version.outputs.tag`.
+- If `TAG` does not match the tag pattern, the step ends with exit code 1 and this error:
+
+  ```
+  ::error::unexpected tag name: $TAG
+  ```
+
+- It runs `git` with `-c user.name='github-actions[bot]'`, a `-c user.email=` option and the arguments `tag -a "$TAG" -m "$TAG" "$GITHUB_SHA"`. Then it runs `git push origin "refs/tags/$TAG"`.
+- It writes `tag=$TAG` to `$GITHUB_OUTPUT` and appends this summary line:
+
+  ```
+  Tagged ${GITHUB_SHA:0:12} as $TAG.
+  ```
+
+#### Step "Find the existing tag of the release commit"
+
+- The step has the id `existing` and runs only if `(steps.guard.outputs.outcome || env.OUTCOME) == 'tagged'`.
+- It lists the tags with `git tag --points-at "$GITHUB_SHA"`, sorted with `sort -V`, and keeps the last name that matches the tag pattern as `tag`.
+- If no name matches, the step ends with exit code 1 and this error:
+
+  ```
+  ::error::no vX.Y.Z tag points at ${GITHUB_SHA:0:12}
+  ```
+
+- Otherwise it writes `tag=$tag` to `$GITHUB_OUTPUT`.
+
+#### Step "Dispatch the release pull request workflow on main"
+
+- The step runs only if `steps.tip.outputs.proceed != 'false'`.
+- It runs `gh workflow run release-pr.yml --ref main` and keeps the standard error in `$RUNNER_TEMP/dispatch.err`. If the command fails, the step ends with exit code 1 and this error, where `$out` is the output of the command:
+
+  ```
+  ::error::could not dispatch release-pr.yml on main (exit $code): $(printf '%s' "$out" | tr '\r\n' '  ') $(tr '\r\n' '  ' < "$errfile")
+  ```
+
+- Otherwise the step appends this summary line:
+
+  ```
+  Dispatched release-pr.yml on main.
+  ```
+
+#### Step "Dispatch the release on the tag"
+
+- The step runs only if `steps.tip.outputs.proceed != 'false'`. It sets `TAG` to `steps.create.outputs.tag || steps.existing.outputs.tag`.
+- If `TAG` does not match the tag pattern, the step ends with exit code 1 and this error:
+
+  ```
+  ::error::unexpected tag name: $TAG
+  ```
+
+- It looks up the release of the tag with `gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG"` and keeps the standard error in `$RUNNER_TEMP/release.err`.
+  - If the lookup succeeds, the step appends this summary line and ends with exit code 0:
+
+    ```
+    A published release for $TAG exists. Release not dispatched.
+    ```
+
+  - If the lookup fails and its error output holds `HTTP 404`, the step runs `gh workflow run release.yml --ref "$TAG"`. If that command fails, the step ends with exit code 1 and this error, where `$out` is the output of the command:
+
+    ```
+    ::error::could not dispatch release.yml on $TAG (exit $code): $(printf '%s' "$out" | tr '\r\n' '  ') $(tr '\r\n' '  ' < "$errfile")
+    ```
+
+    Otherwise it appends this summary line:
+
+    ```
+    Dispatched release.yml on $TAG.
+    ```
+
+  - If the lookup fails otherwise, the step ends with exit code 1 and this error:
+
+    ```
+    ::error::could not look up the release of $TAG (exit $code): $(tr '\r\n' '  ' < "$errfile")
+    ```
