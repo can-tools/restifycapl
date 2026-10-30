@@ -807,3 +807,273 @@ Version preview: <!-- version -->vX.Y.Z (vA.B.C + level)<!-- /version -->
 - An invalid argument ends with exit code 2. The script writes a message and a usage line to standard error.
 - A JSON input file that cannot be read, or that has the wrong shape, ends with an `::error::` that names the file, and exit code 1.
 - A failing `git` command ends with an `::error::` and exit code 1.
+
+## Release PR (`release-pr.yml`)
+
+### Jobs
+
+- The workflow has two jobs, `build` and `labels`. The job `labels` is described after the job `build`.
+- The job `build` runs only if `github.event_name != 'pull_request'`. It runs on `ubuntu-latest`.
+- The job `build` sets these environment variables:
+  - `GH_TOKEN` is `github.token`.
+  - `GH_REPO` is `github.repository`.
+  - `REPO_OWNER` is `github.repository_owner`.
+  - `EVENT_NAME` is `github.event_name`.
+- The job `build` has fifteen steps, in this order: "Checkout main (full history and tags)", "Fetch the pull request data of the release commits", "Wait for the tag of a merged release commit", "Fetch the pull request data", "Compute the release level", "Look up the open release pull requests", "Close the release PR and delete release/next when nothing is left to release", "Stop when several release pull requests are open", "Generate the CHANGELOG section", "Generate the pull request body", "Build the release/next commit", "Push release/next", "Open or update the release pull request", "Keep exactly one bump label" and "Dispatch CI and the bump label check on release/next".
+
+### Job `build`
+
+In the messages quoted in this section, a shell variable (for example `$n`, `$COUNT` or `$code`) stands for its value at run time. `$(tr '\r\n' '  ' < "$errfile")` stands for the content of the step's error file, and `$(printf '%s' "$out" | tr '\r\n' '  ')` for `$out`; in both, each carriage return and line feed is turned into a space.
+
+All steps except the first run with `shell: bash`.
+
+#### Step "Checkout main (full history and tags)"
+
+- The step uses `actions/checkout`, pinned by SHA with the label `# v7.0.1`.
+- It checks out `main` with `fetch-depth: 0` and `fetch-tags: true`.
+
+#### Step "Fetch the pull request data of the release commits"
+
+- The step runs `changelog.ps1 release-prs` and passes its output to `scripts/ci/fetch-pr-releases.sh`, which writes `$RUNNER_TEMP/pr-releases.json`.
+- If `release-prs` fails, the step prints its output and ends with exit code 1.
+
+#### Step "Wait for the tag of a merged release commit"
+
+- The step has the id `guard`.
+- The step runs `changelog.ps1 pending-cut -PrReleases $RUNNER_TEMP/pr-releases.json`. If the command fails, the step prints its output and ends with exit code 1.
+- For the answer `proceed` it writes `proceed=true` to `$GITHUB_OUTPUT`.
+- For the answer `abandoned` it writes `proceed=true`, a notice and a summary line.
+- For the answer `waiting` it writes `proceed=false`, a notice and a summary line. The step then succeeds.
+- Any other answer ends with the error below and exit code 1.
+- The notice for `abandoned`:
+
+  ```
+  ::notice::an untagged release commit was abandoned; a new release pull request covers the full range since the last tag
+  ```
+
+- The summary line for `abandoned`:
+
+  ```
+  A release commit since the last tag is abandoned (not faithful, or untagged and no longer the main tip). It is never tagged; the release pull request is rebuilt for the full range.
+  ```
+
+- The notice for `waiting`:
+
+  ```
+  ::notice::waiting for tag: the release commit is the main tip and has no tag yet; re-run the failed tag-release.yml run if it failed
+  ```
+
+- The summary line for `waiting`:
+
+  ```
+  Waiting for tag: the merged release commit is the main tip and has no tag yet. Nothing was changed. If the tagging run failed, re-run it.
+  ```
+
+- The error for any other answer, where `$out` is the answer:
+
+  ```
+  ::error::unexpected answer from pending-cut: $(printf '%s' "$out" | tr '\r\n' '  ')
+  ```
+
+- What the three answers mean is described in the section on recognising a release commit.
+- When the guard writes `proceed=false`, the three steps that test `steps.guard.outputs.proceed == 'true'` are skipped, and every later step tests an output (`release` or `skip`) that only those steps or "Build the release/next commit" set, so no later step runs.
+
+#### Step "Fetch the pull request data"
+
+- The step has the id `fetch` and runs only if `steps.guard.outputs.proceed == 'true'`.
+- It reads the tip of `origin/main` with `git rev-parse origin/main`, called `BASE` in the later steps, and writes it as the output `base`.
+- It runs `changelog.ps1 prs -Base <base>`. If the command fails, the step prints its output and ends with exit code 1.
+- For each number printed by `changelog.ps1 prs -Base <base>`, the step reads the pull request's commits and changed files with `gh api` and adds their commit messages and file names to `$RUNNER_TEMP/pr-messages.json` and `$RUNNER_TEMP/pr-files.json`.
+- If reading the commits fails, the step ends with exit code 1 and this error:
+
+  ```
+  ::error::could not read the commits of pull request #$n (exit $code)
+  ```
+
+- If reading the changed files fails, the step ends with exit code 1 and this error:
+
+  ```
+  ::error::could not read the changed files of pull request #$n (exit $code)
+  ```
+
+#### Step "Compute the release level"
+
+- The step has the id `level` and runs only if `steps.guard.outputs.proceed == 'true'`. It sets `BASE` to `steps.fetch.outputs.base`.
+- It runs `changelog.ps1 level -Base "$BASE" -PrMessages "$RUNNER_TEMP/pr-messages.json"`. If the command fails, the step prints its output and ends with exit code 1.
+- For `major`, `minor` or `patch` it sets `release=true`. For `none` it sets `release=false`.
+- Any other answer ends with exit code 1 and this error:
+
+  ```
+  ::error::unexpected level from changelog.ps1: $(printf '%s' "$out" | tr '\r\n' '  ')
+  ```
+
+- The step writes the outputs `level` (the answer) and `release`.
+
+#### Step "Look up the open release pull requests"
+
+- The step has the id `lookup` and runs only if `steps.guard.outputs.proceed == 'true'`.
+- It runs `gh api "repos/${GH_REPO}/pulls?state=open&base=main&head=${REPO_OWNER}:release/next" --jq '.[].number'` and keeps the standard error in `$RUNNER_TEMP/lookup.err`.
+- If the command fails, the step ends with exit code 1 and this error:
+
+  ```
+  ::error::could not list the pull requests of release/next (exit $code): $(tr '\r\n' '  ' < "$errfile")
+  ```
+
+- If a line of the output is not a number, the step ends with exit code 1 and this error:
+
+  ```
+  ::error::unexpected output from the pull request lookup: $n
+  ```
+
+- The step writes the numbers, one per line, to `$RUNNER_TEMP/release-prs.txt`.
+- The outputs are `count`, the number of lines, and `number`, the last number (empty if there is none).
+
+#### Step "Close the release PR and delete release/next when nothing is left to release"
+
+- The step runs only if `steps.level.outputs.release == 'false'`.
+- For each number in `release-prs.txt` it runs `gh pr close "$n" --comment "Closed by the release bot: nothing on main is left to release."`.
+- It then runs `git ls-remote --exit-code origin refs/heads/release/next`.
+  - With exit code 0 it runs `git push origin --delete release/next`.
+  - With exit code 2 it deletes nothing.
+  - With any other exit code the step ends with exit code 1 and this error:
+
+    ```
+    ::error::could not look up release/next on the remote (exit $code)
+    ```
+
+- The summary line, where `$closed` is the number of closed pull requests and `$deleted` is `yes` or `no`:
+
+  ```
+  Nothing to release. Release pull requests closed: $closed. Branch release/next deleted: $deleted.
+  ```
+
+- The close step runs only when the level is none (`release == 'false'`); the steps from "Stop when several release pull requests are open" to "Generate the pull request body" and "Build the release/next commit" run only when it is major, minor or patch (`release == 'true'`).
+
+#### Step "Stop when several release pull requests are open"
+
+- The step runs only if `steps.level.outputs.release == 'true' && steps.lookup.outputs.count >= 2`. It sets `COUNT` to `steps.lookup.outputs.count`.
+- It prints this error and ends with exit code 1:
+
+  ```
+  ::error::release/next has $COUNT open pull requests; close the extra ones by hand. Nothing was pushed or changed.
+  ```
+
+#### Step "Generate the CHANGELOG section"
+
+- The step runs only if `steps.level.outputs.release == 'true'`. It sets `BASE` to `steps.fetch.outputs.base`.
+- It runs `changelog.ps1 generate -Base "$BASE" -PrMessages "$RUNNER_TEMP/pr-messages.json" -Output "$RUNNER_TEMP/CHANGELOG.generated.md" -SectionOutput "$RUNNER_TEMP/section.md"`.
+- It prints the output of the command. If the command fails, the step ends with exit code 1.
+
+#### Step "Generate the pull request body"
+
+- The step runs only if `steps.level.outputs.release == 'true'`. It sets `BASE` to `steps.fetch.outputs.base` and `LEVEL` to `steps.level.outputs.level`.
+- It runs `changelog.ps1 pr-body -Base "$BASE" -PrMessages "$RUNNER_TEMP/pr-messages.json" -PrFiles "$RUNNER_TEMP/pr-files.json" -Label "bump:$LEVEL" -ChangelogPath "$RUNNER_TEMP/CHANGELOG.generated.md" -Output "$RUNNER_TEMP/pr-body.md"`.
+- It prints the output of the command. If the command fails, the step ends with exit code 1.
+
+#### Step "Build the release/next commit"
+
+- The step has the id `build` and runs only if `steps.level.outputs.release == 'true'`. It sets `BASE` to `steps.fetch.outputs.base` and `COUNT` to `steps.lookup.outputs.count`.
+- The step switches to `release/next` at `BASE` (`git switch -C`), copies the generated file over `CHANGELOG.md`, and commits only that file as `github-actions[bot]`.
+- The commit message is:
+
+  ```
+  release: add the CHANGELOG section for ${BASE:0:12}
+  ```
+
+  `${BASE:0:12}` stands for the first 12 characters of `BASE`.
+- The step reads the tree of the new commit and the commit of `refs/remotes/origin/release/next` with `git rev-parse`. It writes the commit of that ref, empty if the ref does not exist, as the output `remote`.
+- The step sets `skip=true` only when `origin/release/next` exists, its parent is `BASE`, its tree equals the new commit's tree, the event is `push`, and exactly one release pull request is open; otherwise `skip=false`. It writes `skip` as an output.
+- When `skip` is `true`, the step appends this summary line:
+
+  ```
+  Skipped: release/next already holds the same CHANGELOG commit on the same base and has an open pull request. Nothing was pushed, and the pull request body, checklist and label are left as they are.
+  ```
+
+#### Step "Push release/next"
+
+- The step runs only if `steps.build.outputs.skip == 'false'`.
+- `EXPECTED` is the commit of `refs/remotes/origin/release/next` read in "Build the release/next commit", empty when that ref does not exist; the step runs `git push --force-with-lease="release/next:${EXPECTED}" origin release/next`.
+
+#### Step "Open or update the release pull request"
+
+- The step has the id `pr` and runs only if `steps.build.outputs.skip == 'false'`. It sets `LEVEL` to `steps.level.outputs.level`, `COUNT` to `steps.lookup.outputs.count` and `NUMBER` to `steps.lookup.outputs.number`. The body file is `$RUNNER_TEMP/pr-body.md`.
+- With `COUNT` equal to 0 the step creates the pull request with `gh pr create --base main --head release/next --title 'release/next' --body-file "$body"`.
+  - If the command fails, the step ends with exit code 1 and this error, where `$out` is the output of the command:
+
+    ```
+    ::error::could not open the release pull request (exit $code): $(printf '%s' "$out" | tr '\r\n' '  ') $(tr '\r\n' '  ' < "$errfile")
+    ```
+
+  - The step takes the last line of the command's output as the URL, and the part after its last `/` as the number.
+  - If the printed URL does not end in a number, the step looks the new pull request up with `gh api "repos/${GH_REPO}/pulls?state=open&base=main&head=${REPO_OWNER}:release/next" --jq '.[].number'` and takes the first number. If that command fails, the step ends with exit code 1 and this error:
+
+    ```
+    ::error::could not find the new release pull request (exit $code): $(tr '\r\n' '  ' < "$errfile")
+    ```
+
+  - If a line of its output is not a number, the step ends with exit code 1 and this error:
+
+    ```
+    ::error::unexpected output from the pull request lookup: $n
+    ```
+
+  - If no number is found, the step ends with exit code 1 and this error:
+
+    ```
+    ::error::could not determine the number of the new release pull request
+    ```
+
+  - The result word is `opened (#N)`.
+- Otherwise the step uses `NUMBER` and runs `gh pr view "$number" --json state --jq .state`.
+  - If the command fails, the step ends with exit code 1 and this error:
+
+    ```
+    ::error::could not read the state of release pull request #$number (exit $code): $(tr '\r\n' '  ' < "$errfile")
+    ```
+
+  - If the state is not `OPEN`, the step ends with exit code 1 and this error:
+
+    ```
+    ::error::release pull request #$number is no longer open (state: $state); the next push to main or a manual dispatch opens a new one
+    ```
+
+  - If the state is `OPEN`, the step runs `gh pr edit "$number" --body-file "$body"`. The result word is `updated (#N)`.
+- The step writes the number as the output `number`. The summary line, where `$what` is the result word:
+
+  ```
+  Level $LEVEL. Release pull request $what.
+  ```
+
+#### Step "Keep exactly one bump label"
+
+- The step runs only if `steps.build.outputs.skip == 'false'`. It sets `LEVEL` to `steps.level.outputs.level` and `NUMBER` to `steps.pr.outputs.number`.
+- The computed label is `bump:$LEVEL`. The step reads the labels of the pull request with `gh pr view "$number" --json labels --jq '.labels[].name'` and counts those whose name starts with `bump:`.
+- With no such label, the step runs `gh pr edit "$number" --add-label "$computed"`.
+- With one such label that differs from the computed one, the step runs `gh pr edit "$number" --add-label "$computed" --remove-label "$existing"` and then `gh pr comment "$number"` with this body, where `$existing` is the old label and `$computed` the new one:
+
+  ```
+  The release bot replaced the label $existing with $computed, the level computed from the commits on main.
+  ```
+
+- With one such label equal to the computed one, the step changes nothing.
+- With two or more such labels, the step changes nothing and prints this warning. The step does not fail.
+
+  ```
+  ::warning::pull request #$number has $count bump:* labels; none was changed, and the bump label check stays red until exactly one is left
+  ```
+
+#### Step "Dispatch CI and the bump label check on release/next"
+
+- The step runs only if `steps.build.outputs.skip == 'false'`.
+- The step dispatches `ci.yml`, then `bump-label.yml`, on `release/next`; a failed dispatch ends the step with the error below, so a failed `ci.yml` dispatch also means no `bump-label.yml` dispatch.
+- The error, where `$workflow` is the workflow file and `$out` is the output of the command:
+
+  ```
+  ::error::could not dispatch $workflow on release/next (exit $code): $(printf '%s' "$out" | tr '\r\n' '  ') $(tr '\r\n' '  ' < "$errfile")
+  ```
+
+- After both dispatches the step appends this summary line:
+
+  ```
+  Dispatched ci.yml and bump-label.yml on release/next.
+  ```
