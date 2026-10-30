@@ -73,7 +73,7 @@ The job `build` of `release-pr.yml` has `contents: write`, `pull-requests: write
 
 - `release-pr.yml` pushes `release/next` with `git push --force-with-lease`. As a consequence of the platform rule, that push starts no run.
 - `release/next` is not in the push filter of `ci.yml`.
-- The bot opens the release pull request with `gh pr create --base main --head release/next --title 'release/next'`. As a consequence of the platform rule, this pull request does not start a `pull_request` run of `ci.yml`.
+- The bot opens the release pull request with `gh pr create --base main --head release/next --title 'release/next' --body-file "$body"`. As a consequence of the platform rule, this pull request does not start a `pull_request` run of `ci.yml`.
 - So the only thing that starts `ci.yml` on `release/next` is the dispatch in the first row of the dispatch table. It runs the jobs of `ci.yml` on the tip of `release/next`. This gives the check runs `build + test (x86)` and `build + test (x64)` (the job names in `ci.yml`) on that branch.
 - `bump-label.yml` starts on a `pull_request` event (opened, synchronize, reopened, labeled, unlabeled) and on a dispatch. The bot dispatches it on `release/next` after it rebuilds the branch.
 - A `bump:*` label change on the `release/next` pull request starts the job `labels` of `release-pr.yml`.
@@ -116,7 +116,7 @@ Five branch prefixes are working branches: `feat/`, `stage/`, `chore/`, `fix/` a
 - The level is the highest of the changes since the last tag: minor if there is any `feat/` or `stage/` change, else patch if there is any `fix/` change, else none.
 - The level comes from the branch prefix, not from the commit types. A `feat/`, `stage/` or `fix/` pull request that has only `chore:` commits still releases. It is listed by its branch name, with a warning.
 - The bot computes the level with `changelog.ps1 level`. If it is major, minor or patch, the job rebuilds `release/next` and opens or updates the release pull request. If it is none, the job closes every open release pull request with a comment and deletes `release/next` if the branch exists.
-- The bot labels the release pull request `bump:<level>`. A person can change the label, but the next rebuild that is not skipped puts the computed label back and comments. The `bump label` check and the tagging require exactly one `bump:*` label; the tagging also requires it to be `bump:major`, `bump:minor` or `bump:patch`.
+- The bot labels the release pull request `bump:<level>`. On every rebuild that is not skipped, it adds the computed label when there is no `bump:*` label, replaces a single other `bump:*` label with the computed one and comments, and changes nothing but warns when there are two or more. The `bump label` check and the tagging require exactly one `bump:*` label; the tagging also requires it to be `bump:major`, `bump:minor` or `bump:patch`.
 - A change of type `unknown` raises no level of its own. The generator gives a warning for it and, unless it has a breaking marker, lists it under Development.
 
 ### Reserved branch `release/next`
