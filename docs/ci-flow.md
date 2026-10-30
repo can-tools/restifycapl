@@ -1077,3 +1077,151 @@ All steps except the first run with `shell: bash`.
   ```
   Dispatched ci.yml and bump-label.yml on release/next.
   ```
+
+### The pull request description
+
+In the texts quoted in this section, `<...>` stands for a value at run time.
+
+`changelog.ps1 pr-body` writes the description to the `-Output` file. The step "Generate the pull request body" passes `$RUNNER_TEMP/pr-body.md`, and the step "Open or update the release pull request" passes that file as `--body-file`.
+
+The file has these parts, in this order:
+
+1. The version preview line, as described in the section on the version preview line, then a blank line.
+2. The caution block, only when Breaking changes has entries. It is written as below, with one `> ` line for each breaking entry (an entry starts with `- `), then a blank line.
+
+   ```
+   > [!CAUTION]
+   > **Breaking change.** This release contains:
+   >
+   > <entry>
+   ```
+
+3. The release notes. The heading and the sentence are:
+
+   ```
+   ## Release notes
+
+   Development entries stay in CHANGELOG.md and are left out of the GitHub release notes.
+   ```
+
+   The groups follow in this order: Breaking changes, Added, Fixed. Each group is a blank line, the line `### <name>`, a blank line and its entries. A blank line follows the groups. The group Development is never written. At least one of the three groups is always present. Each breaking entry appears twice: in the caution block and under `### Breaking changes`.
+4. The warnings, only when there is at least one warning. The format is:
+
+   ```
+   ## Warnings
+
+   - <text>
+   ```
+
+   with one `- <text>` line for each warning, then a blank line. The warnings come in this order: first the warnings listed under "Entries and warnings" in the CHANGELOG section, then one warning for each commit after the cut-off whose subject has the type `fix` and a number (` (#N)`), when the changed files of that pull request in `-PrFiles` include `src/module/exports.cpp`. The commits are taken oldest first. The log line of that warning is:
+
+   ```
+   ::warning::the fix/ pull request #<number> changed src/module/exports.cpp; confirm that no export table row was renamed, reordered or removed
+   ```
+
+5. The review part:
+
+   ```
+   ## Review
+
+   The release bot maintains this pull request: commits pushed to `release/next` by hand are overwritten the next time it rebuilds the branch, and the checklist below is reset on every rebuild. Squash-merging the pull request releases the version.
+
+   - [ ] The release notes above read correctly for DLL and CAPL users
+   - [ ] The `bump:*` label matches the intended version (the preview is the last tag plus the label's level)
+   - [ ] The breaking changes in the caution block above are intended
+   ```
+
+   The third item is written only when Breaking changes has entries.
+
+Other facts:
+
+- The links of the entries use `-RepoUrl`. Without it, the URL is taken from the `-ChangelogPath` file in the same way as for `generate`: from the first link definition of the form `[<12 hex characters>]: <url>/commit/<40 hex characters>`. If there is none, the run ends with `::error::no repository URL: the file has no link definition to take it from; pass -RepoUrl`. A `-RepoUrl` of another form ends with exit code 2 and the usage text `-RepoUrl must be https://github.com/<owner>/<repo>`.
+- The lines are joined with a line feed, and a line feed follows the last line. The file is UTF-8 without a byte order mark.
+- The file is written only after all checks have passed. If there is no entry under Breaking changes, Added or Fixed, the run ends with `::error::nothing to release since <last tag>: no feat/, stage/ or fix/ change and no breaking marker after the cut-off commit`, the same error as step 4 of the CHANGELOG section.
+- The script writes each warning to standard output as `::warning::<text>`. It does this before the check for an empty release, so the warnings are printed also when the run ends with that error.
+
+### Job `labels`
+
+In the messages quoted in this section, a shell variable (for example `$PR_NUMBER`, `$count` or `$code`) stands for its value at run time. `$(tr '\r\n' '  ' < "$errfile")` stands for the content of the step's error file, and `$(printf '%s' "$out" | tr '\r\n' '  ')` for `$out`; in both, each carriage return and line feed is turned into a space.
+
+All steps except the first run with `shell: bash`.
+
+- The job has the id `labels` and runs on `ubuntu-latest`.
+- It runs only if all four conditions hold: the event is `pull_request`; `github.head_ref` is `release/next`; the full name of the head repository equals `github.repository`; the name of the label of the event starts with `bump:`.
+- The permissions are `contents: read` and `pull-requests: write`.
+- The concurrency group is `release-pr-labels`, with `cancel-in-progress: false`.
+- The job sets these environment variables:
+  - `GH_TOKEN` is `github.token`.
+  - `GH_REPO` is `github.repository`.
+  - `PR_NUMBER` is `github.event.pull_request.number`.
+- The job has four steps, in this order: "Checkout main (full history and tags)", "Read the bump label and the body of the pull request", "Rewrite the version preview line of the body" and "Update the pull request body".
+
+#### Step "Checkout main (full history and tags)"
+
+- The step uses `actions/checkout`, pinned by SHA with the label `# v7.0.1`.
+- It checks out `main` with `fetch-depth: 0`, `fetch-tags: true` and `persist-credentials: false`.
+
+#### Step "Read the bump label and the body of the pull request"
+
+- The step has the id `label`.
+- If `PR_NUMBER` does not match `^[0-9]+$`, the step ends with exit code 1 and this error:
+
+  ```
+  ::error::unexpected pull request number: $PR_NUMBER
+  ```
+
+- It runs `gh api "repos/${GH_REPO}/pulls/${PR_NUMBER}"` and keeps the standard error in `$RUNNER_TEMP/pr.err`. If the command fails, the step ends with exit code 1 and this error:
+
+  ```
+  ::error::could not read pull request #$PR_NUMBER (exit $code): $(tr '\r\n' '  ' < "$errfile")
+  ```
+
+- It saves the response in `$RUNNER_TEMP/pr.json`.
+- It runs `jq -j '.body // ""'` on the response and writes the result to `$RUNNER_TEMP/body.md`.
+- It counts the labels of the response whose name starts with `bump:`, read with `jq -r '.labels[].name'`.
+- If the count is not 1, the step prints this warning:
+
+  ```
+  ::warning::pull request #$PR_NUMBER has $count bump:* labels; the bump label check stays red until exactly one is left; the body was not changed
+  ```
+
+- If the count is 1 and the label is not exactly `bump:major`, `bump:minor` or `bump:patch`, the step prints this warning, where `$label` is the label:
+
+  ```
+  ::warning::the label $label is not bump:major, bump:minor or bump:patch; the bump label check stays red until it is replaced; the body was not changed
+  ```
+
+- After either warning the step appends this summary line and sets `label` to empty. The step then succeeds. The two later steps run only if `steps.label.outputs.label != ''`, so both are skipped.
+
+  ```
+  Pull request #$PR_NUMBER: nothing changed.
+  ```
+
+- The step ends by writing `label=$label` to `$GITHUB_OUTPUT`: the one `bump:*` label when both checks pass, empty after a warning.
+
+#### Step "Rewrite the version preview line of the body"
+
+- The step runs only if `steps.label.outputs.label != ''`. It sets `LABEL` to that output.
+- It runs `pwsh -NoProfile -File scripts/ci/changelog.ps1 body-version -Body "$body" -Label "$LABEL" -Output "$body"`, where `body` is `$RUNNER_TEMP/body.md`. What `body-version` does is described in the section on the version preview line.
+- The script is the one of the checkout of `main` made in the first step, and the last tag comes from the tags of that checkout.
+- If the command fails, the step ends with exit code 1 and this error, where `$out` is the standard output of the command:
+
+  ```
+  ::error::could not rewrite the version preview of pull request #$PR_NUMBER (exit $code): $(printf '%s' "$out" | tr '\r\n' '  ')
+  ```
+
+#### Step "Update the pull request body"
+
+- The step runs only if `steps.label.outputs.label != ''`. It sets `LABEL` to that output.
+- It runs `gh pr edit "$PR_NUMBER" --body-file "$RUNNER_TEMP/body.md"` and keeps the standard error in `$RUNNER_TEMP/edit.err`.
+- If the command fails, the step ends with exit code 1 and this error, where `$out` is the standard output of the command:
+
+  ```
+  ::error::could not update the body of pull request #$PR_NUMBER (exit $code): $(printf '%s' "$out" | tr '\r\n' '  ') $(tr '\r\n' '  ' < "$errfile")
+  ```
+
+- Otherwise the step appends this summary line:
+
+  ```
+  Pull request #$PR_NUMBER: version preview rewritten for label $LABEL.
+  ```
