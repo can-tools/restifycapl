@@ -657,3 +657,153 @@ The step runs with `shell: bash`. It runs these parts in order.
   ```
   Pull request #${number} carries exactly one bump label:${selected}
   ```
+
+## How the level, the version and the CHANGELOG section are computed (`changelog.ps1`)
+
+In the messages quoted in this section, `<...>` stands for a value at run time.
+
+### Range and change types
+
+The last tag:
+
+- The script lists the tags with `git tag --list`. A tag counts when it matches `^v([0-9]+)\.([0-9]+)\.([0-9]+)$`.
+- A tag with a leading zero in a field is ignored. The script writes this to standard error: `ignored tag <name>: a field has a leading zero`.
+- A tag with a field above 65535 is ignored. The script writes this to standard error: `ignored tag <name>: a field is above 65535`.
+- Of the remaining tags, the highest wins. The tags are compared by number: first the major field, then the minor, then the patch.
+- If no tag is left, the run ends with `::error::no tag of the form vX.Y.Z found; fetch the tags (a shallow checkout has none) or tag the first release by hand`.
+
+The range:
+
+- `-Base` is a full commit hash: 40 lowercase hex characters. Otherwise the run ends with exit code 2 and the usage text `-Base must be a full 40-character lowercase hex commit hash`.
+- Without `-Base`, the script takes the result of `git rev-parse origin/main`, the tip of `origin/main`.
+- The range is `git log --first-parent <last tag>..<Base>`. Only the first-parent commits are read. They are processed oldest first.
+
+The subject of a commit:
+
+- The script reads a trailing ` (#N)`, where `N` has one to nine digits and the text before it ends with a character that is not a space. The text before it is the subject text.
+- The type is the branch prefix matched by `^(feat|stage|fix|chore|docs|release)/` at the start of the subject text. Without a match the type is `unknown`.
+- A commit with the type `release` is skipped for the level and for the entries.
+
+The commit messages of a pull request:
+
+- `-PrMessages` is a JSON object from pull request number to the full commit messages, built by the workflow.
+- The messages are read for a commit that has a number in its subject, is not of type `release` and has that number in the object.
+- The first line of a message is parsed with `^([a-z]+)(?:\([^()]*\))?(!)?: (\S.*)$`: type, optional scope, optional `!`, and the text. A first line that does not match gives an empty type and the whole first line as the text.
+- A line after the first line that starts with `BREAKING CHANGE:` or `BREAKING-CHANGE:` is a breaking footer. The first such line counts. If its text is not empty, it replaces the text of the message.
+- A message is breaking when it has the `!` or a breaking footer.
+
+The cut-off:
+
+- Commits up to and including a fixed commit named in the script (`$CutOffSha`) are listed under Development and raise no level.
+
+### Level
+
+- `changelog.ps1 level` prints one of `major`, `minor`, `patch` or `none` on standard output. It takes `-Base` and `-PrMessages`.
+- A commit of type `release` and a commit up to the cut-off are skipped.
+- Breaking messages count for any branch type.
+- The result is the first of these tests that holds:
+  1. A message is breaking and the major field of the last tag is 1 or more: `major`.
+  2. A message is breaking, or a commit has the type `feat` or `stage`: `minor`.
+  3. A commit has the type `fix`: `patch`.
+  4. Otherwise: `none`.
+- The rule for a last tag with the major field 0 is part of this test: the first test does not hold, so a breaking message gives `minor`.
+
+### Next version
+
+- `changelog.ps1 next-version` takes exactly one of `-Level` and `-Label`. Otherwise the run ends with exit code 2 and the usage text `give exactly one of -Level and -Label`.
+- `-Level` is `major`, `minor`, `patch` or `none`. `-Label` is `bump:major`, `bump:minor` or `bump:patch`. Any other value ends with exit code 2 and a usage text.
+- With `-Label`, the level is the part of the label after `bump:`.
+- The next version is computed from the last tag `X.Y.Z`:
+  - `major`: `X+1.0.0`.
+  - `minor`: `X.Y+1.0`.
+  - `patch`: `X.Y.Z+1`.
+- The level `none` ends with `::error::nothing to release: the level is none`.
+- A field of the result above 65535 ends with `::error::the next version <version> has a field above 65535 (version resource fields are 16-bit)`.
+- The output is `X.Y.Z`, without `v`.
+
+### CHANGELOG section
+
+`changelog.ps1 generate` adds a new release section to the CHANGELOG text and writes the result to a file.
+
+Parameters:
+
+| Parameter | Meaning |
+|---|---|
+| `-Base` | As in the range above. |
+| `-Date` | The date in the heading, as `YYYY-MM-DD`. Default: today, UTC. A value that is not a real date ends with exit code 2 and the usage text `-Date must be a real date as YYYY-MM-DD`. |
+| `-RepoUrl` | `https://github.com/<owner>/<repo>`. Default: taken from the first link definition of the file of the form `[<12 hex characters>]: <url>/commit/<40 hex characters>`. Another value ends with exit code 2 and the usage text `-RepoUrl must be https://github.com/<owner>/<repo>`. |
+| `-ChangelogPath` | The file that is read. Default: `CHANGELOG.md`. |
+| `-Output` | The file that is written. Default: `-ChangelogPath`, so the file is overwritten. |
+| `-SectionOutput` | Optional. A second file that gets the new section alone. |
+| `-PrMessages` | As in the range above. |
+
+Before step 1, if the file has no such link definition and `-RepoUrl` is not given, the run ends with `::error::no repository URL: the file has no link definition to take it from; pass -RepoUrl`.
+
+Steps, in this order:
+
+1. The script drops the untagged sections. It reads `CHANGELOG.md` as it is at the last tag with `git show <last tag>:CHANGELOG.md`. Every section of the file whose heading `## [<12 hex characters>] - YYYY-MM-DD` has a hash that is not a heading in that version is removed. It is removed from its heading up to the next `## [` heading or link definition, together with its link definition `[<hash>]:`.
+2. If a line of the remaining file starts with `## [<short>]`, where `<short>` is the first 12 characters of `-Base`, the run ends with `::error::the file already has a section for <short>`.
+3. The script reads the range and builds the entries. It writes each warning to standard output as `::warning::<text>`.
+4. If there is no entry under Breaking changes, Added or Fixed, the run ends with `::error::nothing to release since <last tag>: no feat/, stage/ or fix/ change and no breaking marker after the cut-off commit`.
+5. The script builds the section and writes the files.
+
+Entries and warnings:
+
+- The commits are read oldest first. A commit of type `release` gives nothing.
+- A commit up to the cut-off gives one Development entry with its subject text.
+- A commit without a number in the subject gives the warning `the subject "<text>" has no "(#N)"; its commit messages and breaking markers were not read`.
+- Each breaking message gives an entry under Breaking changes.
+- A commit of type `feat`, `stage` or `fix`:
+  - Each message that is not breaking and has the type `feat`, `stage` or `fix` gives an entry with the text of the message. The type `fix` goes under Fixed, the other two under Added.
+  - If there is no such message and no breaking message, the subject text gives an entry instead: under Fixed for `fix`, under Added for the others. The script also gives the warning `"<text>" has no feat, stage, fix or breaking commit message; it is listed by its branch name`.
+- A commit of another type gives one Development entry with its subject text, unless it has a breaking message.
+- For the type `unknown`, the script also gives the warning `the subject "<text>" does not start with a feat/, stage/, fix/, chore/ or docs/ branch prefix; it is listed under Development`.
+- The entry format is `- <text> ([#N](<RepoUrl>/pull/N))`. When the subject has no number, the entry is `- <text>`, without the link.
+
+The section:
+
+- The heading is `## [<short>] - <Date>`.
+- The groups follow in this order: Breaking changes, Added, Fixed, Development. Each is a `### ` heading with a blank line before and after. A group without entries is omitted. The entries of a group keep the order of the commits, oldest first.
+
+The placement in the file:
+
+- The section goes before the first line that starts with `## [`. If there is none, it goes before the first link definition. If there is none either, it goes at the end of the file.
+- A blank line follows the section. A blank line is also added before it when the line before is not blank.
+- The link definition is `[<short>]: <RepoUrl>/commit/<full Base>`. It is placed directly above the first link definition that follows the new section. If there is none, it is appended at the end of the file, after a blank line.
+
+The output files:
+
+- The result goes to `-Output`, or over `-ChangelogPath` when `-Output` is not given.
+- `-SectionOutput` gets the section alone: its lines, each ended with a line feed. It does not get the link definition.
+- Both files are UTF-8 without a byte order mark.
+- When a check fails, nothing is written.
+
+### Version preview line
+
+The first line of the pull request description built by `changelog.ps1 pr-body` is:
+
+```
+Version preview: <!-- version -->vX.Y.Z (vA.B.C + level)<!-- /version -->
+```
+
+- `vX.Y.Z` is the next version. `vA.B.C` is the last tag. `level` is `major`, `minor` or `patch`.
+- With `-Label`, the next version and `level` come from the level of the label. Without it, they come from the computed level.
+- `-Label` must be `bump:major`, `bump:minor` or `bump:patch`. Another value ends with exit code 2 and the usage text `-Label must be bump:major, bump:minor or bump:patch`.
+- `release-pr.yml` always passes `-Label "bump:$LEVEL"` to `pr-body`.
+
+`changelog.ps1 body-version` updates this line in an existing description:
+
+- The parameters are `-Body` (the description file that is read), `-Label` and `-Output` (the file that is written). All three are required.
+- The description must have exactly one line that holds a version marker. That line must hold `<!-- version -->` once and `<!-- /version -->` once, in this order.
+- The command replaces the text between the two markers with the preview built from the label and the last tag.
+- All other lines stay as they are, so the ticks in the checklist stay.
+- The output is UTF-8 without a byte order mark.
+- `-Output` may be the same file as `-Body`: the command reads `-Body` completely before it writes.
+- If the description does not match, the run ends with `::error::<Body> must hold exactly one line with both version markers in order; found <count> line(s) with a marker`. `<Body>` is the value of `-Body`; `<count>` is the number of lines that hold either marker.
+
+### Errors in general
+
+- A failure ends with `::error::<message>` on standard output and exit code 1.
+- An invalid argument ends with exit code 2. The script writes a message and a usage line to standard error.
+- A JSON input file that cannot be read, or that has the wrong shape, ends with an `::error::` that names the file, and exit code 1.
+- A failing `git` command ends with an `::error::` and exit code 1.
