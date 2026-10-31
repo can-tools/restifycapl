@@ -1879,7 +1879,8 @@ The step does these things in this order:
   ::error::dist must contain exactly the two DLLs
   ```
 
-- It creates `dist/SHA256SUMS` with `sha256sum restifycapl-x86.dll restifycapl-x64.dll`, run in `dist`.- It counts the lines of `parts/table/export-table.md` that match `^\| [0-9]+ \| `, called `rows` below. A row of the table has the form ``| <index> | `<signature>` | <description> |``. If `rows` is less than 1, it ends with exit code 1 and this error:
+- It creates `dist/SHA256SUMS` with `sha256sum restifycapl-x86.dll restifycapl-x64.dll`, run in `dist`.
+- It counts the lines of `parts/table/export-table.md` that match `^\| [0-9]+ \| `, called `rows` below. A row of the table has the form ``| <index> | `<signature>` | <description> |``. If `rows` is less than 1, it ends with exit code 1 and this error:
 
   ```
   ::error::the export table markdown has no function rows
@@ -1910,7 +1911,8 @@ The step does these things in this order:
 #### Step "Upload the release assets"
 
 - The step uses `actions/upload-artifact`, pinned by SHA with the label `# v7.0.2`.
-- The artifact name is `release-assets` and the path is `dist`.- The step sets `if-no-files-found: error` and `overwrite: true`.
+- The artifact name is `release-assets` and the path is `dist`.
+- The step sets `if-no-files-found: error` and `overwrite: true`.
 
 ### Job `attest`
 
