@@ -1938,3 +1938,88 @@ The step does these things in this order:
   ```
   ::error::attestation of $dll could not be verified
   ```
+
+### Job `publish`
+
+- The permissions are `contents: write`.
+- The job sets these environment variables:
+  - `GH_TOKEN` is `github.token`.
+  - `TAG` is `needs.validate.outputs.tag`.
+- The job has seven steps, in this order: "Download the release assets", "Require that no published release exists for the tag", "Delete a leftover draft for the tag", "Create the draft release and upload the assets", "Verify the draft", "Make the release public" and "Say what state the release is in".
+
+#### Step "Download the release assets"
+
+- The step uses `actions/download-artifact`, pinned by SHA with the label `# v7.0.0`. The artifact name is `release-assets` and the path is `dist`.
+
+#### Step "Require that no published release exists for the tag"
+
+- The step makes check 5 of the step "Validate the tag" again, with the same command and the same outcomes.
+  - If the command succeeds, the step ends with exit code 1 and this error:
+
+    ```
+    ::error::a published release for $TAG already exists; never move a published tag
+    ```
+
+  - If the command fails and its error output does not hold `HTTP 404`, the step ends with exit code 1 and this error:
+
+    ```
+    ::error::could not check for an existing release: $err
+    ```
+
+#### Step "Delete a leftover draft for the tag"
+
+- The step lists the releases with `gh api --paginate "repos/$GITHUB_REPOSITORY/releases"` and passes the list to `jq -r --arg tag "$TAG" '.[] | select(.draft and .tag_name == $tag) | .id'`, which prints the id of each release whose `draft` is true and whose `tag_name` is `$TAG`.
+- For each id, it prints `deleting leftover draft $id` and runs `gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id"`.
+
+#### Step "Create the draft release and upload the assets"
+
+- The step runs `gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --verify-tag --title "$TAG" --notes-file dist/notes.md dist/restifycapl-x86.dll dist/restifycapl-x64.dll dist/SHA256SUMS`.
+
+#### Step "Verify the draft"
+
+The step does these things in this order:
+
+- It makes up to 10 attempts. In each, it sets `all` to the output of `gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases"`, `draft` to the output of `echo "$all" | jq -c --arg tag "$TAG" '[.[][] | select(.draft and .tag_name == $tag)]'` and `count` to the length of `draft`.
+- The attempts stop at the first one whose `count` is not 0. After attempts 1 to 9, when `count` is 0, the step prints `no draft for $TAG listed yet (attempt $attempt of 10)` and runs `sleep 3`. After the 10th attempt it goes on to the next check.
+- If `count` is not 1, it ends with exit code 1 and the error below. In the log, the `$(...)` part is replaced by a JSON array on one line with the `id`, `tag_name` and `name` of every release in `all` whose `draft` is true, whatever its tag.
+
+  ```
+  ::error::expected exactly one draft for $TAG, found $count; listed drafts: $(echo "$all" | jq -c '[.[][] | select(.draft) | {id, tag_name, name}]')
+  ```
+
+- It takes the names of the assets of the draft, sorted and joined with a space, as `names`. If `names` is not `SHA256SUMS restifycapl-x64.dll restifycapl-x86.dll`, it ends with exit code 1 and this error:
+
+  ```
+  ::error::the draft must carry exactly three assets, found: $names
+  ```
+
+- It sets `chars` to `.[0].body | length` of `draft`, computed with `jq`. If `chars` is above 125000, it ends with exit code 1 and this error:
+
+  ```
+  ::error::the draft notes are $chars characters, the limit is 125000
+  ```
+
+- It creates the directory `verify`. For each asset of the draft, it runs `gh api -H "Accept: application/octet-stream" "repos/$GITHUB_REPOSITORY/releases/assets/$id" > "verify/$name"`, where `$id` and `$name` are the id and name of the asset.
+- It runs `sha256sum -c SHA256SUMS` in `verify`.
+
+#### Step "Make the release public"
+
+- The step runs `gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false`.
+
+#### Step "Say what state the release is in"
+
+- The step runs only if `failure()`.
+- It runs `gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG"`, discarding its output and error output, and sets `msg` by the exit status of the command.
+  - If the command succeeds, `msg` is:
+
+    ```
+    The release for $TAG is public. Never move the tag; fix forward through a fix/ pull request and the next version.
+    ```
+
+  - Otherwise `msg` is:
+
+    ```
+    Nothing is public for $TAG. Re-run the failed jobs for a transient failure. For a defect, the tag stays and its name is never reused: fix it through a fix/ pull request and release the next version; the draft may be deleted.
+    ```
+
+- It prints `::error::$msg` and appends `$msg` to the job summary.
