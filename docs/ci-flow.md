@@ -16,6 +16,44 @@ The flow is made of seven workflows in `.github/workflows/` and two composite ac
 | `.github/actions/export-table/action.yml` | export-table | Composite action. Runs the export-table fixtures, checks `src/module/exports.cpp` and writes the job summary. `ci.yml` and `release.yml` use it. |
 | `.github/actions/provision/action.yml` | Provision build environment | Composite action. Activates MSVC, provisions the pinned vcpkg tool and the static dependencies, and places them where the Makefile expects them. `arch-pipeline.yml` uses it. |
 
+## Release path at a glance
+
+The diagram shows the workflows of a release in order, from the first push to the published GitHub release. A solid arrow leads from an event to a workflow that starts on it, or from a workflow to the branch, tag, pull request or release that it pushes, opens, updates or publishes. A dashed arrow means that a step starts the workflow at the arrow head with `gh workflow run` on the ref in the label.
+
+```mermaid
+flowchart LR
+    A1["push to a working branch"]
+    A2["push to main"]
+    A3["bump label change on the release pull request"]
+    C["ci.yml"]
+    AP["auto-pr.yml"]
+    D["draft pull request"]
+    RB["release-pr.yml job build"]
+    RL["release-pr.yml job labels"]
+    BL["bump-label.yml"]
+    TR["tag-release.yml jobs classify and tag"]
+    RN["release/next and the release pull request"]
+    TG["tag vX.Y.Z"]
+    RE["release.yml jobs validate, pipeline-x86, pipeline-x64, export-table, assemble, attest and publish"]
+    GR["GitHub release"]
+
+    A1 -->|"push"| C
+    A1 -->|"push"| AP
+    AP -->|"opens"| D
+    A2 -->|"push"| C
+    A2 -->|"push"| RB
+    A2 -->|"push"| TR
+    RB -->|"pushes; opens or updates"| RN
+    RB -.->|"gh workflow run on release/next"| C
+    RB -.->|"gh workflow run on release/next"| BL
+    A3 -->|"labeled or unlabeled"| RL
+    A3 -->|"labeled or unlabeled"| BL
+    TR -->|"creates and pushes"| TG
+    TR -.->|"gh workflow run on main"| RB
+    TR -.->|"gh workflow run on the tag"| RE
+    RE -->|"publishes"| GR
+```
+
 ## What starts what
 
 ### The platform rule
