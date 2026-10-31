@@ -1643,3 +1643,296 @@ All steps except the first of each job run with `shell: bash`.
     ```
     ::error::could not look up the release of $TAG (exit $code): $(tr '\r\n' '  ' < "$errfile")
     ```
+
+## Release (`release.yml`)
+
+The workflow has the permission `contents: read`. The triggers and the concurrency group of the workflow are in the section on triggers of each workflow.
+
+In the messages and commands quoted in this section, a shell variable (for example `$TAG`, `$code`, `$n` or `$dll`) stands for its value at run time. In the messages of `changelog.ps1` quoted in this section, `<...>` stands for a value at run time.
+
+Every step with `run:` runs with `shell: bash`.
+
+### Jobs
+
+- The workflow has seven jobs, in this order: `validate`, `pipeline-x86`, `pipeline-x64`, `export-table`, `assemble`, `attest` and `publish`. The job `publish` is described after the job `attest`.
+- `pipeline-x86` and `pipeline-x64` consist only of `needs:`, `uses:` and `with:`. They call `arch-pipeline.yml` as described in the section on Architecture pipeline, which also names the artifacts they upload.
+- The other five jobs run on `ubuntu-latest`.
+- Third-party actions in the file, each pinned by SHA with a label: `actions/checkout` with `# v7.0.1`, `actions/upload-artifact` with `# v7.0.2`, `actions/download-artifact` with `# v7.0.0` and `actions/attest-build-provenance` with `# v4.2.2`.
+- `validate` is the first job. The other jobs have these `needs:`:
+
+| Job | `needs:` |
+|---|---|
+| `pipeline-x86` | `validate` |
+| `pipeline-x64` | `validate` |
+| `export-table` | `validate` |
+| `assemble` | `validate`, `pipeline-x86`, `pipeline-x64`, `export-table` |
+| `attest` | `assemble` |
+| `publish` | `validate`, `export-table`, `assemble`, `attest` |
+
+- `publish` has `if: github.ref_type == 'tag'`.
+- The mode is set by the step "Select mode" of `validate`; the rule for it is in the section on triggers of each workflow. The table compares the two modes.
+
+| | Mode `tag` | Mode `dry-run` |
+|---|---|---|
+| Step "Validate the tag" | Runs and writes the outputs `tag` and `version`. | Skipped. |
+| Step "Extract the CHANGELOG section for the release notes" | Runs with `-Mode tag`. | Runs with `-Mode dry-run`. |
+| Step "Show the version" | Runs. | Skipped. |
+| Step "Preview the next release" | Skipped. | Runs. |
+| Jobs `validate` to `attest` | Run. | Run. |
+| Job `publish` | Runs. | Skipped. |
+
+### Job `validate`
+
+- The permissions are `contents: read` and `pull-requests: read`.
+- The job has two outputs: `tag` is the output `tag` of the step `tag`, and `version` is the output `version` of the step `tag`.
+- The job has eight steps, in this order: "Checkout (full history)", "Select mode", "Validate the tag", "Run the CHANGELOG fixtures", "Extract the CHANGELOG section for the release notes", "Show the version", "Preview the next release" and "Upload the notes body".
+
+#### Step "Checkout (full history)"
+
+- The step uses `actions/checkout`, pinned by SHA with the label `# v7.0.1`, with `fetch-depth: 0`.
+
+#### Step "Select mode"
+
+- The step has the id `mode`.
+- It writes `mode=tag` to `$GITHUB_OUTPUT` when `$GITHUB_REF_TYPE` is `tag`, and `mode=dry-run` otherwise.
+
+#### Step "Validate the tag"
+
+- The step has the id `tag` and runs only if `steps.mode.outputs.mode == 'tag'`.
+- It sets `GH_TOKEN` to `github.token` and `TAG` to `github.ref_name`.
+- The step makes the checks below in this order. The first check that fails ends the step with exit code 1.
+  1. `TAG` must match `^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`. Otherwise:
+
+     ```
+     ::error::tag '$TAG' is not of the form vX.Y.Z without leading zeros
+     ```
+
+  2. No field of the tag may be longer than 5 characters or above 65535. Otherwise:
+
+     ```
+     ::error::tag '$TAG' has a field above 65535 (version resource fields are 16-bit)
+     ```
+
+  3. `git merge-base --is-ancestor "$GITHUB_SHA" origin/main` must succeed. Otherwise:
+
+     ```
+     ::error::the tagged commit is not an ancestor of origin/main
+     ```
+
+  4. `git rev-list --parents -n 1 "$GITHUB_SHA"`, read into an array with `read -r -a`, must give at least 2 words. Otherwise:
+
+     ```
+     ::error::the tagged commit has no parent; tag the squash-merge commit of the CHANGELOG cut
+     ```
+
+  5. The step runs `gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG"` and keeps its error output as `$err`; its standard output is discarded.
+     - If the command succeeds, the step ends with this error:
+
+       ```
+       ::error::a published release for $TAG already exists; never move a published tag
+       ```
+
+     - If the command fails and its error output does not hold `HTTP 404`, the step ends with this error:
+
+       ```
+       ::error::could not check for an existing release: $err
+       ```
+
+     - If the command fails and its error output holds `HTTP 404`, the check passes.
+- The step then writes `tag=$TAG` and `version=${TAG#v}` to `$GITHUB_OUTPUT`.
+
+#### Step "Run the CHANGELOG fixtures"
+
+- The step runs the same command as the step "Run the CHANGELOG fixtures" of the job `changelog-fixtures`, described in the section on CI.
+
+#### Step "Extract the CHANGELOG section for the release notes"
+
+- The step sets `MODE` to `steps.mode.outputs.mode`.
+- It runs `pwsh -NoProfile -File scripts/ci/changelog.ps1 notes -Mode "$MODE" -Sha "$GITHUB_SHA" -Output "$RUNNER_TEMP/notes-body.md"`.
+- The command writes the notes body to the `-Output` file and appends this summary line, where `<heading>` is the heading line of the section it chose and `<mode>` is the value of `-Mode`:
+
+  ```
+  Release notes taken from the CHANGELOG section `<heading>` (<mode> mode).
+  ```
+
+How `notes` locates the section:
+
+- In mode `tag`, the section is the one whose heading matches `## [<12 lowercase hex characters>] - YYYY-MM-DD`, where the 12 characters are a prefix of the output of `git rev-parse <sha>^` and `<sha>` is the value of `-Sha`. There must be exactly one such heading. Otherwise the command ends with this error:
+
+  ```
+  ::error::the tag must be on the squash-merge commit of the CHANGELOG cut; expected exactly one "## [<first 12 characters of that output>] - YYYY-MM-DD" heading, found <count>
+  ```
+
+- In mode `dry-run`, the section is the first one, from the top of `CHANGELOG.md`, whose heading starts with `## [` and whose body is not empty. If there is none, the command ends with this error:
+
+  ```
+  ::error::no CHANGELOG.md section has release notes once "### Development" is removed
+  ```
+
+- In both modes, the body is made like this:
+  - It takes the lines of the section up to the next heading that starts with `## [` or the next link definition.
+  - It removes the `### Development` block: the line `### Development` and the lines after it up to the next line that starts with `### `, or up to the end of the section. If a section that the command reads has more than one line `### Development`, the command ends with this error:
+
+    ```
+    ::error::the section has more than one "### Development" block
+    ```
+
+  - A body is empty when each of its lines is blank or starts with `### `. In mode `tag`, an empty body ends the command with this error:
+
+    ```
+    ::error::the CHANGELOG section <heading> is empty once "### Development" is removed
+    ```
+
+#### Step "Show the version"
+
+- The step runs only if `steps.mode.outputs.mode == 'tag'`. It sets `TAG_VERSION` to `steps.tag.outputs.version`.
+- It appends this line to the job summary:
+
+  ```
+  Version $TAG_VERSION, taken from the tag.
+  ```
+
+#### Step "Preview the next release"
+
+- The step runs only if `steps.mode.outputs.mode == 'dry-run'`. It sets `GH_TOKEN` to `github.token`.
+- Each outcome described below ends the step with `exit 0`.
+- The step keeps four files in `$RUNNER_TEMP`: `pr-messages.json`, `pr-arg.json`, `CHANGELOG.generated.md` and `section.md`.
+- It runs `changelog.ps1` through a helper that keeps the exit code in `$code`, the standard output in `$out`, and in `$reason` the standard output with a leading `::error::` removed from each line.
+- The commands, in this order:
+  1. `pwsh -NoProfile -File scripts/ci/changelog.ps1 prs`. The command prints one pull request number per line. The step reads `$out` line by line and skips empty lines.
+  2. The step writes `{}` to `pr-messages.json`. For each pull request number `n`, it reads the commit messages with `gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/pulls/$n/commits" | jq -c '[.[][].commit.message]'`, writes them to `pr-arg.json` and adds them to `pr-messages.json` with `jq`, under the key `n`. The shape of the file is the one of `-PrMessages` in the section on range and change types.
+  3. `changelog.ps1 level -PrMessages "$messages"`, where `messages` is `pr-messages.json`. Its output is `level`.
+  4. If `level` is not `none`, `changelog.ps1 next-version -Level "$level"`. Its output is `version`.
+  5. `changelog.ps1 generate -PrMessages "$messages" -Output "$generated" -SectionOutput "$section"`, where `generated` is `CHANGELOG.generated.md` and `section` is `section.md`. After it, the step prints the output of the command to the log with `echo "$out"`.
+- If `prs`, `level` or `next-version` ends with a non-zero exit code, or one of the two commands of item 2 does, the step prints the warning of the table, appends its summary line and ends with `exit 0`:
+
+| Failure | `::warning::` | Summary line |
+|---|---|---|
+| `prs` fails | `::warning::could not list the pull requests (exit $code)` | `No release preview: could not list the pull requests since the last tag: $reason` |
+| The command that reads the commits of `n` (`gh api` with `jq -c`) fails | `::warning::could not read the commits of pull request #$n (exit $code)` | `No release preview: could not read the commits of pull request #$n.` |
+| The `jq` that adds the commits of `n` to `pr-messages.json` fails | `::warning::could not add the commits of pull request #$n to the messages file (exit $code)` | `No release preview: could not add the commits of pull request #$n to the messages file.` |
+| `level` fails | `::warning::level failed with exit code $code` | `No release preview: the level could not be computed: $reason` |
+| `next-version` fails | `::warning::next-version failed with exit code $code` | `No release preview: the version could not be computed: $reason` |
+
+- If `generate` fails, the step appends the summary line `Level $level, next version $version, but the section could not be generated: $reason` and ends with `exit 0`.
+- If `level` is `none`, the step appends this summary line and ends with `exit 0`:
+
+  ```
+  Nothing to release: no commit since the last tag, after the cut-off, is a feat/, stage/ or fix/ change or a breaking change. A dry run publishes nothing.
+  ```
+
+- If `generate` succeeds, the step appends this summary line:
+
+  ```
+  Level $level, next version $version, computed from origin/main with no bump label. A dry run publishes nothing and changes no file.
+  ```
+
+  The line is followed by a `<details>` block: `<details><summary>Generated CHANGELOG section</summary>`, a fenced block opened with four backticks and `markdown` that holds the content of `section.md`, and `</details>`.
+
+#### Step "Upload the notes body"
+
+- The step uses `actions/upload-artifact`, pinned by SHA with the label `# v7.0.2`.
+- The artifact name is `release-notes-body` and the path is `${{ runner.temp }}/notes-body.md`.
+- The step sets `if-no-files-found: error` and `overwrite: true`.
+
+### Job `export-table`
+
+- The permissions are `contents: read`.
+- The job has three steps, in this order: "Checkout", "Check the export table" and "Upload the export table markdown".
+
+#### Step "Checkout"
+
+- The step uses `actions/checkout`, pinned by SHA with the label `# v7.0.1`.
+
+#### Step "Check the export table"
+
+- The step has the id `table` and uses `./.github/actions/export-table`. What the action does is described in the section on Composite action `export-table`.
+
+#### Step "Upload the export table markdown"
+
+- The step runs only if `${{ !cancelled() && steps.table.outputs.markdown-path != '' }}`.
+- It uses `actions/upload-artifact`, pinned by SHA with the label `# v7.0.2`.
+- The artifact name is `export-table-markdown` and the path is `${{ steps.table.outputs.markdown-path }}`.
+- The step sets `if-no-files-found: error` and `overwrite: true`.
+
+### Job `assemble`
+
+- The permissions are `contents: read`.
+- The job has six steps, in this order: "Download restifycapl-x86.dll", "Download restifycapl-x64.dll", "Download the notes body", "Download the export table markdown", "Write SHA256SUMS and the release notes" and "Upload the release assets".
+- The first four steps use `actions/download-artifact`, pinned by SHA with the label `# v7.0.0`:
+
+| Step | Artifact | Path |
+|---|---|---|
+| "Download restifycapl-x86.dll" | `restifycapl-x86` | `dist` |
+| "Download restifycapl-x64.dll" | `restifycapl-x64` | `dist` |
+| "Download the notes body" | `release-notes-body` | `parts/body` |
+| "Download the export table markdown" | `export-table-markdown` | `parts/table` |
+
+#### Step "Write SHA256SUMS and the release notes"
+
+The step does these things in this order:
+
+- It lists `dist` with `ls -1 dist`.
+- It requires the names in `dist` to be exactly `restifycapl-x64.dll` and `restifycapl-x86.dll`. Otherwise it ends with exit code 1 and this error:
+
+  ```
+  ::error::dist must contain exactly the two DLLs
+  ```
+
+- It creates `dist/SHA256SUMS` with `sha256sum restifycapl-x86.dll restifycapl-x64.dll`, run in `dist`.- It counts the lines of `parts/table/export-table.md` that match `^\| [0-9]+ \| `, called `rows` below. A row of the table has the form ``| <index> | `<signature>` | <description> |``. If `rows` is less than 1, it ends with exit code 1 and this error:
+
+  ```
+  ::error::the export table markdown has no function rows
+  ```
+
+- It writes `dist/notes.md` with these parts, in this order:
+  1. The content of `parts/body/notes-body.md`.
+  2. The heading `### Using this release`.
+  3. Three paragraphs. The first two read:
+
+     ```
+     Take `capl/` from this tag's source archive; a DLL and `capl/` from different versions fail at CAPL compile.
+
+     Check a download: in PowerShell, `Get-FileHash restifycapl-x64.dll` must print the hash listed for that file in `SHA256SUMS` (likewise `restifycapl-x86.dll`).
+     ```
+
+     The third paragraph says that both DLLs carry a GitHub build-provenance attestation, which the release workflow verifies before publishing, and points to a document in the source archive for verifying it yourself.
+  4. The heading `### Export table`.
+  5. A `<details>` block whose `<summary>` is `$rows functions`, with the content of `parts/table/export-table.md` and then `</details>`.
+- It counts the characters of `dist/notes.md`: the length of the file decoded as UTF-8, minus the number of surrogate pairs. If the count, `chars`, is above 125000, it ends with exit code 1 and this error:
+
+  ```
+  ::error::release notes are $chars characters, the limit is 125000
+  ```
+
+- It appends to the job summary: the heading `### SHA256SUMS`, the content of `dist/SHA256SUMS` in a fenced block, the heading `### notes.md` and the content of `dist/notes.md`.
+
+#### Step "Upload the release assets"
+
+- The step uses `actions/upload-artifact`, pinned by SHA with the label `# v7.0.2`.
+- The artifact name is `release-assets` and the path is `dist`.- The step sets `if-no-files-found: error` and `overwrite: true`.
+
+### Job `attest`
+
+- The permissions are `id-token: write`, `attestations: write` and `contents: read`.
+- The job has three steps, in this order: "Download the release assets", "Attest build provenance" and "Verify the attestations".
+
+#### Step "Download the release assets"
+
+- The step uses `actions/download-artifact`, pinned by SHA with the label `# v7.0.0`. The artifact name is `release-assets` and the path is `dist`.
+
+#### Step "Attest build provenance"
+
+- The step uses `actions/attest-build-provenance`, pinned by SHA with the label `# v4.2.2`.
+- `subject-path` is the two lines `dist/restifycapl-x86.dll` and `dist/restifycapl-x64.dll`.
+
+#### Step "Verify the attestations"
+
+- The step sets `GH_TOKEN` to `github.token`.
+- For `restifycapl-x86.dll` and then `restifycapl-x64.dll`, called `$dll`, it runs `gh attestation verify "dist/$dll" --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"` up to 3 times.
+- For each DLL, the attempts stop at the first success. After each failed attempt, including the third, the step runs `sleep 10`.
+- If no attempt succeeds for a DLL, the step ends with exit code 1 and this error:
+
+  ```
+  ::error::attestation of $dll could not be verified
+  ```
