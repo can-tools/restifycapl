@@ -17,7 +17,6 @@ The current goal is CI/CD consistency: one CHANGELOG generator and parser in Pow
 - Export contract (`CAPL_DLL_INFO_LIST4`, `exports.def`) and `/MT`: no stage touches them.
 - Each stage = a separate branch from `main`, cut by `build-pipeline-engineer`; the push is done by a human. Documentation changes in the same PR as the behavior it describes. No plan identifiers (e.g. HG-x, R1, stage numbers) in tracked files outside plan documents, except the one-line section breadcrumbs in `docs/<topic>.md` that `project-docs` requires, written as `(decided during github-actions-optimization Stage N)`. Code comments follow the comment discipline in `project-docs`; the plan does not dictate their content.
 - Commits only on the user's instruction; the user pushes and merges.
-- `docs/ci-flow.md` and `docs/ci-optimized-flow.md` describe an earlier flow (manual cut, `## [Unreleased]`, manual tag push, recognition of a cut by its CHANGELOG heading) until stage 6f; where they disagree with this plan, this plan applies.
 
 ## 3. Rule changes
 
@@ -171,12 +170,12 @@ Stages 0–5, 5a, 6a, 6b, 6c, 6c-fix, 6d, 6e and 7a are done and merged on `main
 - Verification: `gate-x86` and `gate-x64` green. The first real generated section is checked in the release PR that `release-pr.yml` opens after stage 6d.
 - Approval: the user approves the wording.
 
-### Stage 6f — flow documents
-- Description: a new revision of `docs/ci-optimized-flow.md` (base: the committed version) and an update of `docs/ci-flow.md` to the implemented flow. Both describe recognition of a release only by the pull request, its label and the squash subject (§2), with no manual cut and no manual tag push; `CHANGELOG.md` appears only as generated output, and `notes -Mode tag` in `release.yml` only as locating the notes.
-- Files: `docs/ci-optimized-flow.md`, `docs/ci-flow.md`.
+### Stage 6f — flow document
+- Description: `docs/ci-flow.md` is written anew as a self-contained description of the CI/CD flow as it runs on `main`: what starts each workflow, every job and step with its permissions and concurrency, the release path from a working branch to the published release, the bump label rule, the recognition of a release commit (§2), the failure and repair paths, what a person does, and the repository settings the flow depends on (unconfirmed ones marked). It describes only the current state, with no history or comparison, and refers to no other document; step-level detail is kept even where `docs/ci-pipeline.md` or `docs/release-process.md` state the same facts (user decision: a deliberate exception to the one-place rule of `project-docs`). A release is recognised only by the pull request, its label and the squash subject; `CHANGELOG.md` appears only as generated output, and `notes -Mode tag` in `release.yml` only as locating the notes. `docs/ci-optimized-flow.md` is deleted. On a `docs/` branch; level none.
+- Files: `docs/ci-flow.md` (rewritten), `docs/ci-optimized-flow.md` (deleted), `docs/work/github-actions-optimization/plans/plan.md` (this stage and the §2 note).
 - Owners: `build-pipeline-engineer` → `code-reviewer`.
-- Verification: every claim about existing behavior matches the workflows on `main`; `gate-x86` and `gate-x64` green.
-- Approval: the user approves the text.
+- Verification: `code-reviewer` checks every sentence about behavior against the file and line that implement it on `main`; every Mermaid diagram renders in GitHub's preview; the file names no other document; `gate-x86` and `gate-x64` green.
+- Approval: the user approves the text chunk by chunk.
 
 ### Stage 7 — first automated release (the next version after v0.1.0)
 - Description: a human reviews the release PR (one label, version preview, generated notes, CAUTION block if any) and squash-merges it; `build-pipeline-engineer` observes.
