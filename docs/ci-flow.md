@@ -11,7 +11,7 @@ The flow is made of seven workflows in `.github/workflows/` and two composite ac
 | `auto-pr.yml` | Auto PR | Opens a draft pull request for a working branch. |
 | `bump-label.yml` | Bump label | Its check `bump label` requires exactly one `bump:*` label on the `release/next` pull request. |
 | `release-pr.yml` | Release PR | The release bot. Builds the `release/next` branch and its pull request, and keeps the `bump:*` label and the version preview in the pull request body up to date. |
-| `tag-release.yml` | Tag Release | The tagging bot. Tags a merged release commit on `main` and dispatches the release. |
+| `tag-release.yml` | Tag Release | The tagging bot. Tags a merged release commit on `main`, dispatches `release-pr.yml` on `main` and dispatches `release.yml` on the tag. |
 | `release.yml` | Release | Checks the tag, builds both DLLs, packs them and publishes the GitHub release. |
 | `.github/actions/export-table/action.yml` | export-table | Composite action. Runs the export-table fixtures, checks `src/module/exports.cpp` and writes the job summary. `ci.yml` and `release.yml` use it. |
 | `.github/actions/provision/action.yml` | Provision build environment | Composite action. Activates MSVC, provisions the pinned vcpkg tool and the static dependencies, and places them where the Makefile expects them. `arch-pipeline.yml` uses it. |
@@ -72,13 +72,13 @@ Every workflow here that pushes, labels or opens something as the bot depends on
 
 | Workflow | Events | Filters | Concurrency |
 |---|---|---|---|
-| `ci.yml` | `push`, `pull_request`, `workflow_dispatch` | Push: branches `main`, `feat/**`, `stage/**`, `chore/**`, `fix/**`, `docs/**`. Pull request: base branch `main`, default types. Dispatch: any ref, no inputs. No path filters. | None |
-| `auto-pr.yml` | `push` | Branches `feat/**`, `stage/**`, `chore/**`, `fix/**`, `docs/**`. No path filters. | None |
-| `bump-label.yml` | `pull_request`, `workflow_dispatch` | Pull request types: opened, synchronize, reopened, labeled, unlabeled. No base-branch filter. Dispatch: no inputs. | Group `bump-label-labels-<pull request number>` for `labeled` and `unlabeled` events (an older run is not cancelled); group `bump-label-refs-<head branch or ref>` for the other events (an older run is cancelled). |
-| `release-pr.yml` | `push`, `workflow_dispatch`, `pull_request` | Push: branch `main`. Dispatch: no inputs. Pull request: base `main`, types labeled and unlabeled. | Job `build`: group `release-pr-build`. Job `labels`: group `release-pr-labels`. Neither cancels. |
-| `tag-release.yml` | `push` | Branch `main`. No dispatch, no path filter. | Job `tag`: group `tag-release`, no cancelling. |
-| `release.yml` | `push`, `workflow_dispatch` | Push: tags `v*.*.*`. Dispatch: no inputs. | Group `release-${{ github.ref }}`, no cancelling. |
-| `arch-pipeline.yml` | `workflow_call` only | Inputs: `arch` (required, x86 or x64) and `release-version` (optional; empty means a development build). | None |
+| `ci.yml` | `push`, `pull_request`, `workflow_dispatch` | Push: branches `main`, `feat/**`, `stage/**`, `chore/**`, `fix/**`, `docs/**`. Pull request: branches `main`. |  |
+| `auto-pr.yml` | `push` | Push: branches `feat/**`, `stage/**`, `chore/**`, `fix/**`, `docs/**`. |  |
+| `bump-label.yml` | `pull_request`, `workflow_dispatch` | Pull request: types opened, synchronize, reopened, labeled, unlabeled. | Workflow: `group` is `bump-label-labels-<pull request number>` for the actions `labeled` and `unlabeled` and `bump-label-refs-<head branch or ref>` otherwise; `cancel-in-progress` is `false` for `labeled` and `unlabeled` and `true` otherwise. |
+| `release-pr.yml` | `push`, `workflow_dispatch`, `pull_request` | Push: branch `main`. Pull request: branches `main`, types labeled and unlabeled. | Job `build`: `group: release-pr-build`, `cancel-in-progress: false`. Job `labels`: `group: release-pr-labels`, `cancel-in-progress: false`. |
+| `tag-release.yml` | `push` | Push: branch `main`. | Job `tag`: `group: tag-release`, `cancel-in-progress: false`. |
+| `release.yml` | `push`, `workflow_dispatch` | Push: tags `v*.*.*`. | Workflow: `group: release-${{ github.ref }}`, `cancel-in-progress: false`. |
+| `arch-pipeline.yml` | `workflow_call` only | Inputs: `arch` (required, x86 or x64) and `release-version` (optional; empty means a development build). |  |
 
 The two composite actions have no events of their own. They run only as steps of other jobs.
 
@@ -94,7 +94,7 @@ The jobs of `ci.yml` are `pipeline-x86` and `pipeline-x64` (both call `arch-pipe
 
 ### Dispatches made by the bots
 
-The bots start other workflows with `gh workflow run`. They authenticate with the built-in `GITHUB_TOKEN`, not with a personal access token. A dispatch is the one way for them to start a run, as a consequence of the platform rule. No file in the repository uses `repository_dispatch`.
+The bots start other workflows with `gh workflow run`. Their jobs set `GH_TOKEN` to `github.token`. A dispatch is the one way for them to start a run, as a consequence of the platform rule.
 
 | Who dispatches (workflow / job / step) | What it starts | Ref | When |
 |---|---|---|---|
@@ -115,11 +115,11 @@ The job `build` of `release-pr.yml` has `contents: write`, `pull-requests: write
 - So the only thing that starts `ci.yml` on `release/next` is the dispatch in the first row of the dispatch table. It runs the jobs of `ci.yml` on the tip of `release/next`. This gives the check runs `build + test (x86)` and `build + test (x64)` (the job names in `ci.yml`) on that branch.
 - `bump-label.yml` starts on a `pull_request` event (opened, synchronize, reopened, labeled, unlabeled) and on a dispatch. The bot dispatches it on `release/next` after it rebuilds the branch.
 - A `bump:*` label change on the `release/next` pull request starts the job `labels` of `release-pr.yml`.
-- `tag-release.yml` pushes the release tag itself. As a consequence of the platform rule, that push starts no run. This is why its last step dispatches `release.yml` on the tag.
+- `tag-release.yml` pushes the release tag with `git push origin "refs/tags/$TAG"`. As a consequence of the platform rule, that push starts no run. The last step of its job `tag`, "Dispatch the release on the tag", dispatches `release.yml` on the tag.
 
 ### What starts CI on a working branch
 
-A pull request opened by Auto PR does not start a `pull_request` run of CI (a consequence of the platform rule). The first CI run of a working branch comes from the developer's push, which matches the push filter of `ci.yml`. Each later push to a branch with an open pull request starts both a `push` run and a `pull_request` run: `ci.yml` also starts on `pull_request` with base `main` and the default types (this follows from the GitHub rule that a push to the head branch of an open pull request is a `synchronize` event).
+A pull request opened by Auto PR does not start a `pull_request` run of CI (a consequence of the platform rule). The first CI run of a working branch comes from a push to the branch, which matches the push filter of `ci.yml`. Each later push to a branch with an open pull request starts both a `push` run and a `pull_request` run: `ci.yml` also starts on `pull_request` with base `main` and the default types (this follows from the GitHub rule that a push to the head branch of an open pull request is a `synchronize` event).
 
 ## Branches, pull request titles and release levels
 
@@ -136,7 +136,7 @@ Five branch prefixes are working branches: `feat/`, `stage/`, `chore/`, `fix/` a
 
 ### Squash-merge subject
 
-`scripts/ci/changelog.ps1` assumes that every commit on `main` is a squash-merge commit whose subject is the pull request title plus ` (#N)`, where `N` is the pull request number. Whether this holds depends on the repository's squash-merge setting; no file in the repository enforces it. `scripts/ci/changelog.ps1` reads the pull request number from the trailing ` (#N)` of the subject.
+`scripts/ci/changelog.ps1` reads the type of a change and the pull request number from the subject of each first-parent commit on `main`: the number `N` from a trailing ` (#N)`, where `N` has one to nine digits.
 
 ### Release levels
 
@@ -159,9 +159,9 @@ Five branch prefixes are working branches: `feat/`, `stage/`, `chore/`, `fix/` a
 
 ### Reserved branch `release/next`
 
-- `release/next` belongs to the release bot. The bot creates the branch and its pull request, whose title is `release/next`.
+- `release-pr.yml` creates and pushes the branch `release/next` and opens its pull request with the title `release/next`.
 - Commits pushed to `release/next` by hand are overwritten the next time the bot rebuilds the branch.
-- The squash commit of that pull request has the subject `release/next (#N)`. The generator gives it the type `release` and ignores it when it computes the level and the entries. The release pull request itself gives no release level.
+- The generator gives a commit whose subject starts with `release/` the type `release` and ignores it when it computes the level and the entries.
 - Neither `ci.yml` nor `auto-pr.yml` lists `release/` in its push filter.
 
 ### Breaking changes
@@ -178,8 +178,7 @@ Five branch prefixes are working branches: `feat/`, `stage/`, `chore/`, `fix/` a
 
 ### Trigger and permissions
 
-- The only event is `push`, for the branches `feat/**`, `stage/**`, `chore/**`, `fix/**` and `docs/**`. There is no path filter, no tag filter and no other event.
-- The workflow has no concurrency group.
+- The only event is `push`, for the branches `feat/**`, `stage/**`, `chore/**`, `fix/**` and `docs/**`.
 - The workflow has `contents: read` and `pull-requests: write`. Its one job, `open draft PR`, runs on `ubuntu-latest` with `GH_TOKEN` set to `secrets.GITHUB_TOKEN`.
 - The job also sets `GH_REPO` to `github.repository` and `BRANCH` to `github.ref_name`.
 - The job has four steps, in this order: "Guard 1: branch ahead of main?", "Guard 2: PR already open for this branch?", "Compose PR body" and "Create draft PR".
@@ -189,23 +188,19 @@ Five branch prefixes are working branches: `feat/`, `stage/`, `chore/`, `fix/` a
 - The step has the id `ahead` and no `if:`.
 - It calls `gh api "repos/${GH_REPO}/compare/main...${BRANCH}"` and writes the whole response to `$RUNNER_TEMP/compare.json`. "Compose PR body" reads this file instead of calling the API again.
 - It reads `.ahead_by` from the file and prints "Branch '<branch>' is ahead of main by N commit(s)."
-- If `ahead_by` is 0, it prints "No commits ahead of main -- nothing to open a PR for. Exiting." and writes `proceed=false` to `$GITHUB_OUTPUT`. Otherwise it writes `proceed=true`. In both cases the step succeeds.
-- The file gives the reason for the guard: `gh pr create` fails with "No commits between main and <branch>" on a branch that was just cut, so the workflow skips the creation instead.
-- The script runs with `set -euo pipefail`. If the API call or `jq` fails, the step fails, the later steps are skipped and no pull request is created.
+- If `ahead_by` is 0, it prints "No commits ahead of main -- nothing to open a PR for. Exiting." and writes `proceed=false` to `$GITHUB_OUTPUT`. Otherwise it writes `proceed=true`. In both cases the step ends with exit code 0.
+- The script runs with `set -euo pipefail`. If `gh api` or `jq` ends with a non-zero exit code, the step ends with a non-zero exit code.
 
 ### Step "Guard 2: PR already open for this branch?"
 
 - The step has the id `existing` and runs only if `steps.ahead.outputs.proceed == 'true'`.
 - It runs `gh pr list --head "${BRANCH}" --state open --json number --jq '.[0].number // empty'`. Only an open pull request with this head branch counts.
-- If a number is returned, it prints "Open PR #N already exists for '<branch>' -- nothing to do. Exiting." and writes `proceed=false`. Otherwise it prints "No open PR found for '<branch>' -- will create one." and writes `proceed=true`. In both cases the step succeeds.
-- The file says why the guard exists: the workflow runs on every push, and only the first push that carries a commit should create a pull request.
+- If a number is returned, it prints "Open PR #N already exists for '<branch>' -- nothing to do. Exiting." and writes `proceed=false`. Otherwise it prints "No open PR found for '<branch>' -- will create one." and writes `proceed=true`. In both cases the step ends with exit code 0.
 
 ### Step "Compose PR body"
 
 - The step runs only if `steps.ahead.outputs.proceed == 'true' && steps.existing.outputs.proceed == 'true'`. It writes `$RUNNER_TEMP/pr-body.md` and has no output.
 - Its inputs are `compare.json` and the `BRANCH` variable.
-- The body is composed once, when the pull request is created; later pushes do not change it.
-- If the step fails, "Create draft PR" is skipped.
 
 #### What the step reads from the compare file
 
@@ -281,14 +276,13 @@ not a required check, so a red result does not block the merge.
 
 - The step runs under the same condition as "Compose PR body": both guards answered `true`.
 - It runs `gh pr create --draft --base main --head "${BRANCH}" --title "${BRANCH}" --body-file "$RUNNER_TEMP/pr-body.md"`. The pull request is a draft, its base is `main`, its head is the pushed branch, its title is the branch name and its body is the composed file.
-- The step has no `|| true`. If the creation fails, the step and the job fail, and no pull request exists.
+- The script runs with `set -euo pipefail`. If `gh pr create` ends with a non-zero exit code, the step ends with a non-zero exit code.
 
 ### Later pushes and failures
 
 - Second push to a branch whose pull request is open: Guard 1 passes, Guard 2 finds the open pull request and answers `false`, and "Compose PR body" and "Create draft PR" are skipped. The title, the body and the draft state stay as they are.
 - If the branch's pull request was closed, the next push to the branch opens a new one, provided the branch is still ahead of `main`.
-- If the creation fails, no pull request exists, and the next push to the branch tries again with a newly composed body.
-- The workflow does not change the title, the body or the draft state.
+- If `gh pr create` ends with a non-zero exit code, the next push to the branch runs both guards again; when both answer `true`, "Compose PR body" composes the body again and "Create draft PR" runs `gh pr create` again.
 
 ## CI (`ci.yml`)
 
@@ -901,7 +895,7 @@ Both callers set `GH_TOKEN` to `github.token`.
 - Without exactly one argument, the script writes `usage: fetch-pr-releases.sh <output-file>` to standard error and ends with exit code 2.
 - The script first writes `{}` to the output file. The file stays `{}` when the input has no number.
 - It skips empty lines.
-- For each number `$n`, it runs `gh api repos/$GITHUB_REPOSITORY/pulls/$n`.
+- For each number `$n`, it runs `gh api "repos/$GITHUB_REPOSITORY/pulls/$n"`.
   - If the command fails and its error output holds the text `HTTP 404`, the entry is `{"found":false}`.
   - If the command fails otherwise, the script ends with exit code 1 and this error:
 
@@ -915,7 +909,7 @@ Both callers set `GH_TOKEN` to `github.token`.
     ::error::unexpected head commit of pull request #$n: $head_sha
     ```
 
-  - Otherwise the script runs `gh api repos/$GITHUB_REPOSITORY/commits/$head_sha`.
+  - Otherwise the script runs `gh api "repos/$GITHUB_REPOSITORY/commits/$head_sha"`.
     - If it succeeds, the entry is `found` true with the keys of the table above, where `headParents` and `headTree` come from the parents and the tree of that commit.
     - If it fails and its error output holds `HTTP 404` or `HTTP 422`, the entry is the same, with `headParents` and `headTree` null.
     - If it fails otherwise, the script ends with exit code 1 and this error:
@@ -1056,7 +1050,7 @@ All steps except the first run with `shell: bash`.
 - The step runs `changelog.ps1 pending-cut -PrReleases $RUNNER_TEMP/pr-releases.json`. If the command fails, the step prints its output and ends with exit code 1.
 - For the answer `proceed` it writes `proceed=true` to `$GITHUB_OUTPUT`.
 - For the answer `abandoned` it writes `proceed=true`, a notice and a summary line.
-- For the answer `waiting` it writes `proceed=false`, a notice and a summary line. The step then succeeds.
+- For the answer `waiting` it writes `proceed=false`, a notice and a summary line. The step then ends with exit code 0.
 - Any other answer ends with the error below and exit code 1.
 - The notice for `abandoned`:
 
@@ -1269,7 +1263,7 @@ All steps except the first run with `shell: bash`.
   ```
 
 - With one such label equal to the computed one, the step changes nothing.
-- With two or more such labels, the step changes nothing and prints this warning. The step does not fail.
+- With two or more such labels, the step changes nothing, prints this warning and ends with exit code 0.
 
   ```
   ::warning::pull request #$number has $count bump:* labels; none was changed, and the bump label check stays red until exactly one is left
@@ -1404,7 +1398,7 @@ All steps except the first run with `shell: bash`.
   ::warning::the label $label is not bump:major, bump:minor or bump:patch; the bump label check stays red until it is replaced; the body was not changed
   ```
 
-- After either warning the step appends this summary line and sets `label` to empty. The step then succeeds. The two later steps run only if `steps.label.outputs.label != ''`, so both are skipped.
+- After either warning the step appends this summary line and sets `label` to empty. The step then ends with exit code 0. The two later steps run only if `steps.label.outputs.label != ''`, so both are skipped.
 
   ```
   Pull request #$PR_NUMBER: nothing changed.
@@ -1476,7 +1470,7 @@ All steps except the first of each job run with `shell: bash`.
 
 - The step has the id `classify`.
 - It runs `pwsh -NoProfile -File scripts/ci/changelog.ps1 release-commit -Sha "$GITHUB_SHA" -PrReleases "$RUNNER_TEMP/pr-releases.json"`. If the command fails, the step prints its output and ends with exit code 1.
-- For the answers `tag`, `tagged`, `not-release` and `not-faithful` the step writes `outcome=$out` to `$GITHUB_OUTPUT`, where `$out` is the answer. The step then succeeds. For `not-release` and `not-faithful` it first writes the texts below.
+- For the answers `tag`, `tagged`, `not-release` and `not-faithful` the step writes `outcome=$out` to `$GITHUB_OUTPUT`, where `$out` is the answer. The step then ends with exit code 0. For `not-release` and `not-faithful` it first writes the texts below.
 - The summary line for `not-release`:
 
   ```
@@ -1549,7 +1543,7 @@ All steps except the first of each job run with `shell: bash`.
   ```
 
 - The step takes `tip` from the output with `cut -f1`.
-- If `tip` is not `$GITHUB_SHA`, the step prints the warning below and appends the summary line below. It writes `proceed=false` to `$GITHUB_OUTPUT`. The step then succeeds.
+- If `tip` is not `$GITHUB_SHA`, the step prints the warning below and appends the summary line below. It writes `proceed=false` to `$GITHUB_OUTPUT`. The step then ends with exit code 0.
 - Otherwise it writes `proceed=true`.
 - The warning:
 
@@ -2046,7 +2040,7 @@ The step does these things in this order:
 
 #### Step "Say what state the release is in"
 
-- The step runs only if `failure()`.
+- The step has `if: failure()`.
 - It runs `gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG"`, discarding its output and error output, and sets `msg` by the exit status of the command.
   - If the command succeeds, `msg` is:
 
