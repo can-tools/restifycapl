@@ -24,7 +24,7 @@ The diagram shows the workflows of a release in order, from the first push to th
 flowchart LR
     A1["push to a working branch"]
     A2["push to main"]
-    A3["bump label change on the release pull request"]
+    A3["a person changes the bump label on the release pull request"]
     C["ci.yml"]
     AP["auto-pr.yml"]
     D["draft pull request"]
@@ -56,23 +56,11 @@ flowchart LR
 
 ## What starts what
 
-### The platform rule
-
-GitHub has a platform rule that the workflows depend on:
-
-- Events created with `GITHUB_TOKEN` (a push, a tag, a label change, a pull request) start no workflow runs. The only exceptions are `workflow_dispatch` and `repository_dispatch`.
-- A dispatch needs the `Actions: write` permission, which a job gets from an explicit `permissions:` block.
-- The `ref` of a dispatch can be a branch or a tag.
-- An explicit `permissions:` block works whatever the repository default for workflow permissions is.
-- A `pull_request` trigger without `types:` uses the GitHub defaults: opened, synchronize and reopened.
-
-Every workflow here that pushes, labels or opens something as the bot depends on this rule.
-
 ### Triggers of each workflow
 
 | Workflow | Events | Filters | Concurrency |
 |---|---|---|---|
-| `ci.yml` | `push`, `pull_request`, `workflow_dispatch` | Push: branches `main`, `feat/**`, `stage/**`, `chore/**`, `fix/**`, `docs/**`. Pull request: branches `main`. |  |
+| `ci.yml` | `push`, `pull_request`, `workflow_dispatch` | Push: branches `main`, `feat/**`, `stage/**`, `chore/**`, `fix/**`, `docs/**`. Pull request: branches `main`, no `types:`. |  |
 | `auto-pr.yml` | `push` | Push: branches `feat/**`, `stage/**`, `chore/**`, `fix/**`, `docs/**`. |  |
 | `bump-label.yml` | `pull_request`, `workflow_dispatch` | Pull request: types opened, synchronize, reopened, labeled, unlabeled. | Workflow: `group` is `bump-label-labels-<pull request number>` for the actions `labeled` and `unlabeled` and `bump-label-refs-<head branch or ref>` otherwise; `cancel-in-progress` is `false` for `labeled` and `unlabeled` and `true` otherwise. |
 | `release-pr.yml` | `push`, `workflow_dispatch`, `pull_request` | Push: branch `main`. Pull request: branches `main`, types labeled and unlabeled. | Job `build`: `group: release-pr-build`, `cancel-in-progress: false`. Job `labels`: `group: release-pr-labels`, `cancel-in-progress: false`. |
@@ -94,7 +82,7 @@ The jobs of `ci.yml` are `pipeline-x86` and `pipeline-x64` (both call `arch-pipe
 
 ### Dispatches made by the bots
 
-The bots start other workflows with `gh workflow run`. Their jobs set `GH_TOKEN` to `github.token`. A dispatch is the one way for them to start a run, as a consequence of the platform rule.
+The bots start other workflows with `gh workflow run`. Their jobs set `GH_TOKEN` to `github.token`. A `workflow_dispatch` event made with the `GITHUB_TOKEN` creates a workflow run.
 
 | Who dispatches (workflow / job / step) | What it starts | Ref | When |
 |---|---|---|---|
@@ -105,21 +93,20 @@ The bots start other workflows with `gh workflow run`. Their jobs set `GH_TOKEN`
 
 The step "Dispatch CI and the bump label check on release/next" starts two workflows, `ci.yml` and `bump-label.yml`, in a loop.
 
-The job `build` of `release-pr.yml` has `contents: write`, `pull-requests: write` and `actions: write`. The job `tag` of `tag-release.yml` has `contents: write`, `pull-requests: read` and `actions: write`. The `actions: write` permission is what allows the dispatch.
-
+The job `build` of `release-pr.yml` has `contents: write`, `pull-requests: write` and `actions: write`. The job `tag` of `tag-release.yml` has `contents: write`, `pull-requests: read` and `actions: write`.
 ### What starts CI on `release/next`
 
-- `release-pr.yml` pushes `release/next` with `git push --force-with-lease`. As a consequence of the platform rule, that push starts no run.
+- `release-pr.yml` pushes `release/next` with `git push --force-with-lease`, with the credential that its step "Checkout main (full history and tags)" stores: that step has no `token` input, and `actions/checkout` uses the `GITHUB_TOKEN` by default. A push made with the repository's `GITHUB_TOKEN` creates no new workflow run.
 - The push filter of `ci.yml` lists `main`, `feat/**`, `stage/**`, `chore/**`, `fix/**` and `docs/**`.
-- The bot opens the release pull request with `gh pr create --base main --head release/next --title 'release/next' --body-file "$body"`. As a consequence of the platform rule, this pull request does not start a `pull_request` run of `ci.yml`.
-- So the dispatch by the step "Dispatch CI and the bump label check on release/next" of the job `build` of `release-pr.yml` starts `ci.yml` on `release/next`. It runs the jobs of `ci.yml` on the tip of `release/next`. This gives the check runs `build + test (x86)` and `build + test (x64)` (the job names in `ci.yml`) on that branch.
+- The step "Open or update the release pull request" opens the release pull request with `gh pr create --base main --head release/next --title 'release/next' --body-file "$body"`; the job sets `GH_TOKEN` to `github.token`.
+- The step "Dispatch CI and the bump label check on release/next" of the job `build` of `release-pr.yml` dispatches `ci.yml` on `release/next` with `gh workflow run "$workflow" --ref release/next`. It runs the jobs of `ci.yml` on the tip of `release/next`. This gives the check runs `build + test (x86)` and `build + test (x64)` (the job names in `ci.yml`) on that branch.
 - `bump-label.yml` starts on a `pull_request` event (opened, synchronize, reopened, labeled, unlabeled) and on a dispatch. The bot dispatches it on `release/next` after it rebuilds the branch.
-- A `bump:*` label change on the `release/next` pull request starts the job `labels` of `release-pr.yml`.
-- `tag-release.yml` pushes the release tag with `git push origin "refs/tags/$TAG"`. As a consequence of the platform rule, that push starts no run. The last step of its job `tag`, "Dispatch the release on the tag", dispatches `release.yml` on the tag.
+- `release-pr.yml` starts on `pull_request` events of the types `labeled` and `unlabeled` with base `main`; for such an event on the `release/next` pull request, from this repository, with a label whose name starts with `bump:`, the job `labels` runs. The step "Keep exactly one bump label" changes the labels with `gh pr edit` and `GH_TOKEN` set to `github.token`; a `labeled` or `unlabeled` event made with the `GITHUB_TOKEN` creates no workflow run.
+- `tag-release.yml` pushes the release tag with `git push origin "refs/tags/$TAG"`. It pushes with the credential that its step "Checkout the pushed commit (full history and tags)" stores: that step has no `token` input, and `actions/checkout` uses the `GITHUB_TOKEN` by default. A push made with the repository's `GITHUB_TOKEN` creates no new workflow run. The last step of its job `tag`, "Dispatch the release on the tag", dispatches `release.yml` on the tag.
 
 ### What starts CI on a working branch
 
-A pull request opened by Auto PR does not start a `pull_request` run of CI (a consequence of the platform rule). The first CI run of a working branch comes from a push to the branch, which matches the push filter of `ci.yml`. Each later push to a branch with an open pull request starts both a `push` run and a `pull_request` run: `ci.yml` also starts on `pull_request` with base `main` and the default types.
+A push to a working branch matches the push filter of `ci.yml` and starts a `push` run. The same push starts `auto-pr.yml`, which opens the draft pull request with `gh pr create` and `GH_TOKEN` set to `secrets.GITHUB_TOKEN`. `ci.yml` also starts on `pull_request` with base `main` and no `types:`, so on the activity types `opened`, `synchronize` and `reopened`. Each later push to the branch while its pull request is open starts both a `push` run and a `pull_request` run.
 
 ## Branches, pull request titles and release levels
 
@@ -864,7 +851,7 @@ The job `build` of `release-pr.yml` and the job `classify` of `tag-release.yml` 
 ### Release subject and candidates
 
 - A release subject is a subject that matches `^release/next \(#([1-9][0-9]{0,8})\)$`: the text `release/next`, a space and the number `N` in parentheses after `#`. `N` has one to nine digits and no leading zero. This pattern is separate from the type `release`, which is the branch prefix `release/` at the start of the subject text.
-- The candidates are the commits of the range whose subject is a release subject. The range is `git log --first-parent <last tag>..<Base>`, where `-Base` is a full commit hash of 40 lowercase hex characters. The candidates are in the order of the `git log` output, which is git's order, newest first.
+- The candidates are the commits of the range whose subject is a release subject. The range is `git log --first-parent <last tag>..<Base>`, where `-Base` is a full commit hash of 40 lowercase hex characters. The candidates are in the order of the `git log` output; the command has no ordering option, and `git log` gives reverse chronological order by default, newest first.
 - `changelog.ps1 release-prs` prints the number of every candidate on standard output, one per line and once each, in the order of the candidates. It takes `-Base`.
 - The end of the range is `-Base` for `release-prs`. Without `-Base`, and always for `pending-cut`, it is the result of `git rev-parse origin/main`, the tip of `origin/main`. If that result is not a full commit hash, the run ends with this error and exit code 1:
 
@@ -2079,7 +2066,7 @@ The step does these things in this order:
 
 ## What a person does
 
-This section lists the events that start the workflows, in the order of a release, and what the workflows do on each. The bots push, label and open pull requests with `GITHUB_TOKEN`; as a consequence of the platform rule, an event in the first column of the next table starts the runs in its row only when it is not made with `GITHUB_TOKEN`.
+This section lists the events that a person makes, in the order of a release, and what the workflows do on each.
 
 | Event | What the workflows do | What the files read and require |
 |---|---|---|
@@ -2227,10 +2214,13 @@ The facts in this section come from the repository settings, from decisions of t
 | Bypass | "When you create a ruleset, you can allow certain users to bypass the rules in the ruleset." | The rules of the ruleset `main` apply to every actor not on its bypass list; the bypass list is not readable without authentication. | GitHub documentation |
 | Squash merge | "Pull requests with squashed commits are merged using the fast-forward option." and "Squashing turns all commits in the pull request into one commit on the base branch." | A release commit is faithful only when its parent and tree equal those of the head commit of the release pull request. | GitHub documentation |
 | Squash merge message | "The default message uses the commit title and message if the pull request contains only 1 commit, or the pull request title and list of commits if the pull request contains 2 or more commits. You can also choose to use just the pull request title, the pull request title and commit details, or the pull request title and description." | The subject of a squash commit depends on this setting; the default of the repository is the pull request title (confirmed by the repository owner). | GitHub documentation |
-| Events of the `GITHUB_TOKEN` | "When you use the repository's `GITHUB_TOKEN` to perform tasks, events triggered by the `GITHUB_TOKEN` will not create a new workflow run, with the following exceptions:" and "`workflow_dispatch` and `repository_dispatch` events always create workflow runs." and "Once a workflow has run at least once, you can dispatch it against any branch or tag via the GitHub API or GitHub CLI." and "The git reference for the workflow. The reference can be a branch or tag name." | The bot dispatches workflows with `gh workflow run` on `main`, on `release/next` and on the tag, and a dispatch by the `GITHUB_TOKEN` starts a run. | GitHub documentation |
+| Events of the `GITHUB_TOKEN` | "When you use the repository's `GITHUB_TOKEN` to perform tasks, events triggered by the `GITHUB_TOKEN` will not create a new workflow run, with the following exceptions:" and "`workflow_dispatch` and `repository_dispatch` events always create workflow runs." and "`pull_request` events with the `opened`, `synchronize`, or `reopened` activity types: when a workflow using `GITHUB_TOKEN` creates or updates a pull request, the resulting `pull_request` event creates workflow runs in an **approval-required** state. The pull request displays a banner in the merge box, and a user with write access to the repository can start the runs by selecting **Approve workflows to run**. Other `pull_request` activity types (such as `labeled`, `edited`, or `closed`) do not create workflow runs. This prevents recursive workflow runs while still allowing CI workflows to run on pull requests created by automation." and "If you need workflow runs from workflow-created pull requests to execute without requiring approval, use a GitHub App installation access token or a personal access token instead of `GITHUB_TOKEN` when creating or updating the pull request." and "For all other events, this behavior prevents you from accidentally creating recursive workflow runs. For example, if a workflow run pushes code using the repository's `GITHUB_TOKEN`, a new workflow will not run even when the repository contains a workflow configured to run when `push` events occur." and "Once a workflow has run at least once, you can dispatch it against any branch or tag via the GitHub API or GitHub CLI." and "The git reference for the workflow. The reference can be a branch or tag name." | The bot dispatches workflows with `gh workflow run` on `main`, on `release/next` and on the tag, and a dispatch by the `GITHUB_TOKEN` starts a run. `auto-pr.yml` and `release-pr.yml` open pull requests with `gh pr create`, and `release-pr.yml` changes the `bump:*` labels of the release pull request with `gh pr edit`, each with `GH_TOKEN` set to the `GITHUB_TOKEN`. `release-pr.yml` pushes `release/next`, the head of the release pull request, and `tag-release.yml` pushes the tag, each with `git push`. | GitHub documentation |
+| Default activity types of `pull_request` | "By default, a workflow only runs when a `pull_request` event's activity type is `opened`, `synchronize`, or `reopened`." | The `pull_request` trigger of `ci.yml` has no `types:`; `bump-label.yml` lists `opened`, `synchronize`, `reopened`, `labeled` and `unlabeled`, and `release-pr.yml` lists `labeled` and `unlabeled`. | GitHub documentation |
 | Releases by tag | "Get a published release with the specified tag." and "Information about published releases are available to everyone. Only users with push access will receive listings for draft releases." | The jobs `validate` and `publish` of `release.yml` and the job `tag` of `tag-release.yml` look up `releases/tags/<tag>`; the steps 'Delete a leftover draft for the tag' and 'Verify the draft' of `publish` list the releases. | GitHub documentation |
 | Retention | "By default, GitHub stores build logs and artifacts for 90 days, and this retention period can be customized." | The artifacts of a run of `release.yml` are used by its later jobs. | GitHub documentation |
 | Git push with a lease | "`--force-with-lease=<refname>:<expect>` will protect `<refname>` (alone), if it is going to be updated, by requiring its current value to be the same as the specified value `<expect>` (which is allowed to be different from the remote-tracking branch we have for the refname, or we do not even have to have such a remote-tracking branch when this form is used)." and "If `<expect>` is the empty string, then the named ref must not already exist." | The step 'Push release/next' of `release-pr.yml` pushes `release/next` with `--force-with-lease="release/next:${EXPECTED}"`, where `EXPECTED` is empty when the remote branch does not exist. | Git documentation (git push) |
+| Order of `git log` | "The output is given in reverse chronological order by default." | `changelog.ps1` reads the candidates of `release-prs` and `pending-cut` from `git log --first-parent --format=%H%x09%s <last tag>..<Base>`, with no ordering option, and `pending-cut` walks them newest first. | Git documentation (git log) |
+| Credentials of `actions/checkout` and the name of the token | "Personal access token (PAT) used to fetch the repository. The PAT is configured with the local git config, which enables your scripts to run authenticated git commands. The post-job step removes the PAT." with the default `${{ github.token }}` of the input `token`; "Whether to configure the token or SSH key with the local git config" with the default `true` of the input `persist-credentials`; and "A token to authenticate on behalf of the GitHub App installed on your repository. This is functionally equivalent to the `GITHUB_TOKEN` secret." | The step "Checkout main (full history and tags)" of the job `build` in `release-pr.yml` and the step "Checkout the pushed commit (full history and tags)" of the job `tag` in `tag-release.yml` have no `token` input and no `persist-credentials: false`; `release-pr.yml` pushes `release/next` and `tag-release.yml` pushes the tag with `git push` after them. | `actions/checkout` `action.yml` and GitHub documentation (contexts) |
 
 ### Not established
 
@@ -2238,6 +2228,7 @@ The facts in this section come from the repository settings, from decisions of t
 |---|---|---|
 | Bypass list of the ruleset `main` | Which actors are on it; it is not readable without authentication. | Which actors the rules of the ruleset `main` apply to. |
 | Check runs of a `workflow_dispatch` run on `release/next` | Whether the checks of the runs that `release-pr.yml` dispatches on `release/next` satisfy the required checks of the release pull request in this repository. The documentation states: "Even if the checks pass for the head commit, they do not satisfy a required status check in a branch ruleset." | The required checks `build + test (x64)`, `build + test (x86)` and `bump label` of the release pull request. |
+| `pull_request` runs of pull requests opened or updated with the `GITHUB_TOKEN` | Whether, in this repository, the `pull_request` events of the draft pull requests that `auto-pr.yml` opens and of the release pull request that `release-pr.yml` opens and pushes create runs of `ci.yml` and `bump-label.yml`; whether such runs are approved and run; and whether their check runs count for the required checks. | The required checks `build + test (x86)`, `build + test (x64)` and `bump label` of the release pull request and of the pull requests opened by `auto-pr.yml`. |
 | Merge methods enabled in the repository settings (the repository-level switches) | They are not readable without authentication. | The subject of the commit on `main`. |
 | Artifact and log retention period set for the repository | It is not readable without authentication (the documented default is 90 days). | Re-run of failed jobs of `release.yml` after the artifacts expired. |
 | Behaviour of a re-run | Which version of the workflow file a re-run uses; whether a re-run keeps the event of the original run; whether 'Re-run failed jobs' reuses the outputs and artifacts of the jobs that succeeded; whether a re-run of a `workflow_dispatch` run uses the same inputs. | The repair by re-run. |
