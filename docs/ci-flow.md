@@ -58,7 +58,7 @@ flowchart LR
 
 ### The platform rule
 
-GitHub has a rule that is not visible in any file of this repository. It is a GitHub platform rule:
+GitHub has a platform rule that the workflows depend on:
 
 - Events created with `GITHUB_TOKEN` (a push, a tag, a label change, a pull request) start no workflow runs. The only exceptions are `workflow_dispatch` and `repository_dispatch`.
 - A dispatch needs the `Actions: write` permission, which a job gets from an explicit `permissions:` block.
@@ -80,7 +80,7 @@ Every workflow here that pushes, labels or opens something as the bot depends on
 | `release.yml` | `push`, `workflow_dispatch` | Push: tags `v*.*.*`. | Workflow: `group: release-${{ github.ref }}`, `cancel-in-progress: false`. |
 | `arch-pipeline.yml` | `workflow_call` only | Inputs: `arch` (required, x86 or x64) and `release-version` (optional; empty means a development build). |  |
 
-The two composite actions have no events of their own. They run only as steps of other jobs.
+The two composite actions run as steps of jobs: `provision` in the jobs `build` and `test` of `arch-pipeline.yml`, `export-table` in the jobs `export-table` of `ci.yml` and `release.yml`.
 
 Some jobs inside these workflows run only for part of the events:
 
@@ -110,7 +110,7 @@ The job `build` of `release-pr.yml` has `contents: write`, `pull-requests: write
 ### What starts CI on `release/next`
 
 - `release-pr.yml` pushes `release/next` with `git push --force-with-lease`. As a consequence of the platform rule, that push starts no run.
-- `release/next` is not in the push filter of `ci.yml`.
+- The push filter of `ci.yml` lists `main`, `feat/**`, `stage/**`, `chore/**`, `fix/**` and `docs/**`.
 - The bot opens the release pull request with `gh pr create --base main --head release/next --title 'release/next' --body-file "$body"`. As a consequence of the platform rule, this pull request does not start a `pull_request` run of `ci.yml`.
 - So the only thing that starts `ci.yml` on `release/next` is the dispatch in the first row of the dispatch table. It runs the jobs of `ci.yml` on the tip of `release/next`. This gives the check runs `build + test (x86)` and `build + test (x64)` (the job names in `ci.yml`) on that branch.
 - `bump-label.yml` starts on a `pull_request` event (opened, synchronize, reopened, labeled, unlabeled) and on a dispatch. The bot dispatches it on `release/next` after it rebuilds the branch.
@@ -119,7 +119,7 @@ The job `build` of `release-pr.yml` has `contents: write`, `pull-requests: write
 
 ### What starts CI on a working branch
 
-A pull request opened by Auto PR does not start a `pull_request` run of CI (a consequence of the platform rule). The first CI run of a working branch comes from a push to the branch, which matches the push filter of `ci.yml`. Each later push to a branch with an open pull request starts both a `push` run and a `pull_request` run: `ci.yml` also starts on `pull_request` with base `main` and the default types (this follows from the GitHub rule that a push to the head branch of an open pull request is a `synchronize` event).
+A pull request opened by Auto PR does not start a `pull_request` run of CI (a consequence of the platform rule). The first CI run of a working branch comes from a push to the branch, which matches the push filter of `ci.yml`. Each later push to a branch with an open pull request starts both a `push` run and a `pull_request` run: `ci.yml` also starts on `pull_request` with base `main` and the default types.
 
 ## Branches, pull request titles and release levels
 
@@ -131,8 +131,7 @@ Five branch prefixes are working branches: `feat/`, `stage/`, `chore/`, `fix/` a
 - A push to `main` also starts `ci.yml`, but not `auto-pr.yml`.
 - `auto-pr.yml` opens a draft pull request with base `main`. Its title is the branch name (`--title "${BRANCH}"`, where `BRANCH` is the branch name).
 - Guard 1 ("Guard 1: branch ahead of main?") skips the creation when the branch has no commits ahead of `main`.
-- Guard 2 ("Guard 2: PR already open for this branch?") skips the creation when an open pull request for the branch already exists. This is why a second push does nothing.
-- No workflow changes the title afterwards.
+- Guard 2 ("Guard 2: PR already open for this branch?") skips the creation when an open pull request for the branch already exists.
 
 ### Squash-merge subject
 
@@ -162,7 +161,6 @@ Five branch prefixes are working branches: `feat/`, `stage/`, `chore/`, `fix/` a
 - `release-pr.yml` creates and pushes the branch `release/next` and opens its pull request with the title `release/next`.
 - Commits pushed to `release/next` by hand are overwritten the next time the bot rebuilds the branch.
 - The generator gives a commit whose subject starts with `release/` the type `release` and ignores it when it computes the level and the entries.
-- Neither `ci.yml` nor `auto-pr.yml` lists `release/` in its push filter.
 
 ### Breaking changes
 
@@ -199,7 +197,7 @@ Five branch prefixes are working branches: `feat/`, `stage/`, `chore/`, `fix/` a
 
 ### Step "Compose PR body"
 
-- The step runs only if `steps.ahead.outputs.proceed == 'true' && steps.existing.outputs.proceed == 'true'`. It writes `$RUNNER_TEMP/pr-body.md` and has no output.
+- The step runs only if `steps.ahead.outputs.proceed == 'true' && steps.existing.outputs.proceed == 'true'`. It writes `$RUNNER_TEMP/pr-body.md`.
 - Its inputs are `compare.json` and the `BRANCH` variable.
 
 #### What the step reads from the compare file
@@ -667,7 +665,7 @@ The step runs with `shell: bash`. It runs these parts in order.
 
 #### The labels
 
-- The step reads the labels of the pull request with `gh api repos/<repo>/pulls/<N>`, where `<repo>` is `GH_REPO` and `<N>` is the number. It lists the names with `--jq '.labels[].name'`.
+- The step reads the labels of the pull request with `gh api "repos/${GH_REPO}/pulls/${number}" --jq '.labels[].name'`.
 - If the command fails, the step prints the message below and ends with exit code 1. The end of the message is the content of `errfile`, as above.
 
   ```
