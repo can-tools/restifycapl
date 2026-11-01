@@ -128,7 +128,7 @@ A pull request opened by Auto PR does not start a `pull_request` run of CI (a co
 Five branch prefixes are working branches: `feat/`, `stage/`, `chore/`, `fix/` and `docs/`.
 
 - A push to such a branch starts `ci.yml` and `auto-pr.yml`. Both use the same five prefixes.
-- A push to `main` also starts `ci.yml`, but not `auto-pr.yml`.
+- A push to `main` also starts `ci.yml`.
 - `auto-pr.yml` opens a draft pull request with base `main`. Its title is the branch name (`--title "${BRANCH}"`, where `BRANCH` is the branch name).
 - Guard 1 ("Guard 1: branch ahead of main?") skips the creation when the branch has no commits ahead of `main`.
 - Guard 2 ("Guard 2: PR already open for this branch?") skips the creation when an open pull request for the branch already exists.
@@ -167,7 +167,7 @@ Five branch prefixes are working branches: `feat/`, `stage/`, `chore/`, `fix/` a
 - A breaking change is marked in a commit message of the pull request by `type!:` or a `BREAKING CHANGE:` footer. This works on any branch type.
 - The marker is read from the commit messages of the pull request named by ` (#N)` in the squash subject. A subject without ` (#N)` is not read, and the generator gives a warning.
 - A breaking change gives minor while the major version of the last tag is 0, and major from 1.0.0.
-- While the major version of the last tag is 0, the level is never major; version 1.0.0 is reached only with the `bump:major` label.
+- While the major version of the last tag is 0, `changelog.ps1 level` prints `minor`, `patch` or `none`. From a last tag `0.Y.Z`, the label `bump:major` gives the version `1.0.0`.
 - A breaking change is listed under "Breaking changes" in the release notes. A `chore/`, `docs/` or `unknown` pull request with a breaking marker is listed only under "Breaking changes", not under Development.
 
 ## Auto PR (`auto-pr.yml`)
@@ -183,7 +183,7 @@ Five branch prefixes are working branches: `feat/`, `stage/`, `chore/`, `fix/` a
 
 ### Step "Guard 1: branch ahead of main?"
 
-- The step has the id `ahead` and no `if:`.
+- The step has the id `ahead`.
 - It calls `gh api "repos/${GH_REPO}/compare/main...${BRANCH}"` and writes the whole response to `$RUNNER_TEMP/compare.json`. "Compose PR body" reads this file instead of calling the API again.
 - It reads `.ahead_by` from the file and prints "Branch '<branch>' is ahead of main by N commit(s)."
 - If `ahead_by` is 0, it prints "No commits ahead of main -- nothing to open a PR for. Exiting." and writes `proceed=false` to `$GITHUB_OUTPUT`. Otherwise it writes `proceed=true`. In both cases the step ends with exit code 0.
@@ -288,19 +288,16 @@ not a required check, so a red result does not block the merge.
 
 - The workflow has `permissions: contents: read`.
 - `export-table`, `changelog-fixtures` and `actionlint` each have their own block, `permissions: contents: read`.
-- `pipeline-x86`, `pipeline-x64`, `gate-x86` and `gate-x64` have no `permissions:` block of their own.
 - The only third-party action in `ci.yml` is `actions/checkout`, used in three jobs and pinned by SHA with the label `# v7.0.1`.
 
 ### Job dependencies
 
-- The only `needs:` in the file are those of the two gates; each gate waits only for its own pipeline. No job has `needs:` on `export-table`, `changelog-fixtures` or `actionlint`.
-- `pipeline-x86` and `pipeline-x64` have no `needs:`, so they run in parallel.
+- `gate-x86` has `needs: pipeline-x86` and `gate-x64` has `needs: pipeline-x64`.
 
 ### Jobs `pipeline-x86` and `pipeline-x64`
 
 - Each job calls `./.github/workflows/arch-pipeline.yml` and passes one input: `arch: x86` for `pipeline-x86`, `arch: x64` for `pipeline-x64`.
-- `release-version` is not passed; its default in `arch-pipeline.yml` is `''`.
-- The two jobs have no `name:`.
+- `release-version` has the default `''` in `arch-pipeline.yml`; an empty value means a development build.
 
 ### Jobs `gate-x86` and `gate-x64`
 
@@ -360,8 +357,8 @@ not a required check, so a red result does not block the merge.
 
 ### Inputs
 
-- `arch` has the type `string` and is required. It has no default. Its description reads: "Target architecture, x86 or x64."
-- `arch-pipeline.yml` does not check `arch`; the value is used in the make targets, the DLL path and the artifact name.
+- `arch` has the type `string` and is required. Its description reads: "Target architecture, x86 or x64."
+- The value of `arch` is used in the make targets, the DLL path and the artifact name.
 - `release-version` has the type `string` and is optional, with default `''`. Its description reads: "X.Y.Z to build and verify as a release; empty for a development build."
 
 ### Permissions
@@ -372,15 +369,13 @@ not a required check, so a red result does not block the merge.
 ### Jobs
 
 - The workflow has two jobs, `build` and `test`. Both have the `name:` equal to the job id and run on `windows-latest`.
-- `build` and `test` have no `needs:`, so they run in parallel.
-- `test` downloads no artifact and builds on its own via `make test`.
+- The job `test` builds and runs the tests with `make test`.
 - Third-party actions in the file: `actions/checkout`, pinned by SHA with the label `# v7.0.1`, and `actions/upload-artifact`, pinned by SHA with the label `# v7.0.2`.
 
 ### What `release-version` changes
 
 - When `release-version` is empty, the build step passes no `VER_*` variables to `make`, and the step "Check version resource against release-version" is skipped.
 - When it is not empty, the build step validates it, passes the version variables to `make`, and the step "Check version resource against release-version" runs.
-- The steps "Check DLL exports (dumpbin /exports)" and "Upload DLL artifact", the artifact name and the job `test` do not use the value.
 
 ### Job `build`
 
@@ -394,11 +389,11 @@ In the messages quoted in this section, a PowerShell variable or expression (for
 
 #### Step "Provision build environment"
 
-- The step uses the local composite action `./.github/actions/provision` with the input `arch: ${{ inputs.arch }}`. It has no `if:`.
+- The step uses the local composite action `./.github/actions/provision` with the input `arch: ${{ inputs.arch }}`.
 
 #### Step "make build-${{ inputs.arch }}"
 
-- The step has no `if:`. It runs with `shell: pwsh` and sets `RELEASE_VERSION` to `inputs.release-version` and `ARCH` to `inputs.arch`.
+- The step runs with `shell: pwsh` and sets `RELEASE_VERSION` to `inputs.release-version` and `ARCH` to `inputs.arch`.
 - The script sets `$ErrorActionPreference = 'Stop'` and starts with an empty list of version arguments.
 - If `RELEASE_VERSION` is not empty, it must match this regular expression: `^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\z`. Otherwise the step throws `release-version must be X.Y.Z without leading zeros, got '$env:RELEASE_VERSION'`.
 - The script splits the value on `.`. A field is rejected when its length is greater than 5 or its integer value is greater than 65535. The step then throws `release-version field '$field' exceeds 65535 (version resource fields are 16-bit)`.
@@ -420,7 +415,7 @@ In the messages quoted in this section, a PowerShell variable or expression (for
 
 #### Step "Check DLL exports (dumpbin /exports)"
 
-- The step has no `if:` and runs for every build, development builds included. It runs with `shell: pwsh` and sets `ARCH`.
+- The step runs with `shell: pwsh` and sets `ARCH`. It runs for a development build as well as for a release build.
 - It runs `dumpbin /nologo /exports` on `build\<arch>\restifycapl-<arch>.dll`. If the exit code is not 0, it throws `dumpbin /exports $dll failed (exit $LASTEXITCODE)`.
 - It writes the dumpbin output to the job summary before it checks the exports. The summary has the heading `### dumpbin /exports <dll>` and the output in a fenced block.
 - It reads the exported names from the dumpbin table and the count from the "number of functions" line.
@@ -430,7 +425,7 @@ In the messages quoted in this section, a PowerShell variable or expression (for
 
 #### Step "Upload DLL artifact"
 
-- The step has no `if:`. It uses `actions/upload-artifact`.
+- The step uses `actions/upload-artifact`.
 - The artifact name is `restifycapl-<arch>` and the path is `build/<arch>/restifycapl-<arch>.dll`.
 - The step sets `if-no-files-found: error` and `overwrite: true`.
 
@@ -440,7 +435,7 @@ In the messages quoted in this section, a PowerShell variable or expression (for
 - "Checkout (full history)" uses `actions/checkout` with `fetch-depth: 0`.
 - "Provision build environment" uses `./.github/actions/provision` with the input `arch: ${{ inputs.arch }}`.
 - "make test (ARCH=${{ inputs.arch }})" runs with `shell: pwsh` and sets `ARCH` to `inputs.arch`. It runs `make test "ARCH=$env:ARCH"`. If the exit code is not 0, it throws `make test ARCH=$env:ARCH failed (exit $LASTEXITCODE)`.
-- The job does not use `release-version`; it runs the same way for a development and a release call.
+- The job runs the same way for a development and a release call.
 
 ## Composite action `provision`
 
@@ -448,7 +443,7 @@ In the messages quoted in this section, a PowerShell variable or expression (for
 
 - The action is in `.github/actions/provision/action.yml`. Its `name:` is `Provision build environment`.
 - Its `description:` reads: "Activates MSVC, provisions the pinned vcpkg tool and the static dependencies, and places them where the Makefile expects them."
-- It has one input, `arch`. The input is required and has no default. Its description reads: "Target architecture, x86 or x64."
+- It has one input, `arch`. The input is required. Its description reads: "Target architecture, x86 or x64."
 - `runs.using` is `composite`.
 - The action has twelve steps, in this order: "Validate arch input", "Activate MSVC developer environment (${{ inputs.arch }})", "Pin VCPKG_ROOT to a CI-only path (avoid VS-bundled vcpkg collision)", "Expose runner image version for cache keying", "Ensure make is available", "Cache vcpkg tool checkout", "Bootstrap vcpkg (full clone, pinned tool tag)", "Verify vcpkg tool pin matches vcpkg.json's builtin-baseline", "Cache vcpkg install root (${{ inputs.arch }}-windows-static)", "vcpkg install (${{ inputs.arch }}-windows-static)", "Place libs where the Makefile expects them" and "Verify /MT provenance (dumpbin /directives)".
 - The jobs `build` and `test` of `arch-pipeline.yml` use the action, each with `arch: ${{ inputs.arch }}`.
@@ -499,7 +494,7 @@ In the messages quoted in this section, a PowerShell variable or expression (for
 
 ### Step "Verify vcpkg tool pin matches vcpkg.json's builtin-baseline"
 
-- The step has no `if:`, so it also runs on a cache hit.
+- The step also runs on a cache hit.
 - The step reads `builtin-baseline` from `vcpkg.json` and compares it with the commit checked out in `VCPKG_ROOT`.
 - If they differ, the step throws a four-line message. Lines 1, 2 and 4 read:
 
@@ -731,7 +726,7 @@ The commit messages of a pull request:
 
 The cut-off:
 
-- Commits up to and including a fixed commit named in the script (`$CutOffSha`) are listed under Development and raise no level.
+- Commits up to and including a fixed commit named in the script (`$CutOffSha`) are listed under Development.
 
 ### Level
 
@@ -811,7 +806,7 @@ The placement in the file:
 The output files:
 
 - The result goes to `-Output`, or over `-ChangelogPath` when `-Output` is not given.
-- `-SectionOutput` gets the section alone: its lines, each ended with a line feed. It does not get the link definition.
+- `-SectionOutput` gets the section alone: its lines, each ended with a line feed.
 - Both files are UTF-8 without a byte order mark.
 - When a check fails, nothing is written.
 
@@ -1316,7 +1311,7 @@ The file has these parts, in this order:
    Development entries stay in CHANGELOG.md and are left out of the GitHub release notes.
    ```
 
-   The groups follow in this order: Breaking changes, Added, Fixed. Each group is a blank line, the line `### <name>`, a blank line and its entries. A blank line follows the groups. The group Development is never written. At least one of the three groups is always present. Each breaking entry appears twice: in the caution block and under `### Breaking changes`.
+   The groups follow in this order: Breaking changes, Added, Fixed. Each group is a blank line, the line `### <name>`, a blank line and its entries. A blank line follows the groups. At least one of the three groups is always present. Each breaking entry appears twice: in the caution block and under `### Breaking changes`.
 4. The warnings, only when there is at least one warning. The format is:
 
    ```
