@@ -66,7 +66,7 @@ GitHub has a platform rule that the workflows depend on:
 - An explicit `permissions:` block works whatever the repository default for workflow permissions is.
 - A `pull_request` trigger without `types:` uses the GitHub defaults: opened, synchronize and reopened.
 
-Every workflow here that pushes, labels or opens something as the bot depends on this rule. The text below says so where it applies.
+Every workflow here that pushes, labels or opens something as the bot depends on this rule.
 
 ### Triggers of each workflow
 
@@ -101,7 +101,7 @@ The bots start other workflows with `gh workflow run`. Their jobs set `GH_TOKEN`
 | `release-pr.yml` / `build` / "Dispatch CI and the bump label check on release/next" | `ci.yml` | `release/next` | When `release-pr.yml` rebuilt the branch (`steps.build.outputs.skip == 'false'`) |
 | `release-pr.yml` / `build` / "Dispatch CI and the bump label check on release/next" | `bump-label.yml` | `release/next` | Same step and same condition as the row above |
 | `tag-release.yml` / `tag` / "Dispatch the release pull request workflow on main" | `release-pr.yml` | `main` | When `steps.tip.outputs.proceed != 'false'` |
-| `tag-release.yml` / `tag` / "Dispatch the release on the tag" | `release.yml` | The release tag (`vX.Y.Z`) | When `steps.tip.outputs.proceed != 'false'` and the lookup of the release of that tag fails and its error output holds `HTTP 404` (see the section on Tag Release) |
+| `tag-release.yml` / `tag` / "Dispatch the release on the tag" | `release.yml` | The release tag (`vX.Y.Z`) | When `steps.tip.outputs.proceed != 'false'` and the lookup of the release of that tag fails and its error output holds `HTTP 404` |
 
 The first step starts two workflows, `ci.yml` and `bump-label.yml`, in a loop.
 
@@ -846,8 +846,8 @@ This section describes how `changelog.ps1` decides whether a commit is a release
 
 The callers:
 
-- Two steps of the job `build` of `release-pr.yml`: "Fetch the pull request data of the release commits" and "Wait for the tag of a merged release commit". They are described in the section on the Release PR.
-- The job `classify` of `tag-release.yml`. It is described in the section on Tag Release.
+- Two steps of the job `build` of `release-pr.yml`: "Fetch the pull request data of the release commits" and "Wait for the tag of a merged release commit".
+- The job `classify` of `tag-release.yml`.
 
 Both callers set `GH_TOKEN` to `github.token`.
 
@@ -1017,7 +1017,7 @@ The outcome, in the order of the checks:
 
 ### Jobs
 
-- The workflow has two jobs, `build` and `labels`. The job `labels` is described after the job `build`.
+- The workflow has two jobs, `build` and `labels`.
 - The job `build` runs only if `github.event_name != 'pull_request'`. It runs on `ubuntu-latest`.
 - The job `build` sets these environment variables:
   - `GH_TOKEN` is `github.token`.
@@ -1684,7 +1684,7 @@ Every step with `run:` runs with `shell: bash`.
 
 ### Jobs
 
-- The workflow has seven jobs, in this order: `validate`, `pipeline-x86`, `pipeline-x64`, `export-table`, `assemble`, `attest` and `publish`. The job `publish` is described after the job `attest`.
+- The workflow has seven jobs, in this order: `validate`, `pipeline-x86`, `pipeline-x64`, `export-table`, `assemble`, `attest` and `publish`.
 - `pipeline-x86` and `pipeline-x64` consist only of `needs:`, `uses:` and `with:`. They call `arch-pipeline.yml` as described in the section on Architecture pipeline, which also names the artifacts they upload.
 - The other five jobs run on `ubuntu-latest`.
 - Third-party actions in the file, each pinned by SHA with a label: `actions/checkout` with `# v7.0.1`, `actions/upload-artifact` with `# v7.0.2`, `actions/download-artifact` with `# v7.0.0` and `actions/attest-build-provenance` with `# v4.2.2`.
@@ -2056,30 +2056,29 @@ The step does these things in this order:
 
 ## What a person does
 
-This section lists the events that start the workflows, in the order of a release, and what the workflows do on each. The bots push, label and open pull requests with `GITHUB_TOKEN`; as a consequence of the platform rule, an event in the first column of the next table starts the runs in its row only when it is not made with `GITHUB_TOKEN`. Each row refers to the sections that describe the steps.
+This section lists the events that start the workflows, in the order of a release, and what the workflows do on each. The bots push, label and open pull requests with `GITHUB_TOKEN`; as a consequence of the platform rule, an event in the first column of the next table starts the runs in its row only when it is not made with `GITHUB_TOKEN`.
 
-| Event | What the workflows do | What the files read and require | Details |
-|---|---|---|---|
-| A push to a branch whose name starts with `feat/`, `stage/`, `chore/`, `fix/` or `docs/` | `ci.yml` runs its jobs. `auto-pr.yml` opens a draft pull request with base `main` and the branch name as title when the branch is ahead of `main` and has no open pull request. | The branch prefix gives the type of the change. `type!:` or a `BREAKING CHANGE:` footer in a commit message marks a breaking change. | The sections on working branches, release levels, breaking changes, Auto PR and CI. |
-| A later push to such a branch while a pull request for it is open | `ci.yml` runs a `push` run and a `pull_request` run. `bump-label.yml` runs the check `bump label`, which does nothing and succeeds because the head branch is not `release/next`. In `auto-pr.yml`, Guard 2 finds the open pull request and answers `false`, so "Compose PR body" and "Create draft PR" are skipped. | Guard 2 counts only an open pull request whose head is the branch. | The sections on what starts CI on a working branch, later pushes and failures, and Bump label. |
-| A new commit on `main` whose subject is not `release/next (#N)` | `release-pr.yml` (job `build`) computes the level. For none, it closes the open release pull requests and deletes `release/next` if it exists. Otherwise it rebuilds `release/next`; unless the rebuild is skipped, it pushes the branch, opens or updates the release pull request, runs the step "Keep exactly one bump label" and dispatches `ci.yml` and `bump-label.yml` on `release/next`. The job `classify` of `tag-release.yml` answers `not-release`, and `ci.yml` runs. | The branch prefix at the start of the subject gives the type of the change, and the pull request number is read from the trailing ` (#N)`. | The sections on squash-merge subject and release levels, and the job `build` in the section on the Release PR. |
-| A `bump:*` label added to or removed from the release pull request | `release-pr.yml` (job `labels`) rewrites the version preview line of the pull request description when the pull request has exactly one `bump:*` label and it is `bump:major`, `bump:minor` or `bump:patch`; the other lines of the description stay as they are. `bump-label.yml` runs the check `bump label`. | The check `bump label` requires exactly one `bump:*` label. | The section on Bump label, the job `labels` in the section on the Release PR, and the section on the version preview line. |
-| A new commit on `main` whose subject is `release/next (#N)` | The job `classify` of `tag-release.yml` classifies the commit. For the answer `tag`, the job `tag` checks that `main` still points at the commit, reads the label, pushes the annotated tag, dispatches `release-pr.yml` on `main`, and dispatches `release.yml` on the tag when the lookup of the release of the tag fails and its error output holds `HTTP 404`. `release.yml` builds both DLLs and publishes the release. `ci.yml` and `release-pr.yml` also run. | For the pull request `#N` of the subject, `merged` is true, `mergeCommitSha` is the hash of this commit, `baseRef` is `main`, `headRef` is `release/next` and `headRepo` equals `baseRepo`. The commit has one parent; that parent and the tree of the commit equal the only parent and the tree of the head commit of the pull request. The pull request has exactly one `bump:*` label, and it is `bump:major`, `bump:minor` or `bump:patch`. | The sections on recognising a release commit, Tag Release and Release. |
+| Event | What the workflows do | What the files read and require |
+|---|---|---|
+| A push to a branch whose name starts with `feat/`, `stage/`, `chore/`, `fix/` or `docs/` | `ci.yml` runs its jobs. `auto-pr.yml` opens a draft pull request with base `main` and the branch name as title when the branch is ahead of `main` and has no open pull request. | The branch prefix gives the type of the change. `type!:` or a `BREAKING CHANGE:` footer in a commit message marks a breaking change. |
+| A later push to such a branch while a pull request for it is open | `ci.yml` runs a `push` run and a `pull_request` run. `bump-label.yml` runs the check `bump label`, which does nothing and succeeds because the head branch is not `release/next`. In `auto-pr.yml`, Guard 2 finds the open pull request and answers `false`, so "Compose PR body" and "Create draft PR" are skipped. | Guard 2 counts only an open pull request whose head is the branch. |
+| A new commit on `main` whose subject is not `release/next (#N)` | `release-pr.yml` (job `build`) computes the level. For none, it closes the open release pull requests and deletes `release/next` if it exists. Otherwise it rebuilds `release/next`; unless the rebuild is skipped, it pushes the branch, opens or updates the release pull request, runs the step "Keep exactly one bump label" and dispatches `ci.yml` and `bump-label.yml` on `release/next`. The job `classify` of `tag-release.yml` answers `not-release`, and `ci.yml` runs. | The branch prefix at the start of the subject gives the type of the change, and the pull request number is read from the trailing ` (#N)`. |
+| A `bump:*` label added to or removed from the release pull request | `release-pr.yml` (job `labels`) rewrites the version preview line of the pull request description when the pull request has exactly one `bump:*` label and it is `bump:major`, `bump:minor` or `bump:patch`; the other lines of the description stay as they are. `bump-label.yml` runs the check `bump label`. | The check `bump label` requires exactly one `bump:*` label. |
+| A new commit on `main` whose subject is `release/next (#N)` | The job `classify` of `tag-release.yml` classifies the commit. For the answer `tag`, the job `tag` checks that `main` still points at the commit, reads the label, pushes the annotated tag, dispatches `release-pr.yml` on `main`, and dispatches `release.yml` on the tag when the lookup of the release of the tag fails and its error output holds `HTTP 404`. `release.yml` builds both DLLs and publishes the release. `ci.yml` and `release-pr.yml` also run. | For the pull request `#N` of the subject, `merged` is true, `mergeCommitSha` is the hash of this commit, `baseRef` is `main`, `headRef` is `release/next` and `headRepo` equals `baseRepo`. The commit has one parent; that parent and the tree of the commit equal the only parent and the tree of the head commit of the pull request. The pull request has exactly one `bump:*` label, and it is `bump:major`, `bump:minor` or `bump:patch`. |
 
-- The next rebuild of `release/next` that is not skipped replaces a single `bump:*` label that differs from the computed one (and comments), rewrites the pull request description, resets the checklist and overwrites commits pushed to `release/next` by hand. See the step "Keep exactly one bump label" in the section on the Release PR, the section on the pull request description and the section on reserved branch `release/next`.
-- When no release pull request is open, the next run of the job `build` of `release-pr.yml` that reaches the step "Build the release/next commit" opens a new one: the skip needs exactly one open release pull request, and the step "Open or update the release pull request" creates the pull request when none is open. See the steps "Build the release/next commit" and "Open or update the release pull request" in the section on the Release PR.
-- On the push of a release commit, `release-pr.yml` also runs. While the release commit is faithful, is the tip of `main` and has no tag, its step "Wait for the tag of a merged release commit" answers `waiting` and the later steps of the job `build` are skipped. See that step in the section on the Release PR and the section on recognising a release commit.
-- The messages that call for an action are in the section on when something fails.
+- The next rebuild of `release/next` that is not skipped replaces a single `bump:*` label that differs from the computed one (and comments), rewrites the pull request description, resets the checklist and overwrites commits pushed to `release/next` by hand.
+- When no release pull request is open, the next run of the job `build` of `release-pr.yml` that reaches the step "Build the release/next commit" opens a new one: the skip needs exactly one open release pull request, and the step "Open or update the release pull request" creates the pull request when none is open.
+- On the push of a release commit, `release-pr.yml` also runs. While the release commit is faithful, is the tip of `main` and has no tag, its step "Wait for the tag of a merged release commit" answers `waiting` and the later steps of the job `build` are skipped.
 
 ### Dispatches and tag pushes the files accept
 
-| Event | What the workflows do | Details |
-|---|---|---|
-| A dispatch of `ci.yml` on any ref | All jobs run except `actionlint`, which is skipped. | The section on triggers of each workflow and the section on CI. |
-| A dispatch of `bump-label.yml` | The check `bump label` runs on the dispatched ref. For a ref other than `release/next` it does nothing and succeeds; for `release/next` it looks up the open pull request of `release/next` and requires exactly one `bump:*` label. | The section on Bump label. |
-| A dispatch of `release-pr.yml` | The job `build` runs the same steps as on a push. The step "Build the release/next commit" writes `skip=false`, because it writes `skip=true` only for the event `push`. | The step "Build the release/next commit" in the section on the Release PR. |
-| A dispatch of `release.yml` on a ref that is not a tag | The mode is `dry-run`: the jobs `validate` to `attest` run, the job `publish` is skipped, and the step "Preview the next release" writes the preview of the next release to the job summary. | The step "Preview the next release" in the section on Release. |
-| A dispatch of `release.yml` on a tag, or a push of a tag `v*.*.*` | The mode is `tag`: the step "Validate the tag" checks the tag, and the job `publish` runs. | The step "Validate the tag" in the section on Release. |
+| Event | What the workflows do |
+|---|---|
+| A dispatch of `ci.yml` on any ref | All jobs run except `actionlint`, which is skipped. |
+| A dispatch of `bump-label.yml` | The check `bump label` runs on the dispatched ref. For a ref other than `release/next` it does nothing and succeeds; for `release/next` it looks up the open pull request of `release/next` and requires exactly one `bump:*` label. |
+| A dispatch of `release-pr.yml` | The job `build` runs the same steps as on a push. The step "Build the release/next commit" writes `skip=false`, because it writes `skip=true` only for the event `push`. |
+| A dispatch of `release.yml` on a ref that is not a tag | The mode is `dry-run`: the jobs `validate` to `attest` run, the job `publish` is skipped, and the step "Preview the next release" writes the preview of the next release to the job summary. |
+| A dispatch of `release.yml` on a tag, or a push of a tag `v*.*.*` | The mode is `tag`: the step "Validate the tag" checks the tag, and the job `publish` runs. |
 
 ## When something fails
 
