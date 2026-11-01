@@ -78,7 +78,7 @@ Every workflow here that pushes, labels or opens something as the bot depends on
 | `release-pr.yml` | `push`, `workflow_dispatch`, `pull_request` | Push: branch `main`. Pull request: branches `main`, types labeled and unlabeled. | Job `build`: `group: release-pr-build`, `cancel-in-progress: false`. Job `labels`: `group: release-pr-labels`, `cancel-in-progress: false`. |
 | `tag-release.yml` | `push` | Push: branch `main`. | Job `tag`: `group: tag-release`, `cancel-in-progress: false`. |
 | `release.yml` | `push`, `workflow_dispatch` | Push: tags `v*.*.*`. | Workflow: `group: release-${{ github.ref }}`, `cancel-in-progress: false`. |
-| `arch-pipeline.yml` | `workflow_call` only | Inputs: `arch` (required, x86 or x64) and `release-version` (optional; empty means a development build). |  |
+| `arch-pipeline.yml` | `workflow_call` | Inputs: `arch` (required, x86 or x64) and `release-version` (optional; empty means a development build). |  |
 
 The two composite actions run as steps of jobs: `provision` in the jobs `build` and `test` of `arch-pipeline.yml`, `export-table` in the jobs `export-table` of `ci.yml` and `release.yml`.
 
@@ -112,7 +112,7 @@ The job `build` of `release-pr.yml` has `contents: write`, `pull-requests: write
 - `release-pr.yml` pushes `release/next` with `git push --force-with-lease`. As a consequence of the platform rule, that push starts no run.
 - The push filter of `ci.yml` lists `main`, `feat/**`, `stage/**`, `chore/**`, `fix/**` and `docs/**`.
 - The bot opens the release pull request with `gh pr create --base main --head release/next --title 'release/next' --body-file "$body"`. As a consequence of the platform rule, this pull request does not start a `pull_request` run of `ci.yml`.
-- So the only thing that starts `ci.yml` on `release/next` is the dispatch by the step "Dispatch CI and the bump label check on release/next" of the job `build` of `release-pr.yml`. It runs the jobs of `ci.yml` on the tip of `release/next`. This gives the check runs `build + test (x86)` and `build + test (x64)` (the job names in `ci.yml`) on that branch.
+- So the dispatch by the step "Dispatch CI and the bump label check on release/next" of the job `build` of `release-pr.yml` starts `ci.yml` on `release/next`. It runs the jobs of `ci.yml` on the tip of `release/next`. This gives the check runs `build + test (x86)` and `build + test (x64)` (the job names in `ci.yml`) on that branch.
 - `bump-label.yml` starts on a `pull_request` event (opened, synchronize, reopened, labeled, unlabeled) and on a dispatch. The bot dispatches it on `release/next` after it rebuilds the branch.
 - A `bump:*` label change on the `release/next` pull request starts the job `labels` of `release-pr.yml`.
 - `tag-release.yml` pushes the release tag with `git push origin "refs/tags/$TAG"`. As a consequence of the platform rule, that push starts no run. The last step of its job `tag`, "Dispatch the release on the tag", dispatches `release.yml` on the tag.
@@ -151,10 +151,10 @@ Five branch prefixes are working branches: `feat/`, `stage/`, `chore/`, `fix/` a
 | unknown | no release |
 
 - The level is the highest of the changes since the last tag: minor if there is any `feat/` or `stage/` change, else patch if there is any `fix/` change, else none.
-- The level comes from the branch prefix, not from the commit types. A `feat/`, `stage/` or `fix/` pull request that has only `chore:` commits still releases. It is listed by its branch name, with a warning.
+- The level comes from the branch prefix of the subject and from the breaking markers. A `feat/`, `stage/` or `fix/` pull request that has only `chore:` commits still releases. It is listed by its branch name, with a warning.
 - The bot computes the level with `changelog.ps1 level`. If it is major, minor or patch, the job rebuilds `release/next` and opens or updates the release pull request. If it is none, the job closes every open release pull request with a comment and deletes `release/next` if the branch exists.
 - The bot labels the release pull request `bump:<level>`. On every rebuild that is not skipped, it adds the computed label when there is no `bump:*` label, replaces a single other `bump:*` label with the computed one and comments, and changes nothing but warns when there are two or more. The `bump label` check and the tagging require exactly one `bump:*` label; the tagging also requires it to be `bump:major`, `bump:minor` or `bump:patch`.
-- A change of type `unknown` raises no level of its own. The generator gives a warning for it and, unless it has a breaking marker, lists it under Development.
+- For a change of type `unknown`, the generator gives a warning and, unless it has a breaking marker, lists it under Development.
 
 ### Reserved branch `release/next`
 
@@ -168,7 +168,7 @@ Five branch prefixes are working branches: `feat/`, `stage/`, `chore/`, `fix/` a
 - The marker is read from the commit messages of the pull request named by ` (#N)` in the squash subject. A subject without ` (#N)` is not read, and the generator gives a warning.
 - A breaking change gives minor while the major version of the last tag is 0, and major from 1.0.0.
 - While the major version of the last tag is 0, `changelog.ps1 level` prints `minor`, `patch` or `none`. From a last tag `0.Y.Z`, the label `bump:major` gives the version `1.0.0`.
-- A breaking change is listed under "Breaking changes" in the release notes. A `chore/`, `docs/` or `unknown` pull request with a breaking marker is listed only under "Breaking changes", not under Development.
+- A breaking change is listed under "Breaking changes" in the release notes. A `chore/`, `docs/` or `unknown` pull request is listed under Development when it has no breaking marker, and under "Breaking changes" when it has one.
 
 ## Auto PR (`auto-pr.yml`)
 
@@ -176,7 +176,7 @@ Five branch prefixes are working branches: `feat/`, `stage/`, `chore/`, `fix/` a
 
 ### Trigger and permissions
 
-- The only event is `push`, for the branches `feat/**`, `stage/**`, `chore/**`, `fix/**` and `docs/**`.
+- The event is `push`, for the branches `feat/**`, `stage/**`, `chore/**`, `fix/**` and `docs/**`.
 - The workflow has `contents: read` and `pull-requests: write`. Its one job, `open draft PR`, runs on `ubuntu-latest` with `GH_TOKEN` set to `secrets.GITHUB_TOKEN`.
 - The job also sets `GH_REPO` to `github.repository` and `BRANCH` to `github.ref_name`.
 - The job has four steps, in this order: "Guard 1: branch ahead of main?", "Guard 2: PR already open for this branch?", "Compose PR body" and "Create draft PR".
@@ -192,7 +192,7 @@ Five branch prefixes are working branches: `feat/`, `stage/`, `chore/`, `fix/` a
 ### Step "Guard 2: PR already open for this branch?"
 
 - The step has the id `existing` and runs only if `steps.ahead.outputs.proceed == 'true'`.
-- It runs `gh pr list --head "${BRANCH}" --state open --json number --jq '.[0].number // empty'`. Only an open pull request with this head branch counts.
+- It runs `gh pr list --head "${BRANCH}" --state open --json number --jq '.[0].number // empty'`.
 - If a number is returned, it prints "Open PR #N already exists for '<branch>' -- nothing to do. Exiting." and writes `proceed=false`. Otherwise it prints "No open PR found for '<branch>' -- will create one." and writes `proceed=true`. In both cases the step ends with exit code 0.
 
 ### Step "Compose PR body"
@@ -288,7 +288,7 @@ not a required check, so a red result does not block the merge.
 
 - The workflow has `permissions: contents: read`.
 - `export-table`, `changelog-fixtures` and `actionlint` each have their own block, `permissions: contents: read`.
-- The only third-party action in `ci.yml` is `actions/checkout`, used in three jobs and pinned by SHA with the label `# v7.0.1`.
+- `ci.yml` uses the third-party action `actions/checkout` in three jobs, pinned by SHA with the label `# v7.0.1`.
 
 ### Job dependencies
 
@@ -351,8 +351,8 @@ not a required check, so a red result does not block the merge.
 
 ### Trigger and callers
 
-- The only event is `workflow_call`.
-- `ci.yml` calls the workflow twice, from `pipeline-x86` and `pipeline-x64`, and passes only `arch`.
+- The event is `workflow_call`.
+- `ci.yml` calls the workflow twice, from `pipeline-x86` and `pipeline-x64`, and passes `arch`.
 - `release.yml` calls it twice, from `pipeline-x86` (`arch: x86`) and `pipeline-x64` (`arch: x64`). Both jobs have `needs: validate` and pass `release-version: ${{ needs.validate.outputs.version }}`.
 
 ### Inputs
@@ -615,7 +615,7 @@ In the messages quoted in this section, a PowerShell variable or expression (for
   - `REPO_OWNER` is `github.repository_owner`.
   - `HEAD_REF` is `github.head_ref || github.ref_name`.
   - `PR_NUMBER` is `github.event.pull_request.number`.
-- On a dispatch, `HEAD_REF` is the dispatched ref (`release/next` when the bot dispatches it) and `PR_NUMBER` is empty, so the step looks the number up (`github.head_ref` and `github.event.pull_request` are set only for pull request events).
+- `HEAD_REF` is `github.ref_name` when `github.head_ref` is empty. When `PR_NUMBER` is empty, the step looks the number up. `release-pr.yml` dispatches the workflow with `--ref release/next`.
 - In the messages quoted in this section, a shell variable (for example `$HEAD_REF` or `${number}`) stands for its value at run time.
 
 ### Step "Require exactly one bump label on release/next"
@@ -708,7 +708,7 @@ The range:
 
 - `-Base` is a full commit hash: 40 lowercase hex characters. Otherwise the run ends with exit code 2 and the usage text `-Base must be a full 40-character lowercase hex commit hash`.
 - Without `-Base`, the script takes the result of `git rev-parse origin/main`, the tip of `origin/main`.
-- The range is `git log --first-parent <last tag>..<Base>`. Only the first-parent commits are read. They are processed oldest first.
+- The range is `git log --first-parent <last tag>..<Base>`. The first-parent commits are processed oldest first.
 
 The subject of a commit:
 
@@ -870,7 +870,7 @@ Both callers set `GH_TOKEN` to `github.token`.
 
 - An empty or omitted `-PrReleases` is an empty table.
 - Every entry of the file is checked, whether a command uses it or not.
-- An entry is an object with a boolean `found`. For an entry with `found` false, only `found` is checked.
+- An entry is an object with a boolean `found`.
 - An entry with `found` true has these keys:
 
 | Key | Type | Taken from the API field |
@@ -955,9 +955,9 @@ A valid release commit is faithful when all of these hold:
 
 ### pending-cut
 
-`changelog.ps1 pending-cut` takes `-PrReleases` only.
+`changelog.ps1 pending-cut` takes `-PrReleases`.
 
-- The range is `<last tag>..<tip>`, where `<tip>` is the tip of `origin/main`. Git leaves the commit of the last tag out of this range, so the last tag is on no candidate.
+- The range is `<last tag>..<tip>`, where `<tip>` is the tip of `origin/main`.
 - The command reads the candidates first, then the data file. The file is read and checked even when there is no candidate.
 - It walks the candidates newest first.
   - A candidate whose number has no key in the file ends the run with exit code 1 and this error:
@@ -1180,7 +1180,7 @@ All steps except the first run with `shell: bash`.
 #### Step "Build the release/next commit"
 
 - The step has the id `build` and runs only if `steps.level.outputs.release == 'true'`. It sets `BASE` to `steps.fetch.outputs.base` and `COUNT` to `steps.lookup.outputs.count`.
-- The step switches to `release/next` at `BASE` (`git switch -C`), copies the generated file over `CHANGELOG.md`, and commits only that file as `github-actions[bot]`.
+- The step switches to `release/next` at `BASE` (`git switch -C`), copies the generated file over `CHANGELOG.md`, runs `git add CHANGELOG.md` and commits as `github-actions[bot]`.
 - The commit message is:
 
   ```
@@ -1687,7 +1687,7 @@ Every step with `run:` runs with `shell: bash`.
 ### Jobs
 
 - The workflow has seven jobs, in this order: `validate`, `pipeline-x86`, `pipeline-x64`, `export-table`, `assemble`, `attest` and `publish`.
-- `pipeline-x86` and `pipeline-x64` consist only of `needs:`, `uses:` and `with:`. They call `arch-pipeline.yml` with `arch` (`x86` or `x64`) and `release-version`, and the artifacts they upload are `restifycapl-x86` and `restifycapl-x64`.
+- `pipeline-x86` and `pipeline-x64` have `needs:`, `uses:` and `with:`. They call `arch-pipeline.yml`, `pipeline-x86` with `arch: x86` and `pipeline-x64` with `arch: x64`, both with `release-version: ${{ needs.validate.outputs.version }}`; `arch-pipeline.yml` uploads the artifacts `restifycapl-x86` and `restifycapl-x64`.
 - The other five jobs run on `ubuntu-latest`.
 - Third-party actions in the file, each pinned by SHA with a label: `actions/checkout` with `# v7.0.1`, `actions/upload-artifact` with `# v7.0.2`, `actions/download-artifact` with `# v7.0.0` and `actions/attest-build-provenance` with `# v4.2.2`.
 - `validate` is the first job. The other jobs have these `needs:`:
@@ -2065,7 +2065,7 @@ This section lists the events that start the workflows, in the order of a releas
 | Event | What the workflows do | What the files read and require |
 |---|---|---|
 | A push to a branch whose name starts with `feat/`, `stage/`, `chore/`, `fix/` or `docs/` | `ci.yml` runs its jobs. `auto-pr.yml` opens a draft pull request with base `main` and the branch name as title when the branch is ahead of `main` and has no open pull request. | The branch prefix gives the type of the change. `type!:` or a `BREAKING CHANGE:` footer in a commit message marks a breaking change. |
-| A later push to such a branch while a pull request for it is open | `ci.yml` runs a `push` run and a `pull_request` run. `bump-label.yml` runs the check `bump label`, which does nothing and succeeds because the head branch is not `release/next`. In `auto-pr.yml`, Guard 2 finds the open pull request and answers `false`, so "Compose PR body" and "Create draft PR" are skipped. | Guard 2 counts only an open pull request whose head is the branch. |
+| A later push to such a branch while a pull request for it is open | `ci.yml` runs a `push` run and a `pull_request` run. `bump-label.yml` runs the check `bump label`, which does nothing and succeeds because the head branch is not `release/next`. In `auto-pr.yml`, Guard 2 finds the open pull request and answers `false`, so "Compose PR body" and "Create draft PR" are skipped. | Guard 2 counts an open pull request whose head is the branch. |
 | A new commit on `main` whose subject is not `release/next (#N)` | `release-pr.yml` (job `build`) computes the level. For none, it closes the open release pull requests and deletes `release/next` if it exists. Otherwise it rebuilds `release/next`; unless the rebuild is skipped, it pushes the branch, opens or updates the release pull request, runs the step "Keep exactly one bump label" and dispatches `ci.yml` and `bump-label.yml` on `release/next`. The job `classify` of `tag-release.yml` answers `not-release`, and `ci.yml` runs. | The branch prefix at the start of the subject gives the type of the change, and the pull request number is read from the trailing ` (#N)`. |
 | A `bump:*` label added to or removed from the release pull request | `release-pr.yml` (job `labels`) rewrites the version preview line of the pull request description when the pull request has exactly one `bump:*` label and it is `bump:major`, `bump:minor` or `bump:patch`; the other lines of the description stay as they are. `bump-label.yml` runs the check `bump label`. | The check `bump label` requires exactly one `bump:*` label. |
 | A new commit on `main` whose subject is `release/next (#N)` | The job `classify` of `tag-release.yml` classifies the commit. For the answer `tag`, the job `tag` checks that `main` still points at the commit, reads the label, pushes the annotated tag, dispatches `release-pr.yml` on `main`, and dispatches `release.yml` on the tag when the lookup of the release of the tag fails and its error output holds `HTTP 404`. `release.yml` builds both DLLs and publishes the release. `ci.yml` and `release-pr.yml` also run. | For the pull request `#N` of the subject, `merged` is true, `mergeCommitSha` is the hash of this commit, `baseRef` is `main`, `headRef` is `release/next` and `headRepo` equals `baseRepo`. The commit has one parent; that parent and the tree of the commit equal the only parent and the tree of the head commit of the pull request. The pull request has exactly one `bump:*` label, and it is `bump:major`, `bump:minor` or `bump:patch`. |
