@@ -12,7 +12,7 @@ The flow is made of seven workflows in `.github/workflows/` and two composite ac
 | `bump-label.yml` | Bump label | Its check `bump label` requires exactly one `bump:*` label on the `release/next` pull request. |
 | `release-pr.yml` | Release PR | The release bot. Builds the `release/next` branch and its pull request, and keeps the `bump:*` label and the version preview in the pull request body up to date. |
 | `tag-release.yml` | Tag Release | The tagging bot. Tags a merged release commit on `main`, dispatches `release-pr.yml` on `main` and dispatches `release.yml` on the tag. |
-| `release.yml` | Release | Checks the tag, builds both DLLs, packs them and publishes the GitHub release. |
+| `release.yml` | Release | On a tag ref: checks the tag, builds both DLLs, packs them and publishes the GitHub release. On another ref: builds and packs both DLLs and writes a preview of the next release to the job summary. |
 | `.github/actions/export-table/action.yml` | export-table | Composite action. Runs the export-table fixtures, checks `src/module/exports.cpp` and writes the job summary. `ci.yml` and `release.yml` use it. |
 | `.github/actions/provision/action.yml` | Provision build environment | Composite action. Activates MSVC, provisions the pinned vcpkg tool and the static dependencies, and places them where the Makefile expects them. `arch-pipeline.yml` uses it. |
 
@@ -150,11 +150,18 @@ Five branch prefixes are working branches: `feat/`, `stage/`, `chore/`, `fix/` a
 | `docs/` | no release |
 | unknown | no release |
 
-- The level is the highest of the changes since the last tag: minor if there is any `feat/` or `stage/` change, else patch if there is any `fix/` change, else none.
-- The level comes from the branch prefix of the subject and from the breaking markers. A `feat/`, `stage/` or `fix/` pull request that has only `chore:` commits still releases. It is listed by its branch name, with a warning.
-- The bot computes the level with `changelog.ps1 level`. If it is major, minor or patch, the job rebuilds `release/next` and opens or updates the release pull request. If it is none, the job closes every open release pull request with a comment and deletes `release/next` if the branch exists.
-- The bot labels the release pull request `bump:<level>`. On every rebuild that is not skipped, it adds the computed label when there is no `bump:*` label, replaces a single other `bump:*` label with the computed one and comments, and changes nothing but warns when there are two or more. The `bump label` check and the tagging require exactly one `bump:*` label; the tagging also requires it to be `bump:major`, `bump:minor` or `bump:patch`.
-- For a change of type `unknown`, the generator gives a warning and, unless it has a breaking marker, lists it under Development.
+- Without a breaking marker, the level is the highest of the changes since the last tag: minor if there is any `feat/` or `stage/` change, else patch if there is any `fix/` change, else none.
+- The level comes from the branch prefix of the subject and from the breaking markers. A `feat/`, `stage/` or `fix/` pull request that has only `chore:` commits still releases. It is listed by its branch name, with the warning `"<subject>" has no feat, stage, fix or breaking commit message; it is listed by its branch name`, where `<subject>` is the subject text without the trailing ` (#N)`.
+- The bot computes the level with `changelog.ps1 level` when the step "Wait for the tag of a merged release commit" writes `proceed=true`.
+- If the level is major, minor or patch and two or more release pull requests are open, the step "Stop when several release pull requests are open" ends with exit code 1 and the error `::error::release/next has $COUNT open pull requests; close the extra ones by hand. Nothing was pushed or changed.`, where `$COUNT` is the number of open release pull requests.
+- If the level is major, minor or patch and at most one release pull request is open, the job builds the `release/next` commit. The step "Build the release/next commit" sets `skip` to `true` only when `origin/release/next` exists, its parent is the commit printed by `git rev-parse origin/main`, its tree equals the tree of the new commit, the event is `push` and exactly one release pull request is open. Otherwise it sets `skip` to `false`, and the job pushes `release/next`, opens or updates the release pull request, runs the step "Keep exactly one bump label" and dispatches `ci.yml` and `bump-label.yml` on `release/next`.
+- If the level is none, the job closes every open release pull request with the comment `Closed by the release bot: nothing on main is left to release.` and deletes `release/next` if the branch exists.
+- The bot labels the release pull request `bump:<level>`. When `skip` is `false`, the step "Keep exactly one bump label" counts the labels whose name starts with `bump:`:
+  - With none, it adds the computed label.
+  - With one that differs from the computed label, it replaces it with the computed label and comments `The release bot replaced the label $existing with $computed, the level computed from the commits on main.`, where `$existing` is the old label and `$computed` the computed one.
+  - With two or more, it changes nothing and writes the warning `::warning::pull request #$number has $count bump:* labels; none was changed, and the bump label check stays red until exactly one is left`, where `$number` is the number of the release pull request and `$count` the number of its `bump:*` labels.
+- The `bump label` check and the tagging require exactly one `bump:*` label; the tagging also requires it to be `bump:major`, `bump:minor` or `bump:patch`.
+- For a change of type `unknown`, the generator gives the warning `the subject "<subject>" does not start with a feat/, stage/, fix/, chore/ or docs/ branch prefix; it is listed under Development`, where `<subject>` is the subject text without the trailing ` (#N)`, and, unless the change has a breaking marker, lists it under Development.
 
 ### Reserved branch `release/next`
 
@@ -165,7 +172,7 @@ Five branch prefixes are working branches: `feat/`, `stage/`, `chore/`, `fix/` a
 ### Breaking changes
 
 - A breaking change is marked in a commit message of the pull request by `type!:` or a `BREAKING CHANGE:` footer. This works on any branch type.
-- The marker is read from the commit messages of the pull request named by ` (#N)` in the squash subject. A subject without ` (#N)` is not read, and the generator gives a warning.
+- The marker is read from the commit messages of the pull request named by ` (#N)` in the squash subject. A subject without ` (#N)` is not read, and the generator gives the warning `the subject "<subject>" has no "(#N)"; its commit messages and breaking markers were not read`, where `<subject>` is the subject text.
 - A breaking change gives minor while the major version of the last tag is 0, and major from 1.0.0.
 - While the major version of the last tag is 0, `changelog.ps1 level` prints `minor`, `patch` or `none`. From a last tag `0.Y.Z`, the label `bump:major` gives the version `1.0.0`.
 - A breaking change is listed under "Breaking changes" in the release notes. A `chore/`, `docs/` or `unknown` pull request is listed under Development when it has no breaking marker, and under "Breaking changes" when it has one.
@@ -216,7 +223,7 @@ The last line of the checklist depends on the branch prefix. `--` is two ASCII h
 |---|---|
 | `stage/<N>-...`, where `<N>` is digits or two groups of digits joined by `-` | `Stage <N> -- TODO: task IDs (e.g. CPP/TEST/REV/HUM)` |
 | Any other `stage/` branch, for example `stage/7a-x` | `Stage stage/7a-x -- TODO: task IDs (e.g. CPP/TEST/REV/HUM)`: the whole branch name, with `stage/`, takes the place of `<N>` |
-| `chore/<id>-...`, where `<id>` is lower-case letters, `-` and digits, optionally followed by more `-<digits>` groups, for example `chore/rev-12-...` | `<ID> -- TODO: any additional REV/HUM IDs`, with `<ID>` in upper case |
+| `chore/<id>-...`, where `<id>` is one or more lower-case letters, then `-`, then one or more digits, optionally followed by more `-<digits>` groups, for example `chore/rev-12-...` or `chore/rev-12-3-...` | `<ID> -- TODO: any additional REV/HUM IDs`, with `<ID>` in upper case |
 | Any other `chore/` branch, for example `chore/ci-verify-draft-retry` | `TODO: stage and task IDs` |
 | `feat/`, `fix/` and `docs/` | `TODO: stage and task IDs` |
 
