@@ -34,12 +34,12 @@ Check names are the gate jobs' `name:` values. The jobs inside the called
 workflow report as `pipeline-x86 / build` and similar, which is why the
 required checks are the separately named gates and not those.
 
-## `VCPKG_ROOT` clobbered by `ilammy/msvc-dev-cmd` (found during Stage 6, BPE-9)
+## `VCPKG_ROOT` clobbered by MSVC activation (found during Stage 6, BPE-9)
 
 `windows-latest` ships a full VS Enterprise install with its own
 pre-cloned, pre-bootstrapped vcpkg under `<VS install>\VC\vcpkg` (VS 17.6+
 bundles vcpkg, and `vsdevcmd.bat` sets its own `VCPKG_ROOT` pointing
-there). `ilammy/msvc-dev-cmd@v1` captures every env var `vsdevcmd.bat`
+there). The activation action captures every env var `vsdevcmd.bat`
 sets/changes and persists it to `GITHUB_ENV` for all later steps — which
 silently overwrote the job's own `VCPKG_ROOT` the moment the "Activate
 MSVC developer environment" step ran, so the "Bootstrap vcpkg" step's
@@ -480,7 +480,7 @@ That script provisions a local development machine: installing MSVC Build
 Tools, `make`, and bootstrapping vcpkg for a box that starts with none of
 them. A GitHub-hosted runner starts from a different baseline, so none of
 that applies — MSVC is already preinstalled and activated via
-`ilammy/msvc-dev-cmd`, and `make`/vcpkg are provisioned directly by the
+`TheMrMilchmann/setup-msvc-dev`, and `make`/vcpkg are provisioned directly by the
 `provision` action's own steps, CI-native rather than by shelling out to the
 script.
 
