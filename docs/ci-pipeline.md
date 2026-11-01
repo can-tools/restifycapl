@@ -34,29 +34,31 @@ Check names are the gate jobs' `name:` values. The jobs inside the called
 workflow report as `pipeline-x86 / build` and similar, which is why the
 required checks are the separately named gates and not those.
 
-## `VCPKG_ROOT` clobbered by MSVC activation (found during Stage 6, BPE-9)
+## `VCPKG_ROOT` clobbered by the `ilammy/msvc-dev-cmd` activation (found during Stage 6, BPE-9)
 
 `windows-latest` ships a full VS Enterprise install with its own
 pre-cloned, pre-bootstrapped vcpkg under `<VS install>\VC\vcpkg` (VS 17.6+
 bundles vcpkg, and `vsdevcmd.bat` sets its own `VCPKG_ROOT` pointing
-there). The activation action captures every env var `vsdevcmd.bat`
-sets/changes and persists it to `GITHUB_ENV` for all later steps — which
-silently overwrote the job's own `VCPKG_ROOT` the moment the "Activate
-MSVC developer environment" step ran, so the "Bootstrap vcpkg" step's
-unconditional `git clone` landed on that already-populated VS-bundled
-directory and failed ("already exists and is not an empty directory",
-exit 128).
+there). The activation action used at the time, `ilammy/msvc-dev-cmd`,
+captured every env var `vsdevcmd.bat` sets/changes and persisted it to
+`GITHUB_ENV` for all later steps, which silently overwrote the job's own
+`VCPKG_ROOT` the moment the activation step ran, so the "Bootstrap vcpkg"
+step's unconditional `git clone` landed on that already-populated
+VS-bundled directory and failed ("already exists and is not an empty
+directory", exit 128).
 
-Fixed by re-pinning `VCPKG_ROOT` to a CI-only path under `$RUNNER_TEMP`
-immediately after MSVC activation (see the "Pin VCPKG_ROOT..." step in the
-`provision` action) — the full clone + pinned-tag checkout + bootstrap
-sequence itself is unchanged, it just no longer targets the VS-bundled
-path. `$RUNNER_TEMP` is unique per runner, so each job (every job runs on its
-own runner) cannot collide with the others either. Fixed in commit
-`c11a5b6`.
+That was fixed by re-pinning `VCPKG_ROOT` to a CI-only path under
+`$RUNNER_TEMP` immediately after activation (see the "Pin VCPKG_ROOT..."
+step in the `provision` action); the full clone + pinned-tag checkout +
+bootstrap sequence itself is unchanged, it just no longer targets the
+VS-bundled path. `$RUNNER_TEMP` is unique per runner, so each job (every
+job runs on its own runner) cannot collide with the others either. Fixed
+in commit `c11a5b6`.
 
-No `env:` block can set `VCPKG_ROOT`, for the same reason — it would just
-get clobbered by the same step a few lines later.
+The activation action is now `TheMrMilchmann/setup-msvc-dev`. Its handling
+of `VCPKG_ROOT` is not verified, so the re-pin step is kept as a guard.
+No `env:` block can replace it: with `ilammy/msvc-dev-cmd` it would just
+have been overwritten by the activation step a few lines later.
 
 ## `/MT` provenance check: `LIBCMTD` substring trap (found during Stage 6, BPE-9 / REV-4)
 
@@ -480,9 +482,9 @@ That script provisions a local development machine: installing MSVC Build
 Tools, `make`, and bootstrapping vcpkg for a box that starts with none of
 them. A GitHub-hosted runner starts from a different baseline, so none of
 that applies — MSVC is already preinstalled and activated via
-`TheMrMilchmann/setup-msvc-dev`, and `make`/vcpkg are provisioned directly by the
-`provision` action's own steps, CI-native rather than by shelling out to the
-script.
+`TheMrMilchmann/setup-msvc-dev`, and `make`/vcpkg are provisioned directly
+by the `provision` action's own steps, CI-native rather than by shelling
+out to the script.
 
 ## CI x86 stayed green while a local x86 run showed a locale leak (found during Stage 12, HUM-34)
 

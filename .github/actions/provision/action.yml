@@ -24,7 +24,7 @@ runs:
     with:
       arch: ${{ inputs.arch }}
 
-  # Activation exports VS's bundled vcpkg as VCPKG_ROOT; re-pin it to a CI-only path (docs/ci-pipeline.md).
+  # Re-pin VCPKG_ROOT to a CI-only path; activation may set it to VS's vcpkg (docs/ci-pipeline.md).
   - name: Pin VCPKG_ROOT to a CI-only path (avoid VS-bundled vcpkg collision)
     shell: pwsh
     env:
