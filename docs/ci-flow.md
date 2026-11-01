@@ -1,427 +1,2239 @@
-# CAPL REST DLL – GitHub Actions Current Flow & Human Gates
+## Purpose
 
-Documentation and mapping of the CI/CD flow and Human Gates for the `restifycapl` project, as implemented on `main`.
+This file describes the CI/CD flow of the repository as it runs on `main`.
 
-This document maps who does what (a human or a workflow). The reasons behind individual design decisions live elsewhere and are not repeated here: see [docs/ci-pipeline.md](ci-pipeline.md) for CI and cache rationale and [docs/release-process.md](release-process.md) for the release procedure, its safeguards and recovery steps.
+The flow is made of seven workflows in `.github/workflows/` and two composite actions in `.github/actions/`.
 
-Items marked **(repo setting)** are configured in the GitHub repository settings, not in code in this repository, so this document cannot confirm them from the workflows themselves (see Section 6).
+| File | `name:` | What it does |
+|---|---|---|
+| `ci.yml` | CI | Builds and tests the DLL on x86 and x64, and runs the lint and check jobs. |
+| `arch-pipeline.yml` | Architecture pipeline | Reusable workflow that builds and tests one architecture. `ci.yml` and `release.yml` call it. |
+| `auto-pr.yml` | Auto PR | Opens a draft pull request for a working branch. |
+| `bump-label.yml` | Bump label | Its check `bump label` requires exactly one `bump:*` label on the `release/next` pull request. |
+| `release-pr.yml` | Release PR | The release bot. Builds the `release/next` branch and its pull request, and keeps the `bump:*` label and the version preview in the pull request body up to date. |
+| `tag-release.yml` | Tag Release | The tagging bot. Tags a merged release commit on `main`, dispatches `release-pr.yml` on `main` and dispatches `release.yml` on the tag. |
+| `release.yml` | Release | On a tag ref: checks the tag, builds both DLLs, packs them and publishes the GitHub release. On another ref: builds and packs both DLLs and writes a preview of the next release, or the reason for none, to the job summary. |
+| `.github/actions/export-table/action.yml` | export-table | Composite action. Runs the export-table fixtures, checks `src/module/exports.cpp` and writes the job summary. `ci.yml` and `release.yml` use it. |
+| `.github/actions/provision/action.yml` | Provision build environment | Composite action. Activates MSVC, provisions the pinned vcpkg tool and the static dependencies, and places them where the Makefile expects them. `arch-pipeline.yml` uses it. |
 
----
+## Release path at a glance
 
-## 1. End-to-End Overview
-
-The diagram below illustrates the complete lifecycle of code: from pushing commits on a working branch, through automated Draft PR creation, CI pipeline execution, human decision points (CANoe verification, CHANGELOG cut), up to tagging and release publication with cryptographic build provenance.
-
-```mermaid
-flowchart TD
-    classDef human fill:#ffe4e1,stroke:#ff69b4,stroke-width:2px;
-    classDef bot fill:#e6f3ff,stroke:#4a90e2,stroke-width:2px;
-    classDef gate fill:#fff3cd,stroke:#ffc107,stroke-width:2px;
-
-    %% 1. Developer pushes branch
-    H1["Human: Push commits to branch<br/>(stage/**, chore/**, fix/**, docs/**)"]:::human
-
-    %% 2. Auto-PR
-    APR_TRIGGER{"Bot: auto-pr.yml<br/>Verify guards"}:::bot
-    APR_CREATE["Bot: Create Draft PR<br/>with dedicated checklist"]:::bot
-
-    %% 3. CI Pipeline
-    CI_TRIGGER{"Bot: ci.yml<br/>Trigger CI"}:::bot
-    CI_X86["Bot: pipeline-x86<br/>(arch-pipeline.yml: build + test)"]:::bot
-    CI_X64["Bot: pipeline-x64<br/>(arch-pipeline.yml: build + test)"]:::bot
-    CI_TABLE["Bot: export-table<br/>(not a required check)"]:::bot
-    CI_CLFIX["Bot: changelog-fixtures<br/>(not a required check)"]:::bot
-
-    GATE_X86{"Gate: build + test (x86)<br/>job gate-x86, required check"}:::gate
-    GATE_X64{"Gate: build + test (x64)<br/>job gate-x64, required check"}:::gate
-
-    %% 4. Human Verification & Checkpoints
-    H2["Human: Review Draft PR checklist"]:::human
-    H3["Human: Download DLL from CI & verify<br/>in Vector CANoe (if exports.cpp touched)"]:::human
-    H4["Human: Run changelog.ps1 cut locally<br/>on a chore/ branch, push, PR"]:::human
-    H4B["Human (optional): Dispatch release.yml<br/>dry run on that branch"]:::human
-    H5["Human: Squash-merge PR into main"]:::human
-    CI_MAIN["Bot: ci.yml runs again<br/>on the push to main"]:::bot
-
-    %% 5. Release
-    H5B["Human (optional): Dispatch release.yml<br/>dry run on main to find the commit to tag"]:::human
-    H6["Human: Create & push tag vX.Y.Z<br/>on squash-merge commit"]:::human
-    REL_TRIGGER{"Bot: release.yml<br/>Trigger release process"}:::bot
-    REL_VAL["Bot: validate<br/>(tag, ancestor, parent, no release, changelog notes)"]:::bot
-    REL_X86["Bot: pipeline-x86<br/>(arch-pipeline.yml: build + test)"]:::bot
-    REL_X64["Bot: pipeline-x64<br/>(arch-pipeline.yml: build + test)"]:::bot
-    REL_TABLE["Bot: export-table<br/>(generate markdown table)"]:::bot
-    REL_ASM["Bot: assemble<br/>(DLLs, SHA256SUMS, notes.md)"]:::bot
-    REL_ATTEST["Bot: attest<br/>(Sigstore/OIDC build provenance)"]:::bot
-    REL_PUB["Bot: publish<br/>(draft, verify, make public)"]:::bot
-
-    H7["Human: Verify published release<br/>and SHA256 checksums"]:::human
-
-    %% Connections
-    H1 --> APR_TRIGGER
-    APR_TRIGGER -->|Ahead of main & no open PR| APR_CREATE
-    APR_CREATE --> H2
-
-    H1 --> CI_TRIGGER
-    CI_TRIGGER --> CI_X86
-    CI_TRIGGER --> CI_X64
-    CI_TRIGGER --> CI_TABLE
-    CI_TRIGGER --> CI_CLFIX
-    CI_X86 --> GATE_X86
-    CI_X64 --> GATE_X64
-
-    GATE_X86 --> H2
-    GATE_X64 --> H2
-    H2 --> H2B["Human: Mark the PR Ready for review"]:::human
-    H2B --> H3
-    H3 --> H4
-    H4 --> H4B
-    H4B --> H5
-    H4 --> H5
-    H5 --> CI_MAIN
-    CI_MAIN --> H5B
-    CI_MAIN --> H6
-    H5B --> H6
-
-    H6 --> REL_TRIGGER
-    REL_TRIGGER --> REL_VAL
-    REL_VAL --> REL_X86
-    REL_VAL --> REL_X64
-    REL_VAL --> REL_TABLE
-    REL_X86 --> REL_ASM
-    REL_X64 --> REL_ASM
-    REL_TABLE --> REL_ASM
-    REL_ASM --> REL_ATTEST
-    REL_ATTEST --> REL_PUB
-    REL_PUB --> H7
-```
-
-The release cut itself travels through the same path as any other change: the `chore/` branch carrying the cut is pushed, `auto-pr.yml` opens its Draft PR, `ci.yml` runs, and the human squash-merges it (the diagram shows the cut as the last step before the merge for readability). The squash-merge is itself a push to `main`, so `ci.yml` runs once more on `main`; by convention the maintainer waits for that run to be green before starting a cut (see [docs/release-process.md](release-process.md)). Pushing a tag does not start `ci.yml` or `auto-pr.yml`; it starts only `release.yml`.
-
----
-
-## 2. Detailed Flow: `auto-pr.yml`
-
-Workflow executed on every push to the working branches `stage/**`, `chore/**`, `fix/**` and `docs/**` (permissions: `contents: read`, `pull-requests: write`; it authenticates with the workflow's `GITHUB_TOKEN`). Safely creates a Draft PR with a checklist tailored to the touched files. Creating the PR requires the repository setting "Allow GitHub Actions to create and approve pull requests" **(repo setting)**; if it is off, the `Create draft PR` step fails visibly.
+The diagram shows the workflows of a release in order, from the first push to the published GitHub release. A solid arrow leads from an event to a workflow that starts on it, or from a workflow to the branch, tag, pull request or release that it pushes, opens, updates or publishes. A dashed arrow means that a step starts the workflow at the arrow head with `gh workflow run` on the ref in the label.
 
 ```mermaid
-flowchart TD
-    classDef bot fill:#e6f3ff,stroke:#4a90e2,stroke-width:2px;
-    classDef decision fill:#fff3cd,stroke:#ffc107,stroke-width:2px;
-    classDef exit fill:#f8d7da,stroke:#dc3545,stroke-width:2px;
+flowchart LR
+    A1["push to a working branch"]
+    A2["push to main"]
+    A3["a person changes the bump label on the release pull request"]
+    C["ci.yml"]
+    AP["auto-pr.yml"]
+    D["draft pull request"]
+    RB["release-pr.yml job build"]
+    RL["release-pr.yml job labels"]
+    BL["bump-label.yml"]
+    TR["tag-release.yml jobs classify and tag"]
+    RN["release/next and the release pull request"]
+    TG["tag vX.Y.Z"]
+    RE["release.yml jobs validate, pipeline-x86, pipeline-x64, export-table, assemble, attest and publish"]
+    GR["GitHub release"]
 
-    START(["Push to stage/**, chore/**, fix/**, docs/**"]):::bot --> G1{"Guard 1: Is branch<br/>ahead of main?"}:::decision
-
-    G1 -->|ahead_by == 0| STOP1["Stop (no new commits)"]:::exit
-    G1 -->|"ahead_by > 0"| G2{"Guard 2: Does an open PR<br/>already exist for branch?"}:::decision
-
-    G2 -->|PR already exists| STOP2["Stop (PR already open)"]:::exit
-    G2 -->|No open PR| COMPOSE["Analyze changed files (jq):<br/>• plan_only: every file is a plan markdown<br/>• exports_touched: src/module/exports.cpp changed<br/>• Extract commit subjects"]:::bot
-
-    COMPOSE --> TEMPLATE["Compose PR body:<br/>• Merge checklist<br/>• CANoe check item only if exports_touched<br/>• Warning if exports_touched<br/>• List of branch commits"]:::bot
-
-    TEMPLATE --> CREATE["gh pr create --draft --base main<br/>--head BRANCH --title BRANCH"]:::bot
+    A1 -->|"push"| C
+    A1 -->|"push"| AP
+    AP -->|"opens"| D
+    A2 -->|"push"| C
+    A2 -->|"push"| RB
+    A2 -->|"push"| TR
+    RB -->|"pushes; opens or updates"| RN
+    RB -.->|"gh workflow run on release/next"| C
+    RB -.->|"gh workflow run on release/next"| BL
+    A3 -->|"labeled or unlabeled"| RL
+    A3 -->|"labeled or unlabeled"| BL
+    TR -->|"creates and pushes"| TG
+    TR -.->|"gh workflow run on main"| RB
+    TR -.->|"gh workflow run on the tag"| RE
+    RE -->|"publishes"| GR
 ```
 
-Details:
+## What starts what
 
-- **Guard 1** reads `ahead_by` from the GitHub compare API (`main...BRANCH`); with 0 the run stops, because `gh pr create` would fail on a branch with no commits.
-- **Guard 2** looks for an open PR with the branch as head; if one exists the run stops, so a PR is created on a push only while no open PR exists for the branch (after a PR is closed or merged, the next push with commits ahead of `main` creates a new one).
-- **Classes**: `plan_only` is true when every changed file is a markdown file under a `docs/work/<slug>/plans/` directory; `exports_touched` is true when `src/module/exports.cpp` is among the changed files. There are exactly these two classes.
-- **Checklist** (always): CI green on both legs (`build + test (x86)`, `build + test (x64)`), `code-reviewer` clean, human gate passed against the PR CI artifact if the branch has one, `CHANGELOG.md` `[Unreleased]` entry present, branch up to date with `main`, plan folded into `plan.md`. A `plan_only` branch gets a note that the reviewer, human-gate and changelog items do not apply.
-- **CANoe check item**: added to the checklist only when `exports_touched` (the CAPL nodes in `capl/` must compile in CANoe against the DLL from the PR's CI artifact).
-- **`exports.cpp` warning**: when `exports_touched`, the body warns never to have two open PRs touching this file, and to check the `export-table` result, which is not a required check, so a red result does not block the merge.
-- **TODO line**: its wording depends on the branch prefix (`stage/` and `chore/` derive identifiers from the branch name; `fix/` and `docs/` get a generic line).
-- The body is composed once, at PR creation; later pushes do not update it.
-- The PR is created as a draft. Because it is created with `GITHUB_TOKEN`, GitHub does not start new workflow runs for the PR-creation event itself; the checks on the PR come from the `ci.yml` run triggered by the branch push on the same head commit **(platform behavior, not verifiable from code)**.
+### Triggers of each workflow
 
----
-
-## 3. Detailed Flow: `ci.yml` and `arch-pipeline.yml`
-
-`ci.yml` triggers on:
-
-- `push` to `main`, `stage/**`, `chore/**`, `fix/**`, `docs/**` (tag pushes are deliberately not covered, so CI does not race `release.yml`);
-- `pull_request` targeting `main`;
-- `workflow_dispatch` (no inputs): runs the same jobs on any ref, so the required checks can be produced for a branch no push filter covers.
-
-Workflow permissions are `contents: read`.
-
-CI continuously enforces architecture parity (x86 and x64) as well as compliance with the Vector CANoe export contract. In `arch-pipeline.yml` the `build` and `test` jobs have no `needs` relation: they are **separated and executed in parallel** on dedicated `windows-latest` runners. The `export-table` and `changelog-fixtures` jobs run on `ubuntu-latest`; neither is a gate or a required check.
-
-The two jobs named `build + test (x86)` and `build + test (x64)` are the gates (job ids `gate-x86` and `gate-x64`). They are the required status checks **(repo setting, confirmed by the repository owner)**. Each gate runs on `ubuntu-latest` with `if: always()`, needs its pipeline job, and fails with exit 1 unless the pipeline result is exactly `success`; this way a skipped or failed pipeline can never be read as a pass.
-
-```mermaid
-flowchart TD
-    classDef bot fill:#e6f3ff,stroke:#4a90e2,stroke-width:2px;
-    classDef gate fill:#fff3cd,stroke:#ffc107,stroke-width:2px;
-    classDef win fill:#e8f5e9,stroke:#4caf50,stroke-width:2px;
-
-    TRIGGER(["Push (main, stage/**, chore/**, fix/**, docs/**),<br/>Pull Request (main) or workflow_dispatch"]):::bot --> FORK{"Parallel Fork"}:::bot
-
-    %% x86 leg
-    FORK --> X86_CALL["pipeline-x86 (arch-pipeline.yml, arch=x86)"]:::bot
-    subgraph ArchPipelineX86 ["arch-pipeline.yml (x86) on windows-latest"]
-        X86_B_PROV["build: checkout (full history),<br/>provision action (Section 3.1)"]:::win
-        X86_B_MAKE["make build-x86"]:::win
-        X86_B_EXP["dumpbin /exports<br/>(exactly 1 symbol: caplDllGetTable4)"]:::win
-        X86_B_UP["Upload DLL: restifycapl-x86"]:::win
-
-        X86_T_PROV["test (separate runner, parallel to build):<br/>checkout (full history), provision action"]:::win
-        X86_T_MAKE["make test ARCH=x86 (GoogleTest)"]:::win
-
-        X86_B_PROV --> X86_B_MAKE
-        X86_B_MAKE --> X86_B_EXP
-        X86_B_EXP --> X86_B_UP
-        X86_T_PROV --> X86_T_MAKE
-    end
-    X86_CALL --> ArchPipelineX86
-
-    %% x64 leg
-    FORK --> X64_CALL["pipeline-x64 (arch-pipeline.yml, arch=x64)"]:::bot
-    subgraph ArchPipelineX64 ["arch-pipeline.yml (x64) on windows-latest"]
-        X64_B_PROV["build: checkout (full history),<br/>provision action (Section 3.1)"]:::win
-        X64_B_MAKE["make build-x64"]:::win
-        X64_B_EXP["dumpbin /exports<br/>(exactly 1 symbol: caplDllGetTable4)"]:::win
-        X64_B_UP["Upload DLL: restifycapl-x64"]:::win
-
-        X64_T_PROV["test (separate runner, parallel to build):<br/>checkout (full history), provision action"]:::win
-        X64_T_MAKE["make test ARCH=x64 (GoogleTest)"]:::win
-
-        X64_B_PROV --> X64_B_MAKE
-        X64_B_MAKE --> X64_B_EXP
-        X64_B_EXP --> X64_B_UP
-        X64_T_PROV --> X64_T_MAKE
-    end
-    X64_CALL --> ArchPipelineX64
-
-    %% export-table check
-    FORK --> EXP_JOB["export-table (ubuntu-latest)<br/>composite action export-table (Section 3.2)"]:::bot
-
-    %% changelog-fixtures check
-    FORK --> CLFIX_JOB["changelog-fixtures (ubuntu-latest)<br/>changelog.ps1 fixtures on tests/changelog/"]:::bot
-
-    %% Gates
-    ArchPipelineX86 --> GATE_X86{"gate-x86 = build + test (x86)<br/>if: always()<br/>Requires pipeline-x86 == success"}:::gate
-    ArchPipelineX64 --> GATE_X64{"gate-x64 = build + test (x64)<br/>if: always()<br/>Requires pipeline-x64 == success"}:::gate
-```
-
-### 3.0. `arch-pipeline.yml` in detail
-
-Reusable workflow (`workflow_call`) with inputs `arch` (`x86` or `x64`, required) and `release-version` (optional, default empty: a development build). `ci.yml` never passes `release-version`; `release.yml` does (Section 4).
-
-| Job | Steps |
-|---|---|
-| `build` (`windows-latest`) | <ol><li>Checkout with `fetch-depth: 0` (the Makefile runs `git describe` and `git rev-list`).</li><li>Provision action (Section 3.1).</li><li>`make build-<arch>`. When `release-version` is non-empty it is first validated as `X.Y.Z` with no leading zeros and with every field at most 5 characters and at most 65535, and is passed to make as `VER_MAJOR`, `VER_MINOR`, `VER_BUILD` and `VER_REV=0` (consumed by `src/module/version.rc`). Otherwise make runs without version arguments.</li><li>Only when `release-version` is non-empty: read the built DLL's version resource (`FileVersionInfo`) and require the numeric version `X.Y.Z.0` and both `FileVersion` and `ProductVersion` equal to `vX.Y.Z`.</li><li>`dumpbin /exports` on `build/<arch>/restifycapl-<arch>.dll`: exactly one exported function, named `caplDllGetTable4`; the dumpbin output is also written to the job summary.</li><li>Upload the DLL as artifact `restifycapl-<arch>`.</li></ol> |
-| `test` (`windows-latest`) | <ol><li>Checkout with `fetch-depth: 0`.</li><li>Provision action (Section 3.1).</li><li>`make test ARCH=<arch>` (GoogleTest suite, run outside CANoe). Runs on every pipeline call, once per architecture. No `needs`: it runs in parallel with `build`.</li></ol> |
-
-### 3.1. Composite action `provision` (`.github/actions/provision`)
-
-Used by both `build` and `test`, once per job. Input: `arch`. Steps in order:
-
-1. Validate that `arch` is exactly `x86` or `x64`.
-2. Activate the MSVC developer environment for that architecture (`ilammy/msvc-dev-cmd`). This is the CI equivalent of a Native Tools prompt; CI never calls `scripts/setup-dev-env.ps1`.
-3. Re-pin `VCPKG_ROOT` to a CI-only per-runner path (the previous step overwrites it), and set `VCPKG_PINNED_TAG` and `VCPKG_INSTALL_ROOT` (a per-architecture install root in the workspace).
-4. Expose the runner image version for cache keys.
-5. Install `make` with Chocolatey, only when `make` is not already on `PATH`.
-6. Restore the vcpkg tool checkout cache (shared by all jobs and both architectures).
-7. Bootstrap vcpkg (full clone, checkout of the pinned tag, `bootstrap-vcpkg.bat`) only when the tool cache was not hit.
-8. Verify that the pinned vcpkg tool commit equals `builtin-baseline` in `vcpkg.json`.
-9. Restore the vcpkg install-root cache (keyed per triplet, `vcpkg.json` hash and image version).
-10. `vcpkg install` for the `<arch>-windows-static` triplet, always run (also on a cache hit), and require that the triplet's `lib` directory exists.
-11. Place the libraries where the Makefile expects them: `libcurl.lib` and `zs.lib` into `lib/<arch>/`, `gtest.lib` and `gtest_main.lib` into `lib/gtest/<arch>/`, and the curl and gtest headers into `include/vendor/curl/` and `include/vendor/gtest/`.
-12. Verify `/MT` provenance with `dumpbin /directives` on those four libraries: each must declare `/DEFAULTLIB:LIBCMT` (and not `LIBCMTD`) and must not declare `/DEFAULTLIB:MSVCRT`.
-
-Rationale for the pins, the caches and the `VCPKG_ROOT` handling: [docs/ci-pipeline.md](ci-pipeline.md) and [docs/development-environment.md](development-environment.md).
-
-### 3.2. Composite action `export-table` (`.github/actions/export-table`)
-
-Used by the `export-table` job in `ci.yml` and in `release.yml`. Steps:
-
-1. Run the fixtures: `scripts/list-export-table.ps1 -FixtureDir tests/export-table`.
-2. (`if: always()`) Parse `src/module/exports.cpp` with `scripts/list-export-table.ps1`, writing the markdown table to a file under the runner temp directory. Only when that file exists after the run, the action output `markdown-path` is set; otherwise it stays empty.
-3. (`if: always()`) Write the job summary: a pass line (function and category counts), a failure line, or a "no result" line, preceded by a note if the fixtures did not succeed, followed by the markdown table when it exists.
-
-In `ci.yml` this job is informational (not a required check). In `release.yml` it is a dependency of `assemble` and `publish`, so a failing export table blocks a release.
-
-### 3.3. `changelog-fixtures` job
-
-Runs `scripts/ci/changelog.ps1 fixtures -FixtureDir tests/changelog` on `ubuntu-latest` (via `pwsh`). Not a required check.
-
----
-
-## 4. Detailed Flow: `release.yml`
-
-The `release.yml` workflow provides deterministic, secure, and atomic releases of `restifycapl-x86.dll` and `restifycapl-x64.dll`. It triggers on a push of a tag matching `v*.*.*` and on `workflow_dispatch`. Workflow permissions are `contents: read`; each job narrows or raises them as listed in 4.2. Runs are grouped by `release-${{ github.ref }}` with `cancel-in-progress: false`, so a second run for the same ref queues instead of cancelling the first.
-
-**The mode follows the ref type**, decided in the `Select mode` step of `validate` from `GITHUB_REF_TYPE`:
-
-1. **Tag mode (the ref is a tag)**: reached by pushing a `v*.*.*` tag, and also by dispatching the workflow manually with a tag selected as the ref. The tag is validated, the version from the tag is built into the DLLs' Windows version resource, the full pipeline runs, and the `publish` job runs.
-2. **Dry-run mode (the ref is a branch)**: reached by dispatching the workflow manually on a branch. The tag validation is skipped, the DLLs are built as development builds (`release-version` is empty), and everything up to and including `attest` runs. **The `publish` job is skipped** (`if: github.ref_type == 'tag'`), so nothing is published.
-
-The `publish` condition checks only the ref type, not the event name: a manual dispatch with a tag as the ref therefore also publishes.
-
-### 4.1. Architecture and Artifact Flow Diagram: `release.yml`
-
-The diagram below reflects the actual GitHub Actions DAG structure. Jobs `pipeline-x86`, `pipeline-x64`, and `export-table` declare `needs: validate`, meaning they fan out **concurrently and independently** upon completion of validation.
-
-```mermaid
-flowchart TD
-    classDef bot fill:#e6f3ff,stroke:#4a90e2,stroke-width:2px;
-    classDef decision fill:#fff3cd,stroke:#ffc107,stroke-width:2px;
-    classDef win fill:#e8f5e9,stroke:#4caf50,stroke-width:2px;
-    classDef pub fill:#d4edda,stroke:#28a745,stroke-width:2px;
-    classDef art fill:#f1f8ff,stroke:#0366d6,stroke-width:1px,stroke-dasharray: 5 5;
-
-    %% Triggers
-    TRIG_TAG(["Trigger: push tag v*.*.*"]):::bot
-    TRIG_DISPATCH(["Trigger: workflow_dispatch<br/>(branch ref = dry run, tag ref = tag mode)"]):::bot
-
-    TRIG_TAG --> VAL
-    TRIG_DISPATCH --> VAL
-
-    %% Job 1: Validate
-    VAL["<b>1. Job: validate</b> (ubuntu-latest)<br/>• Select mode from ref type (tag or dry-run)<br/>• Tag mode only: vX.Y.Z format, fields &le; 65535,<br/>commit is ancestor of origin/main, commit has a parent,<br/>no published release for the tag (HTTP 404)<br/>• Both modes: CHANGELOG fixtures,<br/>changelog.ps1 notes, show the version"]:::bot
-
-    ART_NOTES[("Artifact: release-notes-body<br/>(notes-body.md)")]:::art
-    VAL -.-> ART_NOTES
-
-    %% Job 2: Parallel legs
-    VAL --> PIPE_X86
-    VAL --> PIPE_X64
-    VAL --> EXP_TAB
-
-    subgraph LegX86 ["2a. pipeline-x86 (arch-pipeline.yml on windows-latest)"]
-        PIPE_X86["Run arch-pipeline.yml (arch=x86,<br/>release-version from validate)"]:::win
-        X86_B["build:<br/>• provision, make build-x86 (/MT)<br/>• version resource check (tag mode)<br/>• dumpbin /exports (exactly 1 symbol)"]:::win
-        X86_T["test:<br/>• Dedicated windows-latest runner<br/>• make test ARCH=x86 (GoogleTest)"]:::win
-        PIPE_X86 --> X86_B
-        PIPE_X86 --> X86_T
-    end
-
-    subgraph LegX64 ["2b. pipeline-x64 (arch-pipeline.yml on windows-latest)"]
-        PIPE_X64["Run arch-pipeline.yml (arch=x64,<br/>release-version from validate)"]:::win
-        X64_B["build:<br/>• provision, make build-x64 (/MT)<br/>• version resource check (tag mode)<br/>• dumpbin /exports (exactly 1 symbol)"]:::win
-        X64_T["test:<br/>• Dedicated windows-latest runner<br/>• make test ARCH=x64 (GoogleTest)"]:::win
-        PIPE_X64 --> X64_B
-        PIPE_X64 --> X64_T
-    end
-
-    EXP_TAB["<b>2c. Job: export-table</b> (ubuntu-latest)<br/>• Composite action .github/actions/export-table<br/>• Upload markdown when markdown-path is set"]:::bot
-
-    ART_X86[("Artifact: restifycapl-x86<br/>(restifycapl-x86.dll)")]:::art
-    ART_X64[("Artifact: restifycapl-x64<br/>(restifycapl-x64.dll)")]:::art
-    ART_TAB[("Artifact: export-table-markdown<br/>(export-table.md)")]:::art
-
-    X86_B -.-> ART_X86
-    X64_B -.-> ART_X64
-    EXP_TAB -.-> ART_TAB
-
-    %% Job 3: Assemble
-    ART_X86 -.-> ASM
-    ART_X64 -.-> ASM
-    ART_NOTES -.-> ASM
-    ART_TAB -.-> ASM
-
-    PIPE_X86 --> ASM
-    PIPE_X64 --> ASM
-    EXP_TAB --> ASM
-
-    ASM["<b>3. Job: assemble</b> (ubuntu-latest)<br/>• dist/ holds exactly two DLLs (x86 and x64)<br/>• SHA256SUMS via sha256sum<br/>• Export table has at least 1 function row<br/>• notes.md: notes body + usage text + table in a details block<br/>• notes.md length &le; 125000 characters"]:::bot
-
-    ART_ASSETS[("Artifact: release-assets<br/>(dist/: DLLs, SHA256SUMS, notes.md)")]:::art
-    ASM -.-> ART_ASSETS
-
-    %% Job 4: Attest
-    ASM --> ATT
-    ART_ASSETS -.-> ATT
-
-    ATT["<b>4. Job: attest</b> (ubuntu-latest)<br/>• Download release-assets<br/>• actions/attest-build-provenance for both DLLs<br/>• gh attestation verify (3 attempts, 10 s apart)<br/>(runs in both modes)"]:::bot
-
-    %% Branching
-    ATT --> COND_PUBLISH{"Is the ref a tag?<br/>(github.ref_type == 'tag')"}:::decision
-
-    COND_PUBLISH -->|NO: branch ref| DRY_DONE(["<b>Dry-Run Completed</b><br/>Pipelines, tests, SHA256SUMS, notes<br/>and attestations all passed.<br/>No release created."]):::bot
-
-    COND_PUBLISH -->|YES: tag ref| PUB
-
-    %% Job 5: Publish
-    PUB["<b>5. Job: publish</b> (ubuntu-latest)<br/>• Download release-assets<br/>• Require: no published release for the tag (404)<br/>• Delete any leftover draft for the tag<br/>• Create draft release (--verify-tag) with 3 assets<br/>• Verify draft: one draft, 3 assets, notes length,<br/>assets re-downloaded + sha256sum -c<br/>• Make release public: gh release edit --draft=false<br/>• On failure: report the release state"]:::pub
-
-    PUB --> PUB_SUCCESS(["<b>Release Published</b><br/>Assets, checksums, and attestations live"]):::pub
-```
-
-### 4.2. Detailed `release.yml` Job Breakdown
-
-| Job | Environment (`runs-on`) | Permissions (`permissions`) | Key Tasks & Assertions | Generated / Consumed Artifacts |
-|---|---|---|---|---|
-| `validate` | `ubuntu-latest` | `contents: read` | <ul><li>Full repository checkout (`fetch-depth: 0`, needed for the `origin/main` ancestor check).</li><li>`Select mode`: `tag` when `GITHUB_REF_TYPE` is `tag`, otherwise `dry-run`.</li><li>**Tag mode only** (`Validate the tag`): tag matches `vX.Y.Z` with no leading zeros; each field has at most 5 characters and is at most 65535; `git merge-base --is-ancestor $GITHUB_SHA origin/main` holds; the tagged commit has at least one parent; no published release exists for the tag (`gh api .../releases/tags/$TAG` must return HTTP 404; any other error fails the step). Sets outputs `tag` and `version`.</li><li>**Both modes**: run the fixtures in `tests/changelog/` (`changelog.ps1 fixtures`), then `changelog.ps1 notes -Mode <mode> -Sha $GITHUB_SHA` writes the notes body (Section 4.4).</li><li>**Both modes** (`Show the version`, never fails the job): tag mode writes the version from the tag to the job summary; dry-run mode runs `changelog.ps1 next-version` and writes the computed next version (exit 0), the reason no version can be computed (exit 1), or a warning about the exit code (anything else) to the job summary.</li></ul> | **Produces:** `release-notes-body` (`notes-body.md`).<br/>**Outputs:** `tag`, `version` (both empty in dry-run mode). |
-| `pipeline-x86` | Reusable workflow: `arch-pipeline.yml` (`windows-latest`) | `contents: read` | <ul><li>`needs: validate`; called with `arch: x86` and `release-version` = the `version` output of `validate` (empty in dry-run mode).</li><li>Runs the `build` and `test` jobs of Section 3.0 in parallel on independent Windows runners; the version-resource check runs only when `release-version` is non-empty.</li></ul> | **Produces:** `restifycapl-x86` (`restifycapl-x86.dll`). |
-| `pipeline-x64` | Reusable workflow: `arch-pipeline.yml` (`windows-latest`) | `contents: read` | <ul><li>Identical to x86, called with `arch: x64`.</li><li>Guarantees the same build and test steps for both architectures.</li></ul> | **Produces:** `restifycapl-x64` (`restifycapl-x64.dll`). |
-| `export-table` | `ubuntu-latest` | `contents: read` | <ul><li>`needs: validate`; runs composite action `.github/actions/export-table` (Section 3.2) on `src/module/exports.cpp` and the `tests/export-table/` fixtures.</li><li>Uploads the markdown table when the action's `markdown-path` output is non-empty and the run was not cancelled.</li></ul> | **Produces:** `export-table-markdown` (`export-table.md`). |
-| `assemble` | `ubuntu-latest` | `contents: read` | <ul><li>`needs: validate, pipeline-x86, pipeline-x64, export-table`.</li><li>Downloads both DLLs, the notes body and the export table markdown.</li><li>Asserts that `dist/` contains exactly `restifycapl-x64.dll` and `restifycapl-x86.dll`.</li><li>Writes `dist/SHA256SUMS` with `sha256sum restifycapl-x86.dll restifycapl-x64.dll`.</li><li>Counts export table rows with a `grep` for lines of the form `\| <number> \| `; fewer than 1 fails.</li><li>Assembles `dist/notes.md`: notes body, a `### Using this release` block, and an `### Export table` block with the table in a collapsible `<details>` element.</li><li>Fails if `notes.md` exceeds 125000 characters.</li><li>Appends `SHA256SUMS` and `notes.md` to the job summary.</li></ul> | **Produces:** `release-assets` (`dist/`: both DLLs, `SHA256SUMS`, `notes.md`). |
-| `attest` | `ubuntu-latest` | `id-token: write`<br/>`attestations: write`<br/>`contents: read` | <ul><li>`needs: assemble`; downloads the `release-assets` bundle.</li><li>Generates build provenance attestations for `restifycapl-x86.dll` and `restifycapl-x64.dll` (`actions/attest-build-provenance`).</li><li>Verifies each with `gh attestation verify` (repository and signer workflow `release.yml`), up to 3 attempts 10 seconds apart.</li><li>Runs in both tag and dry-run mode.</li></ul> | Attestations for the two DLLs. |
-| `publish` | `ubuntu-latest` | `contents: write` | <ul><li>`needs: validate, export-table, assemble, attest`; runs only when `github.ref_type == 'tag'`.</li><li>Steps are listed in Section 4.3.</li></ul> | **Publishes:** GitHub Release with 3 assets (`restifycapl-x86.dll`, `restifycapl-x64.dll`, `SHA256SUMS`). |
-
-### 4.3. Steps of the `publish` Job
-
-The job runs these steps in order (rationale and recovery: [docs/release-process.md](release-process.md)):
-
-1. **Download** the `release-assets` artifact into `dist/`.
-2. **Require that no published release exists for the tag**: `gh api repos/.../releases/tags/$TAG` must return HTTP 404; success (a release exists) or any other error fails the step. This repeats the check from `validate`, immediately before the repository is changed. A draft is not returned by this endpoint.
-3. **Delete a leftover draft for the tag**: any draft release for the same tag from an earlier run is deleted, so a re-run starts clean.
-4. **Create the draft release and upload the assets**: `gh release create "$TAG" --draft --verify-tag` with `dist/notes.md` as the notes and the three assets attached. `--verify-tag` makes the command fail if the tag does not exist on the remote.
-5. **Verify the draft**: exactly one draft exists for the tag; its assets are exactly `SHA256SUMS`, `restifycapl-x64.dll` and `restifycapl-x86.dll`; its notes are at most 125000 characters; the assets are downloaded back from GitHub into `verify/` and `sha256sum -c SHA256SUMS` passes there.
-6. **Make the release public**: `gh release edit "$TAG" --draft=false`.
-7. **Say what state the release is in** (`if: failure()`): checks whether a published release exists for the tag and writes one of two messages, both to the job summary and as an `::error::` annotation: that the release for the tag is public (never move the tag, fix forward with a new version and mark the release as withdrawn), or that nothing is public (re-run the failed jobs for a transient failure, or delete the draft and the tag, fix, and tag again). The exact wording is in `release.yml`.
-
-### 4.4. `scripts/ci/changelog.ps1` and what runs it
-
-The script has five subcommands. Which of them the workflows call:
-
-| Subcommand | Purpose | Called by CI | Run by |
+| Workflow | Events | Filters | Concurrency |
 |---|---|---|---|
-| `fixtures` | Runs every case in `tests/changelog/` against a simulated git history. | `ci.yml` job `changelog-fixtures`; `release.yml` job `validate`. | Automatic. |
-| `notes` | Selects the CHANGELOG section for the release, validates it, writes the notes body and a "taken from" line to the job summary. | `release.yml` job `validate`, in both modes. | Automatic. |
-| `next-version` | Prints the next version as `X.Y.Z` computed from `## [Unreleased]` and the existing version tags. | `release.yml` job `validate`, dry-run mode only (`Show the version`). | Automatic in CI; may also be run by hand. |
-| `check` | The same selection and validation as `notes`, without writing a notes file. | Not called by any workflow. | Optional, by hand. |
-| `cut` | Turns `## [Unreleased]` into `## [<first 12 characters of the base commit hash>] - <date>` under a fresh empty `## [Unreleased]` and adds the heading's link definition. The base defaults to `git rev-parse origin/main`, so the hash is not typed by hand. | Not called by any workflow. | Human, locally, on the `chore/` branch that carries the cut (HG-4). |
+| `ci.yml` | `push`, `pull_request`, `workflow_dispatch` | Push: branches `main`, `feat/**`, `stage/**`, `chore/**`, `fix/**`, `docs/**`. Pull request: `branches: [main]`. |  |
+| `auto-pr.yml` | `push` | Push: branches `feat/**`, `stage/**`, `chore/**`, `fix/**`, `docs/**`. |  |
+| `bump-label.yml` | `pull_request`, `workflow_dispatch` | Pull request: types opened, synchronize, reopened, labeled, unlabeled. | Workflow: `group` is `bump-label-labels-<pull request number>` for the actions `labeled` and `unlabeled` and `bump-label-refs-<head branch or ref>` otherwise; `cancel-in-progress` is `false` for `labeled` and `unlabeled` and `true` otherwise. |
+| `release-pr.yml` | `push`, `workflow_dispatch`, `pull_request` | Push: branch `main`. Pull request: branches `main`, types labeled and unlabeled. | Job `build`: `group: release-pr-build`, `cancel-in-progress: false`. Job `labels`: `group: release-pr-labels`, `cancel-in-progress: false`. |
+| `tag-release.yml` | `push` | Push: branch `main`. | Job `tag`: `group: tag-release`, `cancel-in-progress: false`. |
+| `release.yml` | `push`, `workflow_dispatch` | Push: tags `v*.*.*`. | Workflow: `group: release-${{ github.ref }}`, `cancel-in-progress: false`. |
+| `arch-pipeline.yml` | `workflow_call` | Inputs: `arch` (required, x86 or x64) and `release-version` (optional; empty means a development build). |  |
 
-How `notes` selects the section:
+The two composite actions run as steps of jobs: `provision` in the jobs `build` and `test` of `arch-pipeline.yml`, `export-table` in the jobs `export-table` of `ci.yml` and `release.yml`.
 
-- **Tag mode**: the section whose heading is `## [<12 hex characters>] - YYYY-MM-DD` and whose hash is a prefix of the tagged commit's parent (`$GITHUB_SHA^`). There must be exactly one such heading, and the section must still have content once its `### Development` block is removed. The `### Development` block is excluded from the notes body.
-- **Dry-run mode**: the first `## [` section that has release notes once `### Development` is removed. If that heading is `## [Unreleased]`, no git check is run. If it is a hash heading, it is also checked against git (`Test-Cut`):
-  - The hash must name a commit in the run's history; otherwise the run fails.
-  - If the first-parent child of that base commit on `origin/main` carries the heading in its `CHANGELOG.md` (the cut is already merged), the run passes early with a `notice` naming the commit to tag, or with a `warning` when that commit already has a `v*.*.*` tag. The tip-equality and contains-tip checks below do not apply in this case.
-  - Otherwise the hash must equal the `origin/main` tip, and the dispatched branch must contain that tip. If not, the run fails with a message telling how to fix it (for example, merge `main` into the branch and rewrite the heading hash).
+Some jobs inside these workflows run only for part of the events:
 
-Details of every option and exit code: the comment-based help at the top of `scripts/ci/changelog.ps1`.
+- In `ci.yml`, the job `actionlint` is skipped on a dispatch. The other jobs run.
+- In `release-pr.yml`, the job `build` runs when the event is not `pull_request`, so on a push or a dispatch. The job `labels` runs only for a `pull_request` event whose head is `release/next`, from this repository, with a label whose name starts with `bump:`.
+- In `tag-release.yml`, the job `classify` runs on every push to `main`. The job `tag` runs only when `classify` answered `tag` or `tagged`.
+- In `release.yml`, the mode is `tag` on a tag ref and `dry-run` on any other ref. The job `publish` runs only on a tag ref.
+- `bump-label.yml` does nothing and succeeds when the head branch is not `release/next`.
 
----
+The jobs of `ci.yml` are `pipeline-x86` and `pipeline-x64` (both call `arch-pipeline.yml`), `gate-x86` (check `build + test (x86)`), `gate-x64` (check `build + test (x64)`), `export-table`, `changelog-fixtures` and `actionlint`.
 
-## 5. Human Gates Table
+### Dispatches made by the bots
 
-| Gate ID | Timing | Human Action | Why Not Automated Today |
+The bots start other workflows with `gh workflow run`. Their jobs set `GH_TOKEN` to `github.token`. A `workflow_dispatch` event made with the `GITHUB_TOKEN` creates a workflow run.
+
+| Who dispatches (workflow / job / step) | What it starts | Ref | When |
 |---|---|---|---|
-| **HG-1** | Start of work | Creates branch (`stage/**`, `chore/**`, `fix/**`, `docs/**`) and pushes initial commit. Pushing a commit is what starts `auto-pr.yml` and `ci.yml`; a branch outside these prefixes starts neither push workflow, but `ci.yml` can be dispatched on it by hand. | Architectural decision to initiate a new task. |
-| **HG-2** | After Draft PR creation | Reviews PR checklist and marks the draft PR "Ready for review" (the checklist items refer to that step): verifies the required checks `build + test (x86)` and `build + test (x64)` are green, reviews clean, plan executed, `CHANGELOG.md` `[Unreleased]` entry present. Checks the `export-table` and `changelog-fixtures` results by eye: they are not required checks, so a red result does not block the merge. | Formal quality and policy approval requirement prior to merge. |
-| **HG-3** | Before merging changes to `exports.cpp` | Downloads compiled DLLs from the PR's CI artifacts, opens CANoe on a workstation (Windows VM / hardware), and verifies that the CAPL nodes in `capl/` compile against the DLL. The PR checklist carries this item only when `exports.cpp` is touched. | **CANoe is not available on GitHub-hosted runners.** |
-| **HG-4** | Release preparation | On a `chore/` branch, runs `scripts/ci/changelog.ps1 cut` locally (the base hash is read from `origin/main`, not typed), reviews the rewritten `CHANGELOG.md`, pushes the branch and lets the Draft PR and CI run. Optionally dispatches `release.yml` on that branch as a dry run to preview the notes and the next version before merging. By convention (not enforced), a cut starts only when `ci.yml` on `main` is green ([docs/release-process.md](release-process.md)). | Strict project convention: product version cannot be hardcoded in files; the changelog section is explicitly anchored to the base commit hash. Nothing runs `cut` for the maintainer. |
-| **HG-5** | After changelog approval | Performs Squash-Merge of the PR into `main`. Merging is allowed only when the required checks pass **(repo setting)**. | Human maintainer decision on when to integrate the release into `main`. |
-| **HG-6** | After squash-merge | Optionally dispatches `release.yml` as a dry run on `main` after the merge, to find the squash-merge commit to tag (`notice` from `notes`, Section 4.4). Creates and pushes tag `vX.Y.Z` on that merge commit on `main`. The first parent of that commit must be the base commit named in the CHANGELOG heading. | A ref of type tag is the publication trigger: a pushed tag, or a manual dispatch with the tag as the ref (Section 4). The workflow has no approval gate; see [docs/release-process.md](release-process.md). |
-| **HG-7** | After publication | Inspects published GitHub Release and SHA256 checksums. If `publish` failed, reads the state message from its last step and decides between re-running and fixing forward (see [docs/release-process.md](release-process.md)). | Final sanity sign-off by repository maintainer. |
+| `release-pr.yml` / `build` / "Dispatch CI and the bump label check on release/next" | `ci.yml` | `release/next` | When `release-pr.yml` rebuilt the branch (`steps.build.outputs.skip == 'false'`) |
+| `release-pr.yml` / `build` / "Dispatch CI and the bump label check on release/next" | `bump-label.yml` | `release/next` | When `release-pr.yml` rebuilt the branch (`steps.build.outputs.skip == 'false'`) |
+| `tag-release.yml` / `tag` / "Dispatch the release pull request workflow on main" | `release-pr.yml` | `main` | When `steps.tip.outputs.proceed != 'false'` |
+| `tag-release.yml` / `tag` / "Dispatch the release on the tag" | `release.yml` | The release tag (`vX.Y.Z`) | When `steps.tip.outputs.proceed != 'false'` and the lookup of the release of that tag fails and its error output holds `HTTP 404` |
 
-Manual runs beyond the gates above: `ci.yml` and `release.yml` can both be started from the Actions tab with `workflow_dispatch`. A `release.yml` dispatch on a branch is a dry run; a dispatch with a tag as the ref behaves as a tag release and publishes (Section 4).
+The step "Dispatch CI and the bump label check on release/next" starts two workflows, `ci.yml` and `bump-label.yml`, in a loop.
 
----
+The job `build` of `release-pr.yml` has `contents: write`, `pull-requests: write` and `actions: write`. The job `tag` of `tag-release.yml` has `contents: write`, `pull-requests: read` and `actions: write`.
 
-## 6. Settings Outside the Code
+### What starts CI on `release/next`
 
-These affect the flow but are not defined in any workflow file, so this document cannot confirm them from the code:
+- `release-pr.yml` pushes `release/next` with `git push --force-with-lease`, with the credential that its step "Checkout main (full history and tags)" stores: the `with:` of that step is `ref: main`, `fetch-depth: 0` and `fetch-tags: true`, so the inputs `token` and `persist-credentials` of `actions/checkout` keep their defaults `${{ github.token }}` and `true`, and the stored credential is the `GITHUB_TOKEN`. A `push` event made with the repository's `GITHUB_TOKEN` creates no new workflow run.
+- The push filter of `ci.yml` lists `main`, `feat/**`, `stage/**`, `chore/**`, `fix/**` and `docs/**`.
+- The step "Open or update the release pull request" opens the release pull request with `gh pr create --base main --head release/next --title 'release/next' --body-file "$body"`; the job sets `GH_TOKEN` to `github.token`.
+- The step "Dispatch CI and the bump label check on release/next" of the job `build` of `release-pr.yml` dispatches `ci.yml` on `release/next` with `gh workflow run "$workflow" --ref release/next`. It runs the jobs of `ci.yml` on the tip of `release/next`. This gives the check runs `build + test (x86)` and `build + test (x64)` (the job names in `ci.yml`) on that branch.
+- `bump-label.yml` starts on a `pull_request` event (opened, synchronize, reopened, labeled, unlabeled) and on a dispatch. The bot dispatches it on `release/next` after it rebuilds the branch.
+- `release-pr.yml` starts on `pull_request` events of the types `labeled` and `unlabeled` with base `main`; for such an event on the `release/next` pull request, from this repository, with a label whose name starts with `bump:`, the job `labels` runs. The job `build` of `release-pr.yml` changes the `bump:*` labels of the release pull request in its step "Keep exactly one bump label" with `gh pr edit`; the job sets `GH_TOKEN` to `github.token`. A `labeled` or `unlabeled` event triggered by the `GITHUB_TOKEN` creates no workflow run.
+- `tag-release.yml` pushes the release tag with `git push origin "refs/tags/$TAG"`. It pushes with the credential that the step "Checkout the pushed commit (full history and tags)" of the job `tag` stores: the `with:` of that step is `ref: ${{ github.sha }}`, `fetch-depth: 0` and `fetch-tags: true`, so the inputs `token` and `persist-credentials` of `actions/checkout` keep their defaults `${{ github.token }}` and `true`, and the stored credential is the `GITHUB_TOKEN`. A push made with the repository's `GITHUB_TOKEN` creates no new workflow run. The last step of its job `tag`, "Dispatch the release on the tag", dispatches `release.yml` on the tag.
 
-| Setting | Effect on the flow |
+### What starts CI on a working branch
+
+A push to a working branch matches the push filter of `ci.yml` and starts a `push` run. The same push starts `auto-pr.yml`, which, when both guards answer `true`, opens the draft pull request with `gh pr create` and `GH_TOKEN` set to `secrets.GITHUB_TOKEN`. `ci.yml` also starts on `pull_request`; its trigger is `branches: [main]`, so it runs on the default activity types `opened`, `synchronize` and `reopened`. A later push to the branch while a pull request with base `main` and the branch as head is open is a push to the head branch of that pull request; it starts a `push` run and a `pull_request` run of `ci.yml`. `bump-label.yml` lists `opened`, `synchronize` and `reopened`, the three default activity types, so the same push also starts a run of `bump-label.yml`.
+
+## Branches, pull request titles and release levels
+
+### Working branches
+
+Five branch prefixes are working branches: `feat/`, `stage/`, `chore/`, `fix/` and `docs/`.
+
+- A push to such a branch starts `ci.yml` and `auto-pr.yml`. Both use the same five prefixes.
+- A push to `main` also starts `ci.yml`.
+- `auto-pr.yml` opens a draft pull request with base `main`. Its title is the branch name (`--title "${BRANCH}"`, where `BRANCH` is the branch name).
+- Guard 1 ("Guard 1: branch ahead of main?") skips the creation when the branch has no commits ahead of `main`.
+- Guard 2 ("Guard 2: PR already open for this branch?") skips the creation when an open pull request for the branch already exists.
+
+### Squash-merge subject
+
+`scripts/ci/changelog.ps1` reads the type of a change and the pull request number from the subject of each first-parent commit on `main`: the number `N` from a trailing ` (#N)`, where `N` has one to nine digits.
+
+### Release levels
+
+`scripts/ci/changelog.ps1` takes the type of a change from the branch prefix at the start of the squash subject. A subject that starts with none of these prefixes, and not with `release/`, has the type `unknown`.
+
+| Prefix | Level |
 |---|---|
-| Required status checks on `main` | `build + test (x86)` and `build + test (x64)` are required (confirmed by the repository owner). `export-table` and `changelog-fixtures` are not required. |
-| "Allow GitHub Actions to create and approve pull requests" | Must be on for `auto-pr.yml` to create the Draft PR. |
-| Platform behavior of `GITHUB_TOKEN` | Events created with `GITHUB_TOKEN` do not start new workflow runs. A PR opened by `auto-pr.yml` therefore does not start a `pull_request` run of `ci.yml` by itself; the checks shown on the PR come from the `push` run on the same head commit. |
-| Tag protection rules | Unknown; whether `v*.*.*` tags are protected is not visible from the code. |
+| `feat/` | minor |
+| `stage/` | minor |
+| `fix/` | patch |
+| `chore/` | no release |
+| `docs/` | no release |
+| unknown | no release |
+
+- Without a breaking marker, the level is the highest of the changes since the last tag: minor if there is any `feat/` or `stage/` change, else patch if there is any `fix/` change, else none.
+- The level comes from the branch prefix of the subject and from the breaking markers. A `feat/`, `stage/` or `fix/` pull request that has only `chore:` commits still releases. When its commit is after the cut-off, it is listed by its branch name, with the warning `"<subject>" has no feat, stage, fix or breaking commit message; it is listed by its branch name`, where `<subject>` is the subject text without the trailing ` (#N)`.
+- The bot computes the level with `changelog.ps1 level` when the step "Wait for the tag of a merged release commit" writes `proceed=true`.
+- If the level is major, minor or patch and two or more release pull requests are open, the step "Stop when several release pull requests are open" ends with exit code 1 and the error `::error::release/next has $COUNT open pull requests; close the extra ones by hand. Nothing was pushed or changed.`, where `$COUNT` is the number of open release pull requests.
+- If the level is major, minor or patch and at most one release pull request is open, the job builds the `release/next` commit. The step "Build the release/next commit" sets `skip` to `true` only when `origin/release/next` exists, its parent is the commit printed by `git rev-parse origin/main`, its tree equals the tree of the new commit, the event is `push` and exactly one release pull request is open. Otherwise it sets `skip` to `false`, and the job pushes `release/next`, opens or updates the release pull request, runs the step "Keep exactly one bump label" and dispatches `ci.yml` and `bump-label.yml` on `release/next`.
+- If the level is none, the job closes every open release pull request with the comment `Closed by the release bot: nothing on main is left to release.` and deletes `release/next` if the branch exists.
+- The bot labels the release pull request `bump:<level>`. When `skip` is `false`, the step "Keep exactly one bump label" counts the labels whose name starts with `bump:`:
+  - With none, it adds the computed label.
+  - With one that differs from the computed label, it replaces it with the computed label and comments `The release bot replaced the label $existing with $computed, the level computed from the commits on main.`, where `$existing` is the old label and `$computed` the computed one.
+  - With two or more, it changes nothing and writes the warning `::warning::pull request #$number has $count bump:* labels; none was changed, and the bump label check stays red until exactly one is left`, where `$number` is the number of the release pull request and `$count` the number of its `bump:*` labels.
+- The `bump label` check and the tagging require exactly one `bump:*` label; the tagging also requires it to be `bump:major`, `bump:minor` or `bump:patch`.
+- For a change of type `unknown` whose commit is after the cut-off, the generator gives the warning `the subject "<subject>" does not start with a feat/, stage/, fix/, chore/ or docs/ branch prefix; it is listed under Development`, where `<subject>` is the subject text without the trailing ` (#N)`, and, unless the change has a breaking marker, lists it under Development.
+
+### Reserved branch `release/next`
+
+- `release-pr.yml` creates and pushes the branch `release/next` and opens its pull request with the title `release/next`.
+- Commits pushed to `release/next` by hand are overwritten the next time the bot rebuilds the branch.
+- The generator gives a commit whose subject starts with `release/` the type `release` and ignores it when it computes the level and the entries.
+
+### Breaking changes
+
+- A breaking change is marked in a commit message of the pull request by `type!:` or a `BREAKING CHANGE:` footer. This works on any branch type.
+- The marker is read from the commit messages of the pull request named by ` (#N)` in the squash subject. A subject without ` (#N)` is not read, and, when its commit is after the cut-off, the generator gives the warning `the subject "<subject>" has no "(#N)"; its commit messages and breaking markers were not read`, where `<subject>` is the subject text.
+- A breaking change gives minor while the major version of the last tag is 0, and major from 1.0.0.
+- While the major version of the last tag is 0, `changelog.ps1 level` prints `minor`, `patch` or `none`. From a last tag `0.Y.Z`, the label `bump:major` gives the version `1.0.0`.
+- A breaking change is listed under "Breaking changes" in the release notes. A `chore/`, `docs/` or `unknown` pull request is listed under Development when it has no breaking marker, and under "Breaking changes" when it has one.
+
+## Auto PR (`auto-pr.yml`)
+
+`auto-pr.yml` has the `name:` Auto PR. It opens a draft pull request for a pushed working branch when the branch is ahead of `main` and has no open pull request.
+
+### Trigger and permissions
+
+- The event is `push`, for the branches `feat/**`, `stage/**`, `chore/**`, `fix/**` and `docs/**`.
+- The workflow has `contents: read` and `pull-requests: write`. Its one job, `open draft PR`, runs on `ubuntu-latest` with `GH_TOKEN` set to `secrets.GITHUB_TOKEN`.
+- The job also sets `GH_REPO` to `github.repository` and `BRANCH` to `github.ref_name`.
+- The job has four steps, in this order: "Guard 1: branch ahead of main?", "Guard 2: PR already open for this branch?", "Compose PR body" and "Create draft PR".
+
+### Step "Guard 1: branch ahead of main?"
+
+- The step has the id `ahead`.
+- It calls `gh api "repos/${GH_REPO}/compare/main...${BRANCH}"` and writes the whole response to `$RUNNER_TEMP/compare.json`. "Compose PR body" reads this file.
+- It reads `.ahead_by` from the file and prints "Branch '<branch>' is ahead of main by N commit(s)."
+- If `ahead_by` is 0, it prints "No commits ahead of main -- nothing to open a PR for. Exiting." and writes `proceed=false` to `$GITHUB_OUTPUT`. Otherwise it writes `proceed=true`. In both cases the step ends with exit code 0.
+- The script runs with `set -euo pipefail`. If `gh api` or `jq` ends with a non-zero exit code, the step ends with a non-zero exit code.
+
+### Step "Guard 2: PR already open for this branch?"
+
+- The step has the id `existing` and runs only if `steps.ahead.outputs.proceed == 'true'`.
+- It runs `gh pr list --head "${BRANCH}" --state open --json number --jq '.[0].number // empty'`.
+- If a number is returned, it prints "Open PR #N already exists for '<branch>' -- nothing to do. Exiting." and writes `proceed=false`. Otherwise it prints "No open PR found for '<branch>' -- will create one." and writes `proceed=true`. In both cases the step ends with exit code 0.
+
+### Step "Compose PR body"
+
+- The step runs only if `steps.ahead.outputs.proceed == 'true' && steps.existing.outputs.proceed == 'true'`. It writes `$RUNNER_TEMP/pr-body.md`.
+- Its inputs are `compare.json` and the `BRANCH` variable.
+
+#### What the step reads from the compare file
+
+| Value | Rule |
+|---|---|
+| `plan_only` | True when the compare lists at least one file and every file name matches `^docs/work/[^/]+/plans/.*\.md$`. False when the list of files is empty. |
+| `exports_touched` | True when one of the files is `src/module/exports.cpp`. |
+| Commit subjects | The first line of the message of each commit in the compare, one per line, in `$RUNNER_TEMP/subjects.txt`. |
+
+#### The TODO line
+
+The last line of the checklist depends on the branch prefix. `--` is two ASCII hyphens.
+
+| Branch | TODO line |
+|---|---|
+| `stage/<N>-...`, where `<N>` is digits or two groups of digits joined by `-` | `Stage <N> -- TODO: task IDs (e.g. CPP/TEST/REV/HUM)` |
+| Any other `stage/` branch, for example `stage/7a-x` | `Stage stage/7a-x -- TODO: task IDs (e.g. CPP/TEST/REV/HUM)`: the whole branch name, with `stage/`, takes the place of `<N>` |
+| `chore/<id>-...`, where `<id>` is one or more lower-case letters, then `-`, then one or more digits, optionally followed by more `-<digits>` groups, for example `chore/rev-12-...` or `chore/rev-12-3-...` | `<ID> -- TODO: any additional REV/HUM IDs`, with `<ID>` in upper case |
+| Any other `chore/` branch, for example `chore/ci-verify-draft-retry` | `TODO: stage and task IDs` |
+| `feat/`, `fix/` and `docs/` | `TODO: stage and task IDs` |
+
+#### The body
+
+The body is built in this order.
+
+1. The heading `## Merge checklist` and a blank line.
+2. The plan-only paragraph, only if `plan_only` is true.
+3. The first block of three items, always.
+4. The CANoe item, only if `exports_touched` is true.
+5. The second block of three items, always.
+6. A blank line and the TODO line, always.
+7. A separator and the exports.cpp warning, only if `exports_touched` is true.
+8. A separator, the heading `### Commits on this branch` and one `- <subject>` line per commit, only if the list of subjects is not empty. The subjects are written with `printf -- '- %s\n'`.
+
+The text that the file writes for the plan-only paragraph (item 2):
+
+```
+Plan-only branch: the `code-reviewer` and human-gate items below do not
+apply. CI green and up-to-date-with-`main` still apply.
+```
+
+The text that the file writes for the first block (item 3):
+
+```
+- [ ] CI green on both legs (`build + test (x86)`, `build + test (x64)`)
+- [ ] `code-reviewer` clean on this branch (`git diff main...HEAD`), zero Must-fix
+- [ ] Human gate passed against the PR CI artifact, if this branch has one
+```
+
+The text that the file writes for the CANoe item (item 4):
+
+```
+- [ ] CANoe check: the CAPL nodes in capl/ compile in CANoe against the DLL from this PR's CI artifact (author before Ready for review, or reviewer before approval)
+```
+
+The text that the file writes for the second block (item 5):
+
+```
+- [ ] Commit messages follow the Conventional Commits skill
+- [ ] Branch up to date with `main`
+- [ ] Plan folded into `plan.md`, incl. any task-ID/section renumbering (last commit before marking Ready for review)
+```
+
+The text that the file writes for the exports.cpp warning (item 7), after a blank line, a line `---` and a blank line:
+
+```
+⚠️ This branch touches `src/module/exports.cpp`. Never have two open PRs that
+both touch this file. Also confirm the `export-table` check is green: it is
+not a required check, so a red result does not block the merge.
+```
+
+### Step "Create draft PR"
+
+- The step runs only if `steps.ahead.outputs.proceed == 'true' && steps.existing.outputs.proceed == 'true'`: both guards answered `true`.
+- It runs `gh pr create --draft --base main --head "${BRANCH}" --title "${BRANCH}" --body-file "$RUNNER_TEMP/pr-body.md"`. The pull request is a draft, its base is `main`, its head is the pushed branch, its title is the branch name and its body is the composed file.
+- The script runs with `set -euo pipefail`. If `gh pr create` ends with a non-zero exit code, the step ends with a non-zero exit code.
+
+### Later pushes and failures
+
+- Second push to a branch whose pull request is open: Guard 1 passes, Guard 2 finds the open pull request and answers `false`, and "Compose PR body" and "Create draft PR" are skipped. The title, the body and the draft state stay as they are.
+- If the branch's pull request was closed, the next push to the branch opens a new one, provided the branch is still ahead of `main`.
+- If `gh pr create` ends with a non-zero exit code, the next push to the branch runs both guards again; when both answer `true`, "Compose PR body" composes the body again and "Create draft PR" runs `gh pr create` again.
+
+## CI (`ci.yml`)
+
+### Permissions
+
+- The workflow has `permissions: contents: read`.
+- `export-table`, `changelog-fixtures` and `actionlint` each have their own block, `permissions: contents: read`.
+- `ci.yml` uses the third-party action `actions/checkout` in three jobs, pinned by SHA with the label `# v7.0.1`.
+
+### Job dependencies
+
+- `gate-x86` has `needs: pipeline-x86` and `gate-x64` has `needs: pipeline-x64`.
+
+### Jobs `pipeline-x86` and `pipeline-x64`
+
+- Each job calls `./.github/workflows/arch-pipeline.yml` and passes one input: `arch: x86` for `pipeline-x86`, `arch: x64` for `pipeline-x64`.
+- `release-version` has the default `''` in `arch-pipeline.yml`; an empty value means a development build.
+
+### Jobs `gate-x86` and `gate-x64`
+
+- The `name:` of `gate-x86` is `build + test (x86)`. The `name:` of `gate-x64` is `build + test (x64)`.
+- `gate-x86` has `needs: pipeline-x86` and `gate-x64` has `needs: pipeline-x64`. Both have `if: always()` and run on `ubuntu-latest`.
+- Each gate has one step, "Require a successful pipeline", with `shell: bash`.
+- The step sets the environment variable `PIPELINE_RESULT` to `needs.pipeline-x86.result` (`gate-x86`) or `needs.pipeline-x64.result` (`gate-x64`).
+- The script of `gate-x86`:
+
+  ```bash
+  if [ "$PIPELINE_RESULT" != "success" ]; then
+    echo "::error::pipeline-x86 finished with result '$PIPELINE_RESULT', expected 'success'"
+    exit 1
+  fi
+  ```
+
+- The script of `gate-x64`:
+
+  ```bash
+  if [ "$PIPELINE_RESULT" != "success" ]; then
+    echo "::error::pipeline-x64 finished with result '$PIPELINE_RESULT', expected 'success'"
+    exit 1
+  fi
+  ```
+
+- Any other result prints the error message and ends the step with `exit 1`.
+
+### Job `export-table`
+
+- The job runs on `ubuntu-latest`.
+- Step 1 is `actions/checkout`, pinned by SHA.
+- Step 2 is the local composite action `./.github/actions/export-table`.
+
+### Job `changelog-fixtures`
+
+- The job runs on `ubuntu-latest`.
+- Step 1 is `actions/checkout`, pinned by SHA.
+- Step 2, "Run the CHANGELOG fixtures", has `shell: bash` and runs `pwsh -NoProfile -File scripts/ci/changelog.ps1 fixtures -FixtureDir tests/changelog`.
+
+### Job `actionlint`
+
+- The job has `if: github.event_name != 'workflow_dispatch'`, so it is skipped on a dispatch. It runs on `ubuntu-latest`.
+- The job sets `ACTIONLINT_VERSION` to `1.7.12`. The archive's SHA-256 is pinned in `ACTIONLINT_SHA256`.
+- Step 1 is `actions/checkout`, pinned by SHA.
+- Step 2, "Download actionlint and verify its SHA-256", has `shell: bash` and does three things in order. After each command, a non-zero exit code is turned into the error annotation below, followed by `exit 1`.
+  1. It downloads `https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz` to `$RUNNER_TEMP/actionlint.tar.gz` with `curl --fail --silent --show-error --location --output`. On failure: `::error::actionlint download failed (exit $code): $out`.
+  2. It checks the archive against `ACTIONLINT_SHA256` with `sha256sum --check`. On failure: `::error::actionlint archive does not match the pinned SHA-256: $out`.
+  3. It extracts the member `actionlint` into `$RUNNER_TEMP` with `tar --extract --gzip`. On failure: `::error::actionlint extraction failed (exit $code): $out`.
+- Step 3, "Lint the workflows", has `shell: bash`. It runs `"$RUNNER_TEMP/actionlint" -color`, echoes its standard output, and exits with the exit code of `actionlint`.
+
+## Architecture pipeline (`arch-pipeline.yml`)
+
+### Trigger and callers
+
+- The event is `workflow_call`.
+- `ci.yml` calls the workflow twice, from `pipeline-x86` and `pipeline-x64`, and passes `arch`.
+- `release.yml` calls it twice, from `pipeline-x86` (`arch: x86`) and `pipeline-x64` (`arch: x64`). Both jobs have `needs: validate` and pass `release-version: ${{ needs.validate.outputs.version }}`.
+
+### Inputs
+
+- `arch` has the type `string` and is required. Its description reads: "Target architecture, x86 or x64."
+- The value of `arch` is used in the make targets, the DLL path and the artifact name.
+- `release-version` has the type `string` and is optional, with default `''`. Its description reads: "X.Y.Z to build and verify as a release; empty for a development build."
+
+### Permissions
+
+- The workflow has `permissions: contents: read`.
+- The jobs `build` and `test` each repeat `permissions: contents: read`.
+
+### Jobs
+
+- The workflow has two jobs, `build` and `test`. Both have the `name:` equal to the job id and run on `windows-latest`.
+- The job `test` builds and runs the tests with `make test`.
+- Third-party actions in the file: `actions/checkout`, pinned by SHA with the label `# v7.0.1`, and `actions/upload-artifact`, pinned by SHA with the label `# v7.0.2`.
+
+### What `release-version` changes
+
+- When `release-version` is empty, the build step passes no `VER_*` variables to `make`, and the step "Check version resource against release-version" is skipped.
+- When it is not empty, the build step validates it, passes the version variables to `make`, and the step "Check version resource against release-version" runs.
+
+### Job `build`
+
+The job has six steps, in this order: "Checkout (full history)", "Provision build environment", "make build-${{ inputs.arch }}", "Check version resource against release-version", "Check DLL exports (dumpbin /exports)" and "Upload DLL artifact".
+
+In the messages quoted in this section, a PowerShell variable or expression (for example `$env:RELEASE_VERSION`, `$dll` or `$($info.FileVersion)`) stands for its value at run time.
+
+#### Step "Checkout (full history)"
+
+- The step uses `actions/checkout` with `fetch-depth: 0`.
+
+#### Step "Provision build environment"
+
+- The step uses the local composite action `./.github/actions/provision` with the input `arch: ${{ inputs.arch }}`.
+
+#### Step "make build-${{ inputs.arch }}"
+
+- The step runs with `shell: pwsh` and sets `RELEASE_VERSION` to `inputs.release-version` and `ARCH` to `inputs.arch`.
+- The script sets `$ErrorActionPreference = 'Stop'` and starts with an empty list of version arguments.
+- If `RELEASE_VERSION` is not empty, it must match this regular expression: `^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\z`. Otherwise the step throws `release-version must be X.Y.Z without leading zeros, got '$env:RELEASE_VERSION'`.
+- The script splits the value on `.`. A field is rejected when its length is greater than 5 or its integer value is greater than 65535. The step then throws `release-version field '$field' exceeds 65535 (version resource fields are 16-bit)`.
+- For a valid value the version arguments are `VER_MAJOR`, `VER_MINOR` and `VER_BUILD`, set to the first, second and third field, and `VER_REV=0`.
+- The step then runs `make "build-$env:ARCH"` with the version arguments. If the exit code is not 0, it throws `make build-$env:ARCH failed (exit $LASTEXITCODE)`.
+
+#### Step "Check version resource against release-version"
+
+- The step runs only if `inputs.release-version != ''`. It runs with `shell: pwsh` and sets `RELEASE_VERSION` to `inputs.release-version` and `ARCH` to `inputs.arch`.
+- The step checks the format of `release-version` again: the value must match `^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\z`. Otherwise the step throws `release-version must be X.Y.Z without leading zeros, got '$env:RELEASE_VERSION'`.
+- It reads the version resource of `build\<arch>\restifycapl-<arch>.dll` with `[System.Diagnostics.FileVersionInfo]::GetVersionInfo`. `$dll` is the resolved full path.
+- The expected numeric version is `<major>.<minor>.<patch>.0`, built from the three fields. The expected string is `v` followed by `release-version`.
+- The step makes three comparisons and collects a message for each one that fails:
+  - The actual numeric version (`FileMajorPart`, `FileMinorPart`, `FileBuildPart` and `FilePrivatePart`, joined by `.`) is compared with `-ne` to the expected numeric version. The message is `numeric version is $actualNumeric, expected $expectedNumeric`.
+  - `FileVersion` is compared with `-cne` (case-sensitive) to the expected string. The message is `FileVersion is '$($info.FileVersion)', expected '$expectedString'`.
+  - `ProductVersion` is compared with `-cne` to the expected string. The message is `ProductVersion is '$($info.ProductVersion)', expected '$expectedString'`.
+- If there is at least one message, the step throws `Version resource of $dll does not match release-version ${env:RELEASE_VERSION}:` followed by the messages, one per line.
+- If there is none, the step prints `Version resource of $dll matches $expectedNumeric / $expectedString.`
+
+#### Step "Check DLL exports (dumpbin /exports)"
+
+- The step runs with `shell: pwsh` and sets `ARCH`. It runs for a development build as well as for a release build.
+- It runs `dumpbin /nologo /exports` on `build\<arch>\restifycapl-<arch>.dll`. If the exit code is not 0, it throws `dumpbin /exports $dll failed (exit $LASTEXITCODE)`.
+- It writes the dumpbin output to the job summary before it checks the exports. The summary has the heading `### dumpbin /exports <dll>` and the output in a fenced block.
+- It reads the exported names from the dumpbin table and the count from the "number of functions" line.
+- If there is no "number of functions" line, the step throws `No 'number of functions' line found in the dumpbin output for $dll`.
+- The step throws unless the count is 1, exactly one name was read, and that name is `caplDllGetTable4` (case-sensitive comparison). The message is `$dll must export exactly one function, caplDllGetTable4; found $functionCount function(s), named: $($names -join ', ')`.
+- If the check passes, the step prints `$dll exports exactly caplDllGetTable4.`
+
+#### Step "Upload DLL artifact"
+
+- The step uses `actions/upload-artifact`.
+- The artifact name is `restifycapl-<arch>` and the path is `build/<arch>/restifycapl-<arch>.dll`.
+- The step sets `if-no-files-found: error` and `overwrite: true`.
+
+### Job `test`
+
+- The job has three steps, in this order: "Checkout (full history)", "Provision build environment" and "make test (ARCH=${{ inputs.arch }})".
+- "Checkout (full history)" uses `actions/checkout` with `fetch-depth: 0`.
+- "Provision build environment" uses `./.github/actions/provision` with the input `arch: ${{ inputs.arch }}`.
+- "make test (ARCH=${{ inputs.arch }})" runs with `shell: pwsh` and sets `ARCH` to `inputs.arch`. It runs `make test "ARCH=$env:ARCH"`. If the exit code is not 0, it throws `make test ARCH=$env:ARCH failed (exit $LASTEXITCODE)`.
+- The job runs the same way for a development and a release call.
+
+## Composite action `provision`
+
+### Header
+
+- The action is in `.github/actions/provision/action.yml`. Its `name:` is `Provision build environment`.
+- Its `description:` reads: "Activates MSVC, provisions the pinned vcpkg tool and the static dependencies, and places them where the Makefile expects them."
+- It has one input, `arch`. The input is required. Its description reads: "Target architecture, x86 or x64."
+- `runs.using` is `composite`.
+- The action has twelve steps, in this order: "Validate arch input", "Activate MSVC developer environment (${{ inputs.arch }})", "Pin VCPKG_ROOT to a CI-only path (avoid VS-bundled vcpkg collision)", "Expose runner image version for cache keying", "Ensure make is available", "Cache vcpkg tool checkout", "Bootstrap vcpkg (full clone, pinned tool tag)", "Verify vcpkg tool pin matches vcpkg.json's builtin-baseline", "Cache vcpkg install root (${{ inputs.arch }}-windows-static)", "vcpkg install (${{ inputs.arch }}-windows-static)", "Place libs where the Makefile expects them" and "Verify /MT provenance (dumpbin /directives)".
+- The jobs `build` and `test` of `arch-pipeline.yml` use the action, each with `arch: ${{ inputs.arch }}`.
+- The first step throws `arch must be x86 or x64, got '$env:ARCH'` unless `arch` is exactly `x86` or `x64` (case-sensitive).
+- The steps "Ensure make is available", "Bootstrap vcpkg (full clone, pinned tool tag)", "Verify vcpkg tool pin matches vcpkg.json's builtin-baseline", "vcpkg install (${{ inputs.arch }}-windows-static)", "Place libs where the Makefile expects them" and "Verify /MT provenance (dumpbin /directives)" set `$ErrorActionPreference = 'Stop'`.
+- The steps "Validate arch input", "Pin VCPKG_ROOT to a CI-only path (avoid VS-bundled vcpkg collision)", "vcpkg install (${{ inputs.arch }}-windows-static)", "Place libs where the Makefile expects them" and "Verify /MT provenance (dumpbin /directives)" set `ARCH` to `inputs.arch`.
+- In the messages quoted in this section, a PowerShell variable or expression (for example `$env:ARCH`, `$lib` or `$LASTEXITCODE`) stands for its value at run time.
+
+### Step "Validate arch input"
+
+- It runs `if ($env:ARCH -cne 'x86' -and $env:ARCH -cne 'x64') { throw "arch must be x86 or x64, got '$env:ARCH'" }`.
+
+### Step "Activate MSVC developer environment (${{ inputs.arch }})"
+
+- The step uses `ilammy/msvc-dev-cmd`, pinned by SHA with the label `# v1.13.0`.
+- It passes `arch: ${{ inputs.arch }}`.
+
+### Step "Pin VCPKG_ROOT to a CI-only path (avoid VS-bundled vcpkg collision)"
+
+- It appends three lines to `$GITHUB_ENV`, each with `echo "..." >> $env:GITHUB_ENV`.
+- The first line is `VCPKG_ROOT=$env:RUNNER_TEMP\vcpkg`.
+- The second line is `VCPKG_PINNED_TAG=2026.07.29`.
+- The third line is `VCPKG_INSTALL_ROOT=${{ github.workspace }}\vcpkg_installed-$env:ARCH`.
+
+### Step "Expose runner image version for cache keying"
+
+- The step runs `echo "IMAGE_VERSION=$env:ImageVersion" >> $env:GITHUB_ENV`.
+
+### Step "Ensure make is available"
+
+- It runs `choco install make -y --no-progress` only if `Get-Command make -ErrorAction SilentlyContinue` finds no `make`.
+- It then always runs `make --version`.
+
+### Step "Cache vcpkg tool checkout"
+
+- The step has the id `vcpkg-tool-cache`. It uses `actions/cache`, pinned by SHA with the label `# v6.1.0`.
+- The cache path is `${{ env.VCPKG_ROOT }}`.
+- The cache key is `vcpkg-tool-${{ env.VCPKG_PINNED_TAG }}-${{ runner.os }}-${{ env.IMAGE_VERSION }}`.
+
+### Step "Bootstrap vcpkg (full clone, pinned tool tag)"
+
+- The step runs only if `steps.vcpkg-tool-cache.outputs.cache-hit != 'true'`.
+- It runs `git clone https://github.com/microsoft/vcpkg.git "$env:VCPKG_ROOT"`. If the exit code is not 0, it throws `git clone of vcpkg failed (exit $LASTEXITCODE)`.
+- It runs `git -C "$env:VCPKG_ROOT" checkout --quiet "$env:VCPKG_PINNED_TAG"`. If the exit code is not 0, it throws `git checkout $env:VCPKG_PINNED_TAG failed (exit $LASTEXITCODE)`.
+- It reads the checked-out commit with `git -C "$env:VCPKG_ROOT" rev-parse HEAD` and prints `vcpkg tool pinned at $env:VCPKG_PINNED_TAG ($actualCommit)`.
+- It runs `& "$env:VCPKG_ROOT\bootstrap-vcpkg.bat" -disableMetrics`. If the exit code is not 0, it throws `bootstrap-vcpkg.bat failed (exit $LASTEXITCODE)`.
+- If `$env:VCPKG_ROOT\vcpkg.exe` does not exist, it throws `bootstrap-vcpkg.bat ran but vcpkg.exe still not found under $env:VCPKG_ROOT`.
+
+### Step "Verify vcpkg tool pin matches vcpkg.json's builtin-baseline"
+
+- The step also runs on a cache hit.
+- The step reads `builtin-baseline` from `vcpkg.json` and compares it with the commit checked out in `VCPKG_ROOT`.
+- If they differ, the step throws a four-line message. Lines 1, 2 and 4 read:
+
+  ```
+  vcpkg.json's builtin-baseline ($baseline) does not match the pinned vcpkg TOOL's checked-out commit ($toolCommit, from VCPKG_PINNED_TAG=$env:VCPKG_PINNED_TAG).
+  These are two independent pins (WHICH port versions resolve vs. WHICH vcpkg.exe resolves them) that must name the same commit -- otherwise version resolution reads baseline versions from one commit but checks them against a version database pinned at a different (often older) commit, producing 'no version database entry' errors.
+  Fix by re-deriving the commit VCPKG_PINNED_TAG dereferences to (git ls-remote --tags https://github.com/microsoft/vcpkg.git <tag>) and setting vcpkg.json's builtin-baseline to that exact commit.
+  ```
+
+- Line 3 points to a section of a project document.
+- If they are equal, the step prints `vcpkg tool pin ($toolCommit) matches vcpkg.json's builtin-baseline.`
+
+### Step "Cache vcpkg install root (${{ inputs.arch }}-windows-static)"
+
+- The step has the id `vcpkg-installed-cache`. It uses `actions/cache`, pinned by SHA with the label `# v6.1.0`.
+- The cache path is `${{ env.VCPKG_INSTALL_ROOT }}`.
+- The cache key is `vcpkg-installed-${{ inputs.arch }}-windows-static-${{ hashFiles('vcpkg.json') }}-${{ env.IMAGE_VERSION }}`.
+
+### Step "vcpkg install (${{ inputs.arch }}-windows-static)"
+
+- The step has `working-directory: ${{ github.workspace }}`.
+- It runs `& "$env:VCPKG_ROOT\vcpkg.exe" install "--triplet=$env:ARCH-windows-static" "--x-install-root=$env:VCPKG_INSTALL_ROOT"`.
+- If the exit code is not 0, it throws `vcpkg install --triplet=$env:ARCH-windows-static failed (exit $LASTEXITCODE)`.
+- It then checks that the directory `<VCPKG_INSTALL_ROOT>\<arch>-windows-static\lib` exists.
+- If the directory does not exist, it throws `vcpkg install exited 0 but expected lib directory not found: $tripletLibDir -- do not trust exit code alone (see scripts/setup-dev-env.ps1's Install-ManifestTriplet).`
+
+### Step "Place libs where the Makefile expects them"
+
+- The source directories are `<VCPKG_INSTALL_ROOT>\<arch>-windows-static\lib`, its subdirectory `manual-link`, `<VCPKG_INSTALL_ROOT>\<arch>-windows-static\include\gtest` and `<VCPKG_INSTALL_ROOT>\<arch>-windows-static\include\curl`.
+- The destination directories are `lib\<arch>`, `lib\gtest\<arch>`, `include\vendor\gtest` and `include\vendor\curl`. The script creates them with `New-Item -ItemType Directory -Force`.
+- The loop covers `libcurl.lib` and `zs.lib`. It copies each file from the source `lib` directory to `lib\<arch>` with `-Force`. If a file is missing, it throws `Expected product lib not found: $src`.
+- `gtest.lib` comes from the source `lib` directory and `gtest_main.lib` from `manual-link`. Both are copied to `lib\gtest\<arch>`.
+- If a file is missing, the step throws `Expected gtest.lib not found: $gtestLibSrc` or `Expected gtest_main.lib not found: $gtestMainLibSrc`.
+- The step copies the content of the gtest header directory recursively to `include\vendor\gtest`. If the directory is missing, it throws `Expected gtest header directory not found: $srcGtestInclude`.
+- The step copies the content of the curl header directory recursively to `include\vendor\curl`. If the directory is missing, it throws `Expected curl header directory not found: $srcCurlInclude`.
+- It prints `Placed: $libDest\libcurl.lib, $libDest\zs.lib, $gtestLibDest\gtest.lib, $gtestLibDest\gtest_main.lib, headers under $gtestIncludeDest and $curlIncludeDest`.
+
+### Step "Verify /MT provenance (dumpbin /directives)"
+
+- It checks four files: `lib\<arch>\libcurl.lib`, `lib\<arch>\zs.lib`, `lib\gtest\<arch>\gtest.lib` and `lib\gtest\<arch>\gtest_main.lib`.
+- For each file it runs `dumpbin /nologo /directives "$lib"` and joins the output lines with a line break.
+- A file passes the first check when the output matches `/DEFAULTLIB:LIBCMT` and does not match `/DEFAULTLIB:LIBCMTD`.
+- If the first check fails, the step prints `::error::$lib does not declare /DEFAULTLIB:LIBCMT (release static CRT) -- expected for /MT. A lib declaring only /DEFAULTLIB:LIBCMTD (debug static CRT) also fails this check.` and records the failure.
+- Independently of the first check, if the output matches `/DEFAULTLIB:MSVCRT`, the step prints `::error::$lib declares /DEFAULTLIB:MSVCRT -- built with /MD, not /MT. Never mix /MT and /MD in one link (see msvc-build-conventions).` and records the failure.
+- The loop goes through all four files before the step fails.
+- If a failure was recorded, the step throws `/MT provenance check failed for one or more provisioned libs.`
+- Otherwise it prints `All provisioned libs confirmed /DEFAULTLIB:LIBCMT, no MSVCRT.`
+
+## Composite action `export-table`
+
+### Header
+
+- The action is in `.github/actions/export-table/action.yml`. Its `name:` is `export-table`.
+- Its `description:` reads: "Runs the export-table fixtures, checks src/module/exports.cpp and writes the job summary."
+- The action has one output, `markdown-path`, set only when `export-table.md` exists after the check.
+- The description of the output reads: "Path of the generated export table markdown. Set only when the file exists after the check ran (the table could be parsed); not set otherwise, so consumers read an empty string."
+- `runs.using` is `composite`.
+- The action has three steps, in this order: "Run export-table fixtures" (id `fixtures`), "Check src/module/exports.cpp" (id `table`) and "Write job summary".
+- All three steps run with `shell: pwsh`.
+- The job `export-table` of `ci.yml` uses the action as a step with `uses: ./.github/actions/export-table`.
+- The job `export-table` of `release.yml` uses the action in the step "Check the export table" (id `table`); a later step of that job reads the output `markdown-path`.
+
+### Step "Run export-table fixtures"
+
+- The step has the id `fixtures` and sets `FIXTURE_DIR` to `tests/export-table`.
+- It runs `./scripts/list-export-table.ps1 -FixtureDir $env:FIXTURE_DIR`, which runs every `*.fixture` file in that directory, and then `exit $LASTEXITCODE`.
+
+### Step "Check src/module/exports.cpp"
+
+- The step has the id `table`, has `if: always()` and sets `EXPORTS_CPP` to `src/module/exports.cpp`.
+- It creates the directory `export-table` under `$env:RUNNER_TEMP` with `New-Item -ItemType Directory -Force`. `$md` is `export-table.md` in that directory.
+- It runs `./scripts/list-export-table.ps1 -Path $env:EXPORTS_CPP -MarkdownPath $md | Tee-Object -FilePath (Join-Path $dir 'output.txt')`.
+- The script checks the table and, with `-MarkdownPath`, writes it as markdown to that file when it could parse the table.
+- For `-Path`, the script prints `export-table passed: <n> functions in <m> categories, checks 1-12 clean.` or `export-table: <n> of 12 checks failed.`
+- The step keeps `$LASTEXITCODE` in `$code`.
+- If `$md` exists, the step appends `markdown-path=$md` to `$env:GITHUB_OUTPUT`.
+- The step ends with `exit $code`.
+
+### Step "Write job summary"
+
+- The step has `if: always()` and sets `FIXTURES_OUTCOME` to the outcome of the step `fixtures`.
+- It takes the last line of `output.txt` (written by the `Tee-Object` in "Check src/module/exports.cpp") that matches `^export-table( passed)?:` and writes one result line to the job summary. If `output.txt` does not exist, the line `export-table FAILED: no result was produced for src/module/exports.cpp; see the step log.` is written.
+- In the result texts below, `$($Matches[1])` and `$($Matches[2])` stand for the first and second number matched in that line.
+- If the line matches `^export-table passed: (\d+) functions in (\d+) categories`, the result line is:
+
+  ```
+  export-table passed: $($Matches[1]) functions in $($Matches[2]) categories, checks 1-12 clean. Not a required check; read it on any branch that touches src/module/exports.cpp.
+  ```
+
+- If the line matches `^export-table: (\d+) of 12 checks failed`, the result line is:
+
+  ```
+  export-table FAILED: $($Matches[1]) of 12 checks failed in src/module/exports.cpp. This check is not required and does not block the merge, but a failing table cannot be released: release.yml requires it. Fix it before merging any change that touches src/module/exports.cpp.
+  ```
+
+- Otherwise the result line is:
+
+  ```
+  export-table FAILED: no result was produced for src/module/exports.cpp; see the step log.
+  ```
+
+- If `FIXTURES_OUTCOME` is not `success`, the line is preceded by `The export-table fixture run did not succeed; see the "Run export-table fixtures" step.` and a blank line.
+- A blank line follows the result line. If `export-table.md` exists, its content follows the blank line.
+- The text is appended to `$env:GITHUB_STEP_SUMMARY` as UTF-8 without BOM.
+
+## Bump label (`bump-label.yml`)
+
+### Permissions
+
+- The workflow has `contents: read` and `pull-requests: read`.
+
+### Job
+
+- The job has the id `bump-label` and the `name:` `bump label`. It runs on `ubuntu-latest`.
+- The job sets these environment variables:
+  - `GH_TOKEN` is `secrets.GITHUB_TOKEN`.
+  - `GH_REPO` is `github.repository`.
+  - `REPO_OWNER` is `github.repository_owner`.
+  - `HEAD_REF` is `github.head_ref || github.ref_name`.
+  - `PR_NUMBER` is `github.event.pull_request.number`.
+- `HEAD_REF` is `github.ref_name` when `github.head_ref` is empty. When `PR_NUMBER` is empty, the step looks the number up. `release-pr.yml` dispatches the workflow with `--ref release/next`.
+- In the messages quoted in this section, a shell variable (for example `$HEAD_REF` or `${number}`) stands for its value at run time.
+
+### Step "Require exactly one bump label on release/next"
+
+The step runs with `shell: bash`. It runs these parts in order.
+
+#### Other head branches
+
+- The step stores the path `$RUNNER_TEMP/bump-label.err` in `errfile`. The two `gh api` calls write their standard error to this file.
+- If `HEAD_REF` is not `release/next` (exact comparison), the step prints the message below and ends with exit code 0.
+
+  ```
+  Head branch '$HEAD_REF' is not release/next: no bump label required.
+  ```
+
+#### The pull request number
+
+- The step takes the number from `PR_NUMBER`.
+- If `PR_NUMBER` is not empty and does not match `^[0-9]+$`, the step prints the message below and ends with exit code 1.
+
+  ```
+  ::error::unexpected pull request number: $number
+  ```
+
+- If `PR_NUMBER` is empty, the step looks the number up. It runs `gh api "repos/${GH_REPO}/pulls?state=open&head=${REPO_OWNER}:${HEAD_REF}" --jq '.[].number'`.
+- If the command fails, the step prints the message below and ends with exit code 1. In the log, `$(tr '\r\n' '  ' < "$errfile")` is replaced by the content of `errfile` with each carriage return and line feed turned into a space. `$code` is the exit code of the command.
+
+  ```
+  ::error::could not list the pull requests of release/next (exit $code): $(tr '\r\n' '  ' < "$errfile")
+  ```
+
+- If the command prints nothing, the step prints the message below and ends with exit code 1.
+
+  ```
+  ::error::release/next has no open pull request, so its bump label cannot be checked
+  ```
+
+- If the output has more than one line, the step prints the message below and ends with exit code 1.
+
+  ```
+  ::error::release/next has more than one open pull request
+  ```
+
+- If the output contains a character that is not a digit, the step prints the message below and ends with exit code 1.
+
+  ```
+  ::error::unexpected output from the pull request lookup: $number
+  ```
+
+#### The labels
+
+- The step reads the labels of the pull request with `gh api "repos/${GH_REPO}/pulls/${number}" --jq '.labels[].name'`.
+- If the command fails, the step prints the message below and ends with exit code 1. The end of the message is the content of `errfile` with each carriage return and line feed turned into a space.
+
+  ```
+  ::error::could not read the labels of pull request #${number} (exit $code): $(tr '\r\n' '  ' < "$errfile")
+  ```
+
+- The step reads the names line by line. Every label whose name starts with `bump:` counts. For each one, the step adds 1 to `count` and appends a space and the name to `selected`.
+
+#### The result
+
+- If `count` is not 1, the step prints the message below and ends with exit code 1. With no matching label, the message ends with `found 0:`.
+
+  ```
+  ::error::pull request #${number} from release/next must carry exactly one bump:* label, found ${count}:${selected}
+  ```
+
+- If `count` is 1, the step prints the message below and ends with exit code 0.
+
+  ```
+  Pull request #${number} carries exactly one bump label:${selected}
+  ```
+
+## How the level, the version and the CHANGELOG section are computed (`changelog.ps1`)
+
+In the messages quoted in this section, `<...>` stands for a value at run time.
+
+### Range and change types
+
+The last tag:
+
+- The script lists the tags with `git tag --list`. A tag counts when it matches `^v([0-9]+)\.([0-9]+)\.([0-9]+)$`.
+- A tag with a leading zero in a field is ignored. The script writes this to standard error: `ignored tag <name>: a field has a leading zero`.
+- A tag with a field above 65535 is ignored. The script writes this to standard error: `ignored tag <name>: a field is above 65535`.
+- Of the remaining tags, the highest wins. The tags are compared by number: first the major field, then the minor, then the patch.
+- If no tag is left, the run ends with `::error::no tag of the form vX.Y.Z found; fetch the tags (a shallow checkout has none) or tag the first release by hand`.
+
+The range:
+
+- `-Base` is a full commit hash: 40 lowercase hex characters. Otherwise the run ends with exit code 2 and the usage text `-Base must be a full 40-character lowercase hex commit hash`.
+- Without `-Base`, the script takes the result of `git rev-parse origin/main`, the tip of `origin/main`.
+- The range is `git log --first-parent <last tag>..<Base>`. The first-parent commits are processed oldest first.
+
+The subject of a commit:
+
+- The script reads a trailing ` (#N)`, where `N` has one to nine digits and the text before it ends with a character that is not a space. The text before it is the subject text.
+- The type is the branch prefix matched by `^(feat|stage|fix|chore|docs|release)/` at the start of the subject text. Without a match the type is `unknown`.
+- A commit with the type `release` is skipped for the level and for the entries.
+
+The commit messages of a pull request:
+
+- `-PrMessages` is a JSON object from pull request number to the full commit messages, built by the workflow.
+- The messages are read for a commit that has a number in its subject, is not of type `release` and has that number in the object.
+- The first line of a message is parsed with `^([a-z]+)(?:\([^()]*\))?(!)?: (\S.*)$`: type, optional scope, optional `!`, and the text. A first line that does not match gives an empty type and the whole first line as the text.
+- A line after the first line that starts with `BREAKING CHANGE:` or `BREAKING-CHANGE:` is a breaking footer. The first such line counts. If its text is not empty, it replaces the text of the message.
+- A message is breaking when it has the `!` or a breaking footer.
+
+The cut-off:
+
+- Commits up to and including a fixed commit named in the script (`$CutOffSha`) are listed under Development.
+
+### Level
+
+- `changelog.ps1 level` prints one of `major`, `minor`, `patch` or `none` on standard output. It takes `-Base` and `-PrMessages`.
+- A commit of type `release` and a commit up to the cut-off are skipped.
+- Breaking messages count for any branch type.
+- The result is the first of these tests that holds:
+  1. A message is breaking and the major field of the last tag is 1 or more: `major`.
+  2. A message is breaking, or a commit has the type `feat` or `stage`: `minor`.
+  3. A commit has the type `fix`: `patch`.
+  4. Otherwise: `none`.
+- With a last tag whose major field is 0, the first test does not hold, so a breaking message gives `minor`.
+
+### Next version
+
+- `changelog.ps1 next-version` takes exactly one of `-Level` and `-Label`. Otherwise the run ends with exit code 2 and the usage text `give exactly one of -Level and -Label`.
+- `-Level` is `major`, `minor`, `patch` or `none`. `-Label` is `bump:major`, `bump:minor` or `bump:patch`. Another `-Level` ends with exit code 2 and the usage text `-Level must be major, minor, patch or none`. Another `-Label` ends with exit code 2 and the usage text `-Label must be bump:major, bump:minor or bump:patch`.
+- With `-Label`, the level is the part of the label after `bump:`.
+- The next version is computed from the last tag `X.Y.Z`:
+  - `major`: `X+1.0.0`.
+  - `minor`: `X.Y+1.0`.
+  - `patch`: `X.Y.Z+1`.
+- The level `none` ends with `::error::nothing to release: the level is none`.
+- A field of the result above 65535 ends with `::error::the next version <version> has a field above 65535 (version resource fields are 16-bit)`.
+- The output is `X.Y.Z`, without `v`.
+
+### CHANGELOG section
+
+`changelog.ps1 generate` adds a new release section to the CHANGELOG text and writes the result to a file.
+
+Parameters:
+
+| Parameter | Meaning |
+|---|---|
+| `-Base` | A full commit hash: 40 lowercase hex characters. Another value ends with exit code 2 and the usage text `-Base must be a full 40-character lowercase hex commit hash`. Default: the result of `git rev-parse origin/main`, the tip of `origin/main`. |
+| `-Date` | The date in the heading, as `YYYY-MM-DD`. Default: today, UTC. A value that is not a real date ends with exit code 2 and the usage text `-Date must be a real date as YYYY-MM-DD`. |
+| `-RepoUrl` | `https://github.com/<owner>/<repo>`. Default: taken from the first link definition of the file of the form `[<12 hex characters>]: <url>/commit/<40 hex characters>`. Another value ends with exit code 2 and the usage text `-RepoUrl must be https://github.com/<owner>/<repo>`. |
+| `-ChangelogPath` | The file that is read. Default: `CHANGELOG.md`. |
+| `-Output` | The file that is written. Default: `-ChangelogPath`, so the file is overwritten. |
+| `-SectionOutput` | Optional. A second file that gets the new section alone. |
+| `-PrMessages` | A JSON object from pull request number to the full commit messages, built by the workflow. |
+
+Before step 1, if the file has no such link definition and `-RepoUrl` is not given, the run ends with `::error::no repository URL: the file has no link definition to take it from; pass -RepoUrl`.
+
+Steps, in this order:
+
+1. The script drops the untagged sections. It reads `CHANGELOG.md` as it is at the last tag with `git show <last tag>:CHANGELOG.md`. Every section of the file whose heading `## [<12 hex characters>] - YYYY-MM-DD` has a hash that is not a heading in that version is removed. It is removed from its heading up to the next `## [` heading or link definition, together with its link definition `[<hash>]:`.
+2. If a line of the remaining file starts with `## [<short>]`, where `<short>` is the first 12 characters of `-Base`, the run ends with `::error::the file already has a section for <short>`.
+3. The script reads the range and builds the entries. It writes each warning to standard output as `::warning::<text>`.
+4. If there is no entry under Breaking changes, Added or Fixed, the run ends with `::error::nothing to release since <last tag>: no feat/, stage/ or fix/ change and no breaking marker after the cut-off commit`.
+5. The script builds the section and writes the files.
+
+Entries and warnings:
+
+- The commits are read oldest first. A commit of type `release` gives nothing.
+- A commit up to the cut-off gives one Development entry with its subject text.
+- A commit after the cut-off without a number in the subject gives the warning `the subject "<text>" has no "(#N)"; its commit messages and breaking markers were not read`.
+- Each breaking message gives an entry under Breaking changes.
+- A commit of type `feat`, `stage` or `fix`:
+  - Each message that is not breaking and has the type `feat`, `stage` or `fix` gives an entry with the text of the message. The type `fix` goes under Fixed, the other two under Added.
+  - If there is no such message and no breaking message, the subject text gives an entry instead: under Fixed for `fix`, under Added for the others. The script also gives the warning `"<text>" has no feat, stage, fix or breaking commit message; it is listed by its branch name`.
+- A commit of another type gives one Development entry with its subject text, unless it has a breaking message.
+- For the type `unknown`, the script also gives the warning `the subject "<text>" does not start with a feat/, stage/, fix/, chore/ or docs/ branch prefix; it is listed under Development`.
+- The entry format is `- <text> ([#N](<RepoUrl>/pull/N))`. When the subject has no number, the entry is `- <text>`, without the link.
+
+The section:
+
+- The heading is `## [<short>] - <Date>`.
+- The groups follow in this order: Breaking changes, Added, Fixed, Development. Each is a `### ` heading with a blank line before and after. A group without entries is omitted. The entries of a group keep the order of the commits, oldest first.
+
+The placement in the file:
+
+- The section goes before the first line that starts with `## [`. If there is none, it goes before the first link definition. If there is none either, it goes at the end of the file.
+- A blank line follows the section. A blank line is also added before it when the line before is not blank.
+- The link definition is `[<short>]: <RepoUrl>/commit/<full Base>`. It is placed directly above the first link definition that follows the new section. If there is none, it is appended at the end of the file, after a blank line.
+
+The output files:
+
+- The result goes to `-Output`, or over `-ChangelogPath` when `-Output` is not given.
+- `-SectionOutput` gets the section alone: its lines, each ended with a line feed.
+- Both files are UTF-8 without a byte order mark.
+- When a check fails, nothing is written.
+
+### Version preview line
+
+The first line of the pull request description built by `changelog.ps1 pr-body` is:
+
+```
+Version preview: <!-- version -->vX.Y.Z (vA.B.C + level)<!-- /version -->
+```
+
+- `vX.Y.Z` is the next version. `vA.B.C` is the last tag. `level` is `major`, `minor` or `patch`.
+- With `-Label`, the next version and `level` come from the level of the label. Without it, they come from the computed level.
+- `-Label` must be `bump:major`, `bump:minor` or `bump:patch`. Another value ends with exit code 2 and the usage text `-Label must be bump:major, bump:minor or bump:patch`.
+- `release-pr.yml` always passes `-Label "bump:$LEVEL"` to `pr-body`.
+
+`changelog.ps1 body-version` updates this line in an existing description:
+
+- The parameters are `-Body` (the description file that is read), `-Label` and `-Output` (the file that is written). All three are required.
+- The description must have exactly one line that holds a version marker. That line must hold `<!-- version -->` once and `<!-- /version -->` once, in this order.
+- The command replaces the text between the two markers with the preview built from the label and the last tag.
+- All other lines stay as they are, so the ticks in the checklist stay.
+- The output is UTF-8 without a byte order mark.
+- `-Output` may be the same file as `-Body`: the command reads `-Body` completely before it writes.
+- If the description does not match, the run ends with `::error::<Body> must hold exactly one line with both version markers in order; found <count> line(s) with a marker`. `<Body>` is the value of `-Body`; `<count>` is the number of lines that hold either marker.
+
+### Errors in general
+
+- A failure ends with `::error::<message>` on standard output and exit code 1.
+- An invalid argument ends with exit code 2. The script writes a message and a usage line to standard error.
+- A JSON input file that cannot be read, or that has the wrong shape, ends with an `::error::` that names the file, and exit code 1.
+- A failing `git` command ends with an `::error::` and exit code 1.
+
+## Recognising a release commit (`changelog.ps1` and `fetch-pr-releases.sh`)
+
+In the messages of `changelog.ps1` quoted in this section, `<...>` stands for a value at run time. In the messages and commands of `fetch-pr-releases.sh` quoted in this section, a shell variable (`$n`, `$code`, `$head_sha` or `$GITHUB_REPOSITORY`) stands for its value at run time, and `$(tr '\r\n' '  ' < "$errfile")` stands for the content of the script's error file, in which each carriage return and line feed is turned into a space.
+
+This section describes how `changelog.ps1` decides whether a commit is a release commit. The subject of the commit and the pull request data decide this: the pull request whose number is in the subject must be merged as that commit, into `main`, from `release/next` of the same repository.
+
+The callers:
+
+- Two steps of the job `build` of `release-pr.yml`: "Fetch the pull request data of the release commits" and "Wait for the tag of a merged release commit".
+- The job `classify` of `tag-release.yml`.
+
+The job `build` of `release-pr.yml` and the job `classify` of `tag-release.yml` each set `GH_TOKEN` to `github.token`.
+
+### Release subject and candidates
+
+- A release subject is a subject that matches `^release/next \(#([1-9][0-9]{0,8})\)$`: the text `release/next`, a space and the number `N` in parentheses after `#`. `N` has one to nine digits and no leading zero. This pattern is separate from the type `release`, which is the branch prefix `release/` at the start of the subject text.
+- The candidates are the commits of the range whose subject is a release subject. The range is `git log --first-parent <last tag>..<Base>`, where `-Base` is a full commit hash of 40 lowercase hex characters. The candidates are in the order of the output of `git log --first-parent --format=%H%x09%s <last tag>..<Base>`, which `git log` gives in reverse chronological order by default, newest first.
+- `changelog.ps1 release-prs` prints the number of every candidate on standard output, one per line and once each, in the order of the candidates. It takes `-Base`.
+- The end of the range is `-Base` for `release-prs`. Without `-Base`, and always for `pending-cut`, it is the result of `git rev-parse origin/main`, the tip of `origin/main`. If that result is not a full commit hash, the run ends with this error and exit code 1:
+
+  ```
+  ::error::git rev-parse origin/main did not print a full commit hash: <output>
+  ```
+
+### Pull request data file
+
+`-PrReleases` of `pending-cut` and `release-commit` names a JSON file. The file is an object from the pull request number, as a string key, to the data of that pull request.
+
+- An empty or omitted `-PrReleases` is an empty table.
+- Every entry of the file is checked, whether a command uses it or not.
+- An entry is an object with a boolean `found`.
+- An entry with `found` true has these keys:
+
+| Key | Type | Taken from the API field |
+|---|---|---|
+| `found` | boolean | set by `fetch-pr-releases.sh`: false on `HTTP 404`, otherwise true |
+| `merged` | boolean | `merged` of the pull request |
+| `mergeCommitSha` | string or null | `merge_commit_sha` of the pull request |
+| `baseRef` | string | `base.ref` of the pull request |
+| `baseRepo` | string | `base.repo.full_name` of the pull request |
+| `headRef` | string | `head.ref` of the pull request |
+| `headRepo` | string or null | `head.repo.full_name` of the pull request |
+| `headSha` | string | `head.sha` of the pull request |
+| `headParents` | array of strings, or null | the parents of the head commit |
+| `headTree` | string or null | the tree of the head commit |
+
+- The run ends with an `::error::` that names the file as given in `-PrReleases` (and, for an entry, its key and the field), and exit code 1: when the file cannot be read, is not valid UTF-8 or is not valid JSON; when it is not a JSON object; when an entry is not an object with a boolean `found`; and, for an entry with `found` true, when `mergeCommitSha`, `headRepo`, `headParents` or `headTree` is missing, when `baseRef`, `baseRepo`, `headRef` or `headSha` is missing or not a string, when `mergeCommitSha`, `headRepo` or `headTree` is neither a string nor null, when `merged` is missing or not a boolean, when `mergeCommitSha` is null and `merged` is true, or when `headParents` is neither an array of strings nor null.
+
+### fetch-pr-releases.sh
+
+`scripts/ci/fetch-pr-releases.sh <output-file>` writes the pull request data file. It reads the pull request numbers from standard input, one per line. It uses the environment variables `RUNNER_TEMP` and `GITHUB_REPOSITORY`, and the commands `gh` and `jq`.
+
+- Without exactly one argument, the script writes `usage: fetch-pr-releases.sh <output-file>` to standard error and ends with exit code 2.
+- The script first writes `{}` to the output file. The file stays `{}` when the input has no number.
+- It skips empty lines.
+- For each number `$n`, it runs `gh api "repos/$GITHUB_REPOSITORY/pulls/$n"`.
+  - If the command fails and its error output holds the text `HTTP 404`, the entry is `{"found":false}`.
+  - If the command fails otherwise, the script ends with exit code 1 and this error:
+
+    ```
+    ::error::could not read pull request #$n (exit $code): $(tr '\r\n' '  ' < "$errfile")
+    ```
+
+  - If the command succeeds and `.head.sha` of the result is not 40 lowercase hexadecimal characters, the script ends with exit code 1 and this error:
+
+    ```
+    ::error::unexpected head commit of pull request #$n: $head_sha
+    ```
+
+  - Otherwise the script runs `gh api "repos/$GITHUB_REPOSITORY/commits/$head_sha"`.
+    - If it succeeds, the entry is `found` true with the keys `merged`, `mergeCommitSha`, `baseRef`, `baseRepo`, `headRef`, `headRepo` and `headSha` taken from the pull request, and `headParents` and `headTree` taken from the parents and the tree of that commit.
+    - If it fails and its error output holds `HTTP 404` or `HTTP 422`, the entry is `found` true with the keys `merged`, `mergeCommitSha`, `baseRef`, `baseRepo`, `headRef`, `headRepo` and `headSha` taken from the pull request, and `headParents` and `headTree` null.
+    - If it fails otherwise, the script ends with exit code 1 and this error:
+
+      ```
+      ::error::could not read the head commit $head_sha of pull request #$n (exit $code): $(tr '\r\n' '  ' < "$errfile")
+      ```
+
+- The entry is added to the file under the key `$n`.
+
+### Valid release commit
+
+A candidate is a valid release commit when its pull request data passes the checks below. The data is the entry under the number of the candidate.
+
+| # | Check | `pending-cut` when it fails | `release-commit` when it fails |
+|---|---|---|---|
+| 1 | `found` is true | skips the candidate | error |
+| 2 | `merged` is the boolean true | skips the candidate | error |
+| 3 | `mergeCommitSha` equals the hash of the commit (for `release-commit`, the value of `-Sha`) | skips the candidate | error |
+| 4 | `baseRef` is `main` | skips the candidate | error |
+| 5 | `headRef` is `release/next` | skips the candidate | answers `not-release` |
+| 6 | `headRepo` is not null and equals `baseRepo` | skips the candidate | answers `not-release` |
+
+- The checks run in the order of the table. The first check that fails decides.
+- All comparisons are case-sensitive.
+- For the rows 1 to 4, `release-commit` prints this error and ends with exit code 1. `<reason>` is the text of the failed row: `the pull request was not found`, `the pull request is not merged`, `the pull request was merged as another commit` or `the base of the pull request is not main`.
+
+  ```
+  ::error::<first 12 characters of the hash> is a release/next (#<N>) commit, but <reason>
+  ```
+
+### Faithful release commit
+
+A valid release commit is faithful when all of these hold:
+
+- `git log -1 --format=%P%x09%T <sha>` gives exactly one parent.
+- `headParents` and `headTree` of the data are not null.
+- `headParents` has exactly one entry, and it equals that parent.
+- `headTree` equals the tree of the commit.
+
+`headParents` and `headTree` are the parents and the tree of the head commit of the pull request. A valid release commit that does not meet all of these is not faithful.
+
+### pending-cut
+
+`changelog.ps1 pending-cut` takes `-PrReleases`.
+
+- The range is `<last tag>..<tip>`, where `<tip>` is the tip of `origin/main`.
+- The command reads the candidates first, then the data file. The file is read and checked even when there is no candidate.
+- It walks the candidates newest first.
+  - A candidate whose number has no key in the file ends the run with exit code 1 and this error:
+
+    ```
+    ::error::no pull request data for #<N>, the release commit <first 12 characters of the hash>
+    ```
+
+  - A candidate that is not a valid release commit is skipped.
+  - The walk ends at the first valid release commit, and the answer is decided by it.
+- The answer is printed on standard output:
+
+| Answer | Condition |
+|---|---|
+| `proceed` | no candidate is a valid release commit |
+| `waiting` | the first valid release commit is faithful and is the tip of `origin/main` |
+| `abandoned` | the first valid release commit is not faithful, or it is faithful and is not the tip of `origin/main` |
+
+- With `abandoned`, the command also writes a line to standard error. When the commit is not faithful:
+
+  ```
+  release commit <first 12 characters of the hash> (#<N>) abandoned: its parent or tree differs from the head of the pull request
+  ```
+
+  When it is faithful and is not the tip:
+
+  ```
+  release commit <first 12 characters of the hash> (#<N>) abandoned: it has no release tag and is not the origin/main tip
+  ```
+
+- The exit code is 0 for all three answers. A failure ends with exit code 1.
+- The step that runs the command is "Wait for the tag of a merged release commit" of the job `build` of `release-pr.yml`.
+
+### release-commit
+
+`changelog.ps1 release-commit` takes `-Sha` and `-PrReleases`. `-Sha` defaults to `$GITHUB_SHA`. If `-Sha` is empty, the run ends with exit code 2 and the usage text `-Sha is required (GITHUB_SHA is not set)`.
+
+For `release-prs` and `pending-cut`, a candidate is a commit of the range with a release subject, a subject that matches `^release/next \(#([1-9][0-9]{0,8})\)$`. `release-commit` judges the one commit that `-Sha` names.
+
+The outcome, in the order of the checks:
+
+| Condition | Standard output | Exit code |
+|---|---|---|
+| The subject of the commit is not a release subject. The command answers before it reads the data file. | `not-release` | 0 |
+| The data file cannot be read, is not valid UTF-8 or JSON, is not a JSON object, has an entry that is not an object with a boolean `found`, or has an entry with `found` true that misses a key, holds a key of the wrong type, or has `mergeCommitSha` null while `merged` is true. | an `::error::` that names the file | 1 |
+| The file has no key for the number in the subject. | `::error::no pull request data for #<N>, the subject of <first 12 characters of the hash>` | 1 |
+| `found` is not true, `merged` is not the boolean true, `mergeCommitSha` differs from the value of `-Sha`, or `baseRef` is not `main`. | `::error::<first 12 characters of the hash> is a release/next (#<N>) commit, but <reason>`, where `<reason>` is `the pull request was not found`, `the pull request is not merged`, `the pull request was merged as another commit` or `the base of the pull request is not main` | 1 |
+| `headRef` is not `release/next`, or `headRepo` is null or differs from `baseRepo`. | `not-release` | 0 |
+| The commit is valid and not faithful. | `not-faithful` | 0 |
+| The commit is faithful and `git tag --list` lists no tag that matches `^v([0-9]+)\.([0-9]+)\.([0-9]+)$` and has every field free of a leading zero and at most 65535. | `::error::no tag of the form vX.Y.Z found; fetch the tags (a shallow checkout has none) or tag the first release by hand` | 1 |
+| The commit is faithful and the list of `git tag --points-at <sha>` includes the last tag. | `tagged` | 0 |
+| The commit is faithful and the list does not include the last tag. | `tag` | 0 |
+
+- `<sha>` is the value of `-Sha`. The last tag is the highest tag that matches `^v([0-9]+)\.([0-9]+)\.([0-9]+)$`, compared by number; a tag with a leading zero in a field or a field above 65535 is ignored.
+- A failing `git` command ends with an `::error::` and exit code 1.
+- The job `classify` of `tag-release.yml` uses the answers.
+
+## Release PR (`release-pr.yml`)
+
+### Jobs
+
+- The workflow has two jobs, `build` and `labels`.
+- The job `build` runs only if `github.event_name != 'pull_request'`. It runs on `ubuntu-latest`.
+- The permissions of the job `build` are `contents: write`, `pull-requests: write` and `actions: write`.
+- The concurrency group of the job `build` is `release-pr-build`, with `cancel-in-progress: false`.
+- The job `build` sets these environment variables:
+  - `GH_TOKEN` is `github.token`.
+  - `GH_REPO` is `github.repository`.
+  - `REPO_OWNER` is `github.repository_owner`.
+  - `EVENT_NAME` is `github.event_name`.
+- The job `build` has fifteen steps, in this order: "Checkout main (full history and tags)", "Fetch the pull request data of the release commits", "Wait for the tag of a merged release commit", "Fetch the pull request data", "Compute the release level", "Look up the open release pull requests", "Close the release PR and delete release/next when nothing is left to release", "Stop when several release pull requests are open", "Generate the CHANGELOG section", "Generate the pull request body", "Build the release/next commit", "Push release/next", "Open or update the release pull request", "Keep exactly one bump label" and "Dispatch CI and the bump label check on release/next".
+
+### Job `build`
+
+In the messages quoted in this section, a shell variable (for example `$n`, `$COUNT` or `$code`) stands for its value at run time. `$(tr '\r\n' '  ' < "$errfile")` stands for the content of the step's error file, and `$(printf '%s' "$out" | tr '\r\n' '  ')` for `$out`; in both, each carriage return and line feed is turned into a space.
+
+All steps except the first run with `shell: bash`.
+
+#### Step "Checkout main (full history and tags)"
+
+- The step uses `actions/checkout`, pinned by SHA with the label `# v7.0.1`.
+- It checks out `main` with `fetch-depth: 0` and `fetch-tags: true`.
+
+#### Step "Fetch the pull request data of the release commits"
+
+- The step runs `changelog.ps1 release-prs` and passes its output to `scripts/ci/fetch-pr-releases.sh`, which writes `$RUNNER_TEMP/pr-releases.json`.
+- If `release-prs` fails, the step prints its output and ends with exit code 1.
+
+#### Step "Wait for the tag of a merged release commit"
+
+- The step has the id `guard`.
+- The step runs `changelog.ps1 pending-cut -PrReleases $RUNNER_TEMP/pr-releases.json`. If the command fails, the step prints its output and ends with exit code 1.
+- For the answer `proceed` it writes `proceed=true` to `$GITHUB_OUTPUT`.
+- For the answer `abandoned` it writes `proceed=true`, a notice and a summary line.
+- For the answer `waiting` it writes `proceed=false`, a notice and a summary line. The step then ends with exit code 0.
+- Any other answer ends with the error below and exit code 1.
+- The notice for `abandoned`:
+
+  ```
+  ::notice::an untagged release commit was abandoned; a new release pull request covers the full range since the last tag
+  ```
+
+- The summary line for `abandoned`:
+
+  ```
+  A release commit since the last tag is abandoned (not faithful, or untagged and no longer the main tip). It is never tagged; the release pull request is rebuilt for the full range.
+  ```
+
+- The notice for `waiting`:
+
+  ```
+  ::notice::waiting for tag: the release commit is the main tip and has no tag yet; re-run the failed tag-release.yml run if it failed
+  ```
+
+- The summary line for `waiting`:
+
+  ```
+  Waiting for tag: the merged release commit is the main tip and has no tag yet. Nothing was changed. If the tagging run failed, re-run it.
+  ```
+
+- The error for any other answer, where `$out` is the answer:
+
+  ```
+  ::error::unexpected answer from pending-cut: $(printf '%s' "$out" | tr '\r\n' '  ')
+  ```
+
+- The answers: `proceed` when no candidate is a valid release commit; `waiting` when the first valid release commit, newest first, is faithful and is the tip of `origin/main`; `abandoned` when the first valid release commit is not faithful, or is faithful and is not the tip of `origin/main`. A commit is faithful when its only parent and its tree equal the only parent and the tree of the head commit of its pull request.
+- The steps "Fetch the pull request data", "Compute the release level" and "Look up the open release pull requests" run only if `steps.guard.outputs.proceed == 'true'`. Every later step tests the output `release` of "Compute the release level" or the output `skip` of "Build the release/next commit". When the guard writes `proceed=false`, no later step runs.
+
+#### Step "Fetch the pull request data"
+
+- The step has the id `fetch` and runs only if `steps.guard.outputs.proceed == 'true'`.
+- It reads the tip of `origin/main` with `git rev-parse origin/main`, called `BASE` in the later steps, and writes it as the output `base`.
+- It runs `changelog.ps1 prs -Base <base>`. If the command fails, the step prints its output and ends with exit code 1.
+- For each number printed by `changelog.ps1 prs -Base <base>`, the step reads the pull request's commits and changed files with `gh api` and adds their commit messages and file names to `$RUNNER_TEMP/pr-messages.json` and `$RUNNER_TEMP/pr-files.json`.
+- If reading the commits fails, the step ends with exit code 1 and this error:
+
+  ```
+  ::error::could not read the commits of pull request #$n (exit $code)
+  ```
+
+- If reading the changed files fails, the step ends with exit code 1 and this error:
+
+  ```
+  ::error::could not read the changed files of pull request #$n (exit $code)
+  ```
+
+#### Step "Compute the release level"
+
+- The step has the id `level` and runs only if `steps.guard.outputs.proceed == 'true'`. It sets `BASE` to `steps.fetch.outputs.base`.
+- It runs `changelog.ps1 level -Base "$BASE" -PrMessages "$RUNNER_TEMP/pr-messages.json"`. If the command fails, the step prints its output and ends with exit code 1.
+- For `major`, `minor` or `patch` it sets `release=true`. For `none` it sets `release=false`.
+- Any other answer ends with exit code 1 and this error:
+
+  ```
+  ::error::unexpected level from changelog.ps1: $(printf '%s' "$out" | tr '\r\n' '  ')
+  ```
+
+- The step writes the outputs `level` (the answer) and `release`.
+
+#### Step "Look up the open release pull requests"
+
+- The step has the id `lookup` and runs only if `steps.guard.outputs.proceed == 'true'`.
+- It runs `gh api "repos/${GH_REPO}/pulls?state=open&base=main&head=${REPO_OWNER}:release/next" --jq '.[].number'` and keeps the standard error in `$RUNNER_TEMP/lookup.err`.
+- If the command fails, the step ends with exit code 1 and this error:
+
+  ```
+  ::error::could not list the pull requests of release/next (exit $code): $(tr '\r\n' '  ' < "$errfile")
+  ```
+
+- If a line of the output is not a number, the step ends with exit code 1 and this error:
+
+  ```
+  ::error::unexpected output from the pull request lookup: $n
+  ```
+
+- The step writes the numbers, one per line, to `$RUNNER_TEMP/release-prs.txt`.
+- The outputs are `count`, the number of lines, and `number`, the last number (empty if there is none).
+
+#### Step "Close the release PR and delete release/next when nothing is left to release"
+
+- The step runs only if `steps.level.outputs.release == 'false'`.
+- For each number in `release-prs.txt` it runs `gh pr close "$n" --comment "Closed by the release bot: nothing on main is left to release."`.
+- It then runs `git ls-remote --exit-code origin refs/heads/release/next`.
+  - With exit code 0 it runs `git push origin --delete release/next`.
+  - With exit code 2 it deletes nothing.
+  - With any other exit code the step ends with exit code 1 and this error:
+
+    ```
+    ::error::could not look up release/next on the remote (exit $code)
+    ```
+
+- The summary line, where `$closed` is the number of closed pull requests and `$deleted` is `yes` or `no`:
+
+  ```
+  Nothing to release. Release pull requests closed: $closed. Branch release/next deleted: $deleted.
+  ```
+
+- The close step runs only when the level is none (`release == 'false'`); the steps from "Stop when several release pull requests are open" to "Generate the pull request body" and "Build the release/next commit" run only when it is major, minor or patch (`release == 'true'`).
+
+#### Step "Stop when several release pull requests are open"
+
+- The step runs only if `steps.level.outputs.release == 'true' && steps.lookup.outputs.count >= 2`. It sets `COUNT` to `steps.lookup.outputs.count`.
+- It prints this error and ends with exit code 1:
+
+  ```
+  ::error::release/next has $COUNT open pull requests; close the extra ones by hand. Nothing was pushed or changed.
+  ```
+
+#### Step "Generate the CHANGELOG section"
+
+- The step runs only if `steps.level.outputs.release == 'true'`. It sets `BASE` to `steps.fetch.outputs.base`.
+- It runs `changelog.ps1 generate -Base "$BASE" -PrMessages "$RUNNER_TEMP/pr-messages.json" -Output "$RUNNER_TEMP/CHANGELOG.generated.md" -SectionOutput "$RUNNER_TEMP/section.md"`.
+- It prints the output of the command. If the command fails, the step ends with exit code 1.
+
+#### Step "Generate the pull request body"
+
+- The step runs only if `steps.level.outputs.release == 'true'`. It sets `BASE` to `steps.fetch.outputs.base` and `LEVEL` to `steps.level.outputs.level`.
+- It runs `changelog.ps1 pr-body -Base "$BASE" -PrMessages "$RUNNER_TEMP/pr-messages.json" -PrFiles "$RUNNER_TEMP/pr-files.json" -Label "bump:$LEVEL" -ChangelogPath "$RUNNER_TEMP/CHANGELOG.generated.md" -Output "$RUNNER_TEMP/pr-body.md"`.
+- It prints the output of the command. If the command fails, the step ends with exit code 1.
+
+#### Step "Build the release/next commit"
+
+- The step has the id `build` and runs only if `steps.level.outputs.release == 'true'`. It sets `BASE` to `steps.fetch.outputs.base` and `COUNT` to `steps.lookup.outputs.count`.
+- The step switches to `release/next` at `BASE` (`git switch -C`), copies the generated file over `CHANGELOG.md`, runs `git add CHANGELOG.md` and commits as `github-actions[bot]`.
+- The commit message is:
+
+  ```
+  release: add the CHANGELOG section for ${BASE:0:12}
+  ```
+
+  `${BASE:0:12}` stands for the first 12 characters of `BASE`.
+- The step reads the tree of the new commit and the commit of `refs/remotes/origin/release/next` with `git rev-parse`. It writes the commit of that ref, empty if the ref does not exist, as the output `remote`.
+- The step sets `skip=true` only when `origin/release/next` exists, its parent is `BASE`, its tree equals the new commit's tree, the event is `push`, and exactly one release pull request is open; otherwise `skip=false`. It writes `skip` as an output.
+- When `skip` is `true`, the step appends this summary line:
+
+  ```
+  Skipped: release/next already holds the same CHANGELOG commit on the same base and has an open pull request. Nothing was pushed, and the pull request body, checklist and label are left as they are.
+  ```
+
+#### Step "Push release/next"
+
+- The step runs only if `steps.build.outputs.skip == 'false'`.
+- `EXPECTED` is the output `remote` of the step `build`, the commit of `refs/remotes/origin/release/next`, empty when that ref does not exist; the step runs `git push --force-with-lease="release/next:${EXPECTED}" origin release/next`.
+
+#### Step "Open or update the release pull request"
+
+- The step has the id `pr` and runs only if `steps.build.outputs.skip == 'false'`. It sets `LEVEL` to `steps.level.outputs.level`, `COUNT` to `steps.lookup.outputs.count` and `NUMBER` to `steps.lookup.outputs.number`. The body file is `$RUNNER_TEMP/pr-body.md`.
+- With `COUNT` equal to 0 the step creates the pull request with `gh pr create --base main --head release/next --title 'release/next' --body-file "$body"`.
+  - If the command fails, the step ends with exit code 1 and this error, where `$out` is the output of the command:
+
+    ```
+    ::error::could not open the release pull request (exit $code): $(printf '%s' "$out" | tr '\r\n' '  ') $(tr '\r\n' '  ' < "$errfile")
+    ```
+
+  - The step takes the last line of the command's output as the URL, and the part after its last `/` as the number.
+  - If the printed URL does not end in a number, the step looks the new pull request up with `gh api "repos/${GH_REPO}/pulls?state=open&base=main&head=${REPO_OWNER}:release/next" --jq '.[].number'` and takes the first number. If that command fails, the step ends with exit code 1 and this error:
+
+    ```
+    ::error::could not find the new release pull request (exit $code): $(tr '\r\n' '  ' < "$errfile")
+    ```
+
+  - If a line of its output is not a number, the step ends with exit code 1 and this error:
+
+    ```
+    ::error::unexpected output from the pull request lookup: $n
+    ```
+
+  - If no number is found, the step ends with exit code 1 and this error:
+
+    ```
+    ::error::could not determine the number of the new release pull request
+    ```
+
+  - The result word is `opened (#N)`.
+- Otherwise the step uses `NUMBER` and runs `gh pr view "$number" --json state --jq .state`.
+  - If the command fails, the step ends with exit code 1 and this error:
+
+    ```
+    ::error::could not read the state of release pull request #$number (exit $code): $(tr '\r\n' '  ' < "$errfile")
+    ```
+
+  - If the state is not `OPEN`, the step ends with exit code 1 and this error:
+
+    ```
+    ::error::release pull request #$number is no longer open (state: $state); the next push to main or a manual dispatch opens a new one
+    ```
+
+  - If the state is `OPEN`, the step runs `gh pr edit "$number" --body-file "$body"`. The result word is `updated (#N)`.
+- The step writes the number as the output `number`. The summary line, where `$what` is the result word:
+
+  ```
+  Level $LEVEL. Release pull request $what.
+  ```
+
+#### Step "Keep exactly one bump label"
+
+- The step runs only if `steps.build.outputs.skip == 'false'`. It sets `LEVEL` to `steps.level.outputs.level` and `NUMBER` to `steps.pr.outputs.number`.
+- The computed label is `bump:$LEVEL`. The step reads the labels of the pull request with `gh pr view "$number" --json labels --jq '.labels[].name'` and counts those whose name starts with `bump:`.
+- With no such label, the step runs `gh pr edit "$number" --add-label "$computed"`.
+- With one such label that differs from the computed one, the step runs `gh pr edit "$number" --add-label "$computed" --remove-label "$existing"` and then `gh pr comment "$number"` with this body, where `$existing` is the old label and `$computed` the new one:
+
+  ```
+  The release bot replaced the label $existing with $computed, the level computed from the commits on main.
+  ```
+
+- With one such label equal to the computed one, the step changes nothing.
+- With two or more such labels, the step changes nothing, prints this warning and ends with exit code 0.
+
+  ```
+  ::warning::pull request #$number has $count bump:* labels; none was changed, and the bump label check stays red until exactly one is left
+  ```
+
+#### Step "Dispatch CI and the bump label check on release/next"
+
+- The step runs only if `steps.build.outputs.skip == 'false'`.
+- The step dispatches `ci.yml`, then `bump-label.yml`, on `release/next`; a failed dispatch ends the step with the error below, so a failed `ci.yml` dispatch also means no `bump-label.yml` dispatch.
+- The error, where `$workflow` is the workflow file and `$out` is the output of the command:
+
+  ```
+  ::error::could not dispatch $workflow on release/next (exit $code): $(printf '%s' "$out" | tr '\r\n' '  ') $(tr '\r\n' '  ' < "$errfile")
+  ```
+
+- After both dispatches the step appends this summary line:
+
+  ```
+  Dispatched ci.yml and bump-label.yml on release/next.
+  ```
+
+### The pull request description
+
+In the texts quoted in this section, `<...>` stands for a value at run time.
+
+`changelog.ps1 pr-body` writes the description to the `-Output` file. The step "Generate the pull request body" passes `$RUNNER_TEMP/pr-body.md`, and the step "Open or update the release pull request" passes that file as `--body-file`.
+
+The file has these parts, in this order:
+
+1. The version preview line `Version preview: <!-- version -->vX.Y.Z (vA.B.C + level)<!-- /version -->`, where `vX.Y.Z` is the next version, `vA.B.C` is the last tag and `level` is `major`, `minor` or `patch`, then a blank line.
+2. The caution block, only when Breaking changes has entries. It is written as below, with one `> ` line for each breaking entry (an entry starts with `- `), then a blank line.
+
+   ```
+   > [!CAUTION]
+   > **Breaking change.** This release contains:
+   >
+   > <entry>
+   ```
+
+3. The release notes. The heading and the sentence are:
+
+   ```
+   ## Release notes
+
+   Development entries stay in CHANGELOG.md and are left out of the GitHub release notes.
+   ```
+
+   The groups follow in this order: Breaking changes, Added, Fixed. Each group is a blank line, the line `### <name>`, a blank line and its entries. A blank line follows the groups. At least one of the three groups is always present. Each breaking entry appears twice: in the caution block and under `### Breaking changes`.
+4. The warnings, only when there is at least one warning. The format is:
+
+   ```
+   ## Warnings
+
+   - <text>
+   ```
+
+   with one `- <text>` line for each warning, then a blank line. The warnings come in this order:
+
+   - First the warnings of the generator, for the commits after the cut-off that are not of the type `release`, oldest first. `<subject>` is the subject text of the commit, without the trailing ` (#N)`. For one commit, they come in this order:
+     - For a subject without ` (#N)`: `the subject "<subject>" has no "(#N)"; its commit messages and breaking markers were not read`
+     - For a commit of the type `feat`, `stage` or `fix` that has no breaking message and no message of the type `feat`, `stage` or `fix`: `"<subject>" has no feat, stage, fix or breaking commit message; it is listed by its branch name`
+     - For a subject of the type `unknown`: `the subject "<subject>" does not start with a feat/, stage/, fix/, chore/ or docs/ branch prefix; it is listed under Development`
+   - Then one warning for each commit after the cut-off, oldest first, whose subject has the type `fix` and a number (` (#N)`), when the changed files of that pull request in `-PrFiles` include `src/module/exports.cpp`. The log line of that warning is:
+
+     ```
+     ::warning::the fix/ pull request #<number> changed src/module/exports.cpp; confirm that no export table row was renamed, reordered or removed
+     ```
+
+5. The review part:
+
+   ```
+   ## Review
+
+   The release bot maintains this pull request: commits pushed to `release/next` by hand are overwritten the next time it rebuilds the branch, and the checklist below is reset on every rebuild. Squash-merging the pull request releases the version.
+
+   - [ ] The release notes above read correctly for DLL and CAPL users
+   - [ ] The `bump:*` label matches the intended version (the preview is the last tag plus the label's level)
+   - [ ] The breaking changes in the caution block above are intended
+   ```
+
+   The third item is written only when Breaking changes has entries.
+
+Other facts:
+
+- The links of the entries use `-RepoUrl`. Without it, the URL is taken from the `-ChangelogPath` file: from the first link definition of the form `[<12 hex characters>]: <url>/commit/<40 hex characters>`. If there is none, the run ends with `::error::no repository URL: the file has no link definition to take it from; pass -RepoUrl`. A `-RepoUrl` of another form ends with exit code 2 and the usage text `-RepoUrl must be https://github.com/<owner>/<repo>`.
+- The lines are joined with a line feed, and a line feed follows the last line. The file is UTF-8 without a byte order mark.
+- The file is written only after all checks have passed. If there is no entry under Breaking changes, Added or Fixed, the run ends with `::error::nothing to release since <last tag>: no feat/, stage/ or fix/ change and no breaking marker after the cut-off commit`.
+- The script writes each warning to standard output as `::warning::<text>`. It does this before the check for an empty release, so the warnings are printed also when the run ends with that error.
+
+### Job `labels`
+
+In the messages quoted in this section, a shell variable (for example `$PR_NUMBER`, `$count` or `$code`) stands for its value at run time. `$(tr '\r\n' '  ' < "$errfile")` stands for the content of the step's error file, and `$(printf '%s' "$out" | tr '\r\n' '  ')` for `$out`; in both, each carriage return and line feed is turned into a space.
+
+All steps except the first run with `shell: bash`.
+
+- The job has the id `labels` and runs on `ubuntu-latest`.
+- It runs only if all four conditions hold: the event is `pull_request`; `github.head_ref` is `release/next`; the full name of the head repository equals `github.repository`; the name of the label of the event starts with `bump:`.
+- The permissions are `contents: read` and `pull-requests: write`.
+- The concurrency group is `release-pr-labels`, with `cancel-in-progress: false`.
+- The job sets these environment variables:
+  - `GH_TOKEN` is `github.token`.
+  - `GH_REPO` is `github.repository`.
+  - `PR_NUMBER` is `github.event.pull_request.number`.
+- The job has four steps, in this order: "Checkout main (full history and tags)", "Read the bump label and the body of the pull request", "Rewrite the version preview line of the body" and "Update the pull request body".
+
+#### Step "Checkout main (full history and tags)"
+
+- The step uses `actions/checkout`, pinned by SHA with the label `# v7.0.1`.
+- It checks out `main` with `fetch-depth: 0`, `fetch-tags: true` and `persist-credentials: false`.
+
+#### Step "Read the bump label and the body of the pull request"
+
+- The step has the id `label`.
+- If `PR_NUMBER` does not match `^[0-9]+$`, the step ends with exit code 1 and this error:
+
+  ```
+  ::error::unexpected pull request number: $PR_NUMBER
+  ```
+
+- It runs `gh api "repos/${GH_REPO}/pulls/${PR_NUMBER}"` and keeps the standard error in `$RUNNER_TEMP/pr.err`. If the command fails, the step ends with exit code 1 and this error:
+
+  ```
+  ::error::could not read pull request #$PR_NUMBER (exit $code): $(tr '\r\n' '  ' < "$errfile")
+  ```
+
+- It saves the response in `$RUNNER_TEMP/pr.json`.
+- It runs `jq -j '.body // ""'` on the response and writes the result to `$RUNNER_TEMP/body.md`.
+- It counts the labels of the response whose name starts with `bump:`, read with `jq -r '.labels[].name'`.
+- If the count is not 1, the step prints this warning:
+
+  ```
+  ::warning::pull request #$PR_NUMBER has $count bump:* labels; the bump label check stays red until exactly one is left; the body was not changed
+  ```
+
+- If the count is 1 and the label is not exactly `bump:major`, `bump:minor` or `bump:patch`, the step prints this warning, where `$label` is the label:
+
+  ```
+  ::warning::the label $label is not bump:major, bump:minor or bump:patch; the bump label check stays red until it is replaced; the body was not changed
+  ```
+
+- After either warning the step appends this summary line and sets `label` to empty. The two later steps run only if `steps.label.outputs.label != ''`, so both are skipped.
+
+  ```
+  Pull request #$PR_NUMBER: nothing changed.
+  ```
+
+- The step ends by writing `label=$label` to `$GITHUB_OUTPUT`: the one `bump:*` label when both checks pass, empty after a warning. In both cases the step ends with exit code 0.
+
+#### Step "Rewrite the version preview line of the body"
+
+- The step runs only if `steps.label.outputs.label != ''`. It sets `LABEL` to that output.
+- It runs `pwsh -NoProfile -File scripts/ci/changelog.ps1 body-version -Body "$body" -Label "$LABEL" -Output "$body"`, where `body` is `$RUNNER_TEMP/body.md`. `body-version` replaces the text between the two version markers of the description with the preview built from the label and the last tag; all other lines stay as they are. The description must have exactly one line that holds both markers, in this order; otherwise the command ends with exit code 1 and its standard output is `::error::<Body> must hold exactly one line with both version markers in order; found <count> line(s) with a marker`, where `<Body>` is the value of `-Body` and `<count>` is the number of lines that hold either marker.
+- The script is the one of the checkout of `main` made in the first step, and the last tag comes from the tags of that checkout.
+- If the command fails, the step ends with exit code 1 and this error, where `$out` is the standard output of the command:
+
+  ```
+  ::error::could not rewrite the version preview of pull request #$PR_NUMBER (exit $code): $(printf '%s' "$out" | tr '\r\n' '  ')
+  ```
+
+#### Step "Update the pull request body"
+
+- The step runs only if `steps.label.outputs.label != ''`. It sets `LABEL` to that output.
+- It runs `gh pr edit "$PR_NUMBER" --body-file "$RUNNER_TEMP/body.md"` and keeps the standard error in `$RUNNER_TEMP/edit.err`.
+- If the command fails, the step ends with exit code 1 and this error, where `$out` is the standard output of the command:
+
+  ```
+  ::error::could not update the body of pull request #$PR_NUMBER (exit $code): $(printf '%s' "$out" | tr '\r\n' '  ') $(tr '\r\n' '  ' < "$errfile")
+  ```
+
+- Otherwise the step appends this summary line:
+
+  ```
+  Pull request #$PR_NUMBER: version preview rewritten for label $LABEL.
+  ```
+
+## Tag Release (`tag-release.yml`)
+
+The workflow has the permission `contents: read`. It starts on a `push` to the branch `main`. The job `tag` has the concurrency `group: tag-release` with `cancel-in-progress: false`, and the permissions `contents: write`, `pull-requests: read` and `actions: write`.
+
+In the messages and commands quoted in this section, a shell variable (for example `$out`, `$code`, `$PR_NUMBER` or `$TAG`) stands for its value at run time, and `${GITHUB_SHA:0:12}` and `${tip:0:12}` stand for the first 12 characters of `GITHUB_SHA` and of `tip`. `$(tr '\r\n' '  ' < "$errfile")` stands for the content of the step's error file, and `$(printf '%s' "$out" | tr '\r\n' '  ')` for `$out`; in both, each carriage return and line feed is turned into a space.
+
+All steps except the first of each job run with `shell: bash`.
+
+### Jobs
+
+- The workflow has two jobs, `classify` and `tag`. Both run on `ubuntu-latest`.
+- The job `classify` has three steps, in this order: "Checkout the pushed commit (full history and tags)", "Fetch the pull request data of the pushed commit" and "Classify the pushed commit".
+- The job `tag` has nine steps, in this order: "Checkout the pushed commit (full history and tags)", "Reuse the tag already on the release commit", "Check that main still points at the release commit", "Read the bump label of the release pull request", "Compute the next version", "Create and push the annotated tag", "Find the existing tag of the release commit", "Dispatch the release pull request workflow on main" and "Dispatch the release on the tag".
+
+### Job `classify`
+
+- The permissions are `contents: read` and `pull-requests: read`.
+- The job sets the environment variable `GH_TOKEN` to `github.token`.
+- The job has two outputs: `outcome` is the output `outcome` of the step `classify`, and `number` is the output `number` of the step `subject`.
+
+#### Step "Checkout the pushed commit (full history and tags)"
+
+- The step uses `actions/checkout`, pinned by SHA with the label `# v7.0.1`.
+- It checks out `github.sha` with `fetch-depth: 0`, `fetch-tags: true` and `persist-credentials: false`.
+
+#### Step "Fetch the pull request data of the pushed commit"
+
+- The step has the id `subject`.
+- It reads the subject of the pushed commit with `git log -1 --format=%s "$GITHUB_SHA"`.
+- If the subject is `release/next`, a space, `(#`, one or more digits and `)`, the digits are the pull request number, called `number` below. The step then runs `printf '%s\n' "$number" | bash scripts/ci/fetch-pr-releases.sh "$RUNNER_TEMP/pr-releases.json"`. In the commands and messages of `fetch-pr-releases.sh` quoted in this bullet, `$n` is this number and `$head_sha` is `.head.sha` of the pull request.
+  - The script runs `gh api "repos/$GITHUB_REPOSITORY/pulls/$n"`. When the call fails and its error output holds `HTTP 404`, the script writes the entry `{"found":false}`. When it fails otherwise, the script ends with exit code 1 and `::error::could not read pull request #$n (exit $code): $(tr '\r\n' '  ' < "$errfile")`.
+  - When the call succeeds and `$head_sha` is not 40 lowercase hexadecimal characters, the script ends with exit code 1 and `::error::unexpected head commit of pull request #$n: $head_sha`.
+  - Otherwise the script runs `gh api "repos/$GITHUB_REPOSITORY/commits/$head_sha"`. When it succeeds, the entry has `found` true, the keys `merged`, `mergeCommitSha`, `baseRef`, `baseRepo`, `headRef`, `headRepo` and `headSha` from the pull request, and `headParents` and `headTree` from that commit. When it fails and its error output holds `HTTP 404` or `HTTP 422`, the entry has `found` true, the keys `merged`, `mergeCommitSha`, `baseRef`, `baseRepo`, `headRef`, `headRepo` and `headSha` from the pull request, and `headParents` and `headTree` null. When it fails otherwise, the script ends with exit code 1 and `::error::could not read the head commit $head_sha of pull request #$n (exit $code): $(tr '\r\n' '  ' < "$errfile")`.
+- Otherwise the step writes `{}` to `$RUNNER_TEMP/pr-releases.json`.
+- In both cases the step writes `number=$number` to `$GITHUB_OUTPUT`. `number` is empty when the subject did not match.
+
+#### Step "Classify the pushed commit"
+
+- The step has the id `classify`.
+- It runs `pwsh -NoProfile -File scripts/ci/changelog.ps1 release-commit -Sha "$GITHUB_SHA" -PrReleases "$RUNNER_TEMP/pr-releases.json"`. If the command fails, the step prints its output and ends with exit code 1.
+- For the answers `tag`, `tagged`, `not-release` and `not-faithful` the step writes `outcome=$out` to `$GITHUB_OUTPUT`, where `$out` is the answer. The step then ends with exit code 0. For `not-release` and `not-faithful` it first writes the texts below.
+- The summary line for `not-release`:
+
+  ```
+  Not a release commit. Nothing to tag.
+  ```
+
+- The warning for `not-faithful`:
+
+  ```
+  ::warning::the release commit ${GITHUB_SHA:0:12} is not faithful (its content differs from the generated release pull request); it is not tagged
+  ```
+
+- The summary line for `not-faithful`:
+
+  ```
+  Release commit ${GITHUB_SHA:0:12} is not faithful. No tag was created.
+  ```
+
+- Any other answer ends with the error below and exit code 1, where `$out` is the answer:
+
+  ```
+  ::error::unexpected answer from release-commit: $(printf '%s' "$out" | tr '\r\n' '  ')
+  ```
+
+- The answers: `not-release` when the subject is not a release subject, or when `found` and `merged` are true, `mergeCommitSha` equals the value of `-Sha` and `baseRef` is `main`, and `headRef` is not `release/next` or `headRepo` is null or differs from `baseRepo`; `not-faithful` when the subject is a release subject, `found` and `merged` are true, `mergeCommitSha` equals the value of `-Sha`, `baseRef` is `main`, `headRef` is `release/next`, `headRepo` is not null and equals `baseRepo`, and the commit is not faithful; `tagged` when it is faithful and the last tag is in the list of `git tag --points-at` for the commit; `tag` when it is faithful and the last tag is not in that list. A commit is faithful when its only parent and its tree equal the only parent and the tree of the head commit of its pull request.
+- When the subject is a release subject, the command ends with exit code 1 when the data file has no key for the number of the subject; when `found` is not true, `merged` is not the boolean true, `mergeCommitSha` differs from the value of `-Sha` or `baseRef` is not `main`; when the data file cannot be read or has the wrong shape; and when the commit is faithful and `git tag --list` lists no tag that matches `^v([0-9]+)\.([0-9]+)\.([0-9]+)$` and has every field free of a leading zero and at most 65535.
+
+### Job `tag`
+
+- The job `tag` has `needs: classify` and runs only if `needs.classify.outputs.outcome == 'tag' || needs.classify.outputs.outcome == 'tagged'`.
+- The job sets these environment variables:
+  - `GH_TOKEN` is `github.token`.
+  - `OUTCOME` is `needs.classify.outputs.outcome`.
+  - `PR_NUMBER` is `needs.classify.outputs.number`.
+- Five steps test a name against `^v[0-9]+\.[0-9]+\.[0-9]+$`, called the tag pattern below: "Reuse the tag already on the release commit", "Compute the next version", "Create and push the annotated tag", "Find the existing tag of the release commit" and "Dispatch the release on the tag".
+- Several steps test `steps.guard.outputs.outcome || env.OUTCOME`, called the effective outcome below. When `OUTCOME` is `tag`, the step "Reuse the tag already on the release commit" runs and the effective outcome is the `outcome` it writes. When `OUTCOME` is `tagged`, that step is skipped and the effective outcome is `tagged`.
+- The two dispatch steps test `steps.tip.outputs.proceed != 'false'`. They run when the step "Check that main still points at the release commit" wrote `proceed=true`, and when that step was skipped.
+- Each row of the table is for a run in which no step ends with exit code 1. The last column names the steps after the checkout that run, by these short names: Reuse ("Reuse the tag already on the release commit"), Check main ("Check that main still points at the release commit"), Read label ("Read the bump label of the release pull request"), Compute version ("Compute the next version"), Create and push ("Create and push the annotated tag"), Find existing tag ("Find the existing tag of the release commit"), Dispatch release PR ("Dispatch the release pull request workflow on main") and Dispatch release ("Dispatch the release on the tag").
+
+| `OUTCOME` | Effective outcome | `proceed` | Steps after the checkout that run |
+|---|---|---|---|
+| `tag` | `tag` | `true` | Reuse, Check main, Read label, Compute version, Create and push, Dispatch release PR, Dispatch release |
+| `tag` | `tag` | `false` | Reuse, Check main |
+| `tag` | `tagged` | not written | Reuse, Find existing tag, Dispatch release PR, Dispatch release |
+| `tagged` | `tagged` | not written | Find existing tag, Dispatch release PR, Dispatch release |
+
+#### Step "Checkout the pushed commit (full history and tags)"
+
+- The step uses `actions/checkout`, pinned by SHA with the label `# v7.0.1`.
+- It checks out `github.sha` with `fetch-depth: 0` and `fetch-tags: true`.
+
+#### Step "Reuse the tag already on the release commit"
+
+- The step has the id `guard` and runs only if `env.OUTCOME == 'tag'`.
+- It lists the tags with `git tag --list`, sorted with `sort -V`, and keeps the last name that matches the tag pattern as `highest`.
+- If `highest` is not empty and `git rev-parse "refs/tags/$highest^{commit}"` equals `$GITHUB_SHA`, the outcome is `tagged` and the step appends the summary line below. Otherwise the outcome is `tag`.
+- The step writes `outcome=$outcome` to `$GITHUB_OUTPUT`.
+- The summary line, where `$highest` is the name kept:
+
+  ```
+  The latest tag $highest already points at ${GITHUB_SHA:0:12}. Reusing it.
+  ```
+
+#### Step "Check that main still points at the release commit"
+
+- The step has the id `tip` and runs only if `(steps.guard.outputs.outcome || env.OUTCOME) == 'tag'`.
+- It runs `git ls-remote origin refs/heads/main` and keeps the standard error in `$RUNNER_TEMP/tip.err`. If the command fails, the step ends with exit code 1 and this error:
+
+  ```
+  ::error::could not read main on the remote (exit $code): $(tr '\r\n' '  ' < "$errfile")
+  ```
+
+- The step takes `tip` from the output with `cut -f1`.
+- If `tip` is not `$GITHUB_SHA`, the step prints the warning below and appends the summary line below. It writes `proceed=false` to `$GITHUB_OUTPUT`. The step then ends with exit code 0.
+- Otherwise it writes `proceed=true`.
+- The warning:
+
+  ```
+  ::warning::release commit abandoned: main moved from ${GITHUB_SHA:0:12} to ${tip:0:12}; no tag was created and nothing was dispatched
+  ```
+
+- The summary line:
+
+  ```
+  Release commit ${GITHUB_SHA:0:12} abandoned: main moved. No tag, no dispatch.
+  ```
+
+#### Step "Read the bump label of the release pull request"
+
+- The step has the id `label` and runs only if `(steps.guard.outputs.outcome || env.OUTCOME) == 'tag' && steps.tip.outputs.proceed == 'true'`.
+- If `PR_NUMBER` does not match `^[0-9]+$`, the step ends with exit code 1 and this error:
+
+  ```
+  ::error::unexpected pull request number: $PR_NUMBER
+  ```
+
+- It runs `gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '.labels[].name'` and keeps the standard error in `$RUNNER_TEMP/labels.err`. If the command fails, the step ends with exit code 1 and this error:
+
+  ```
+  ::error::could not read the labels of pull request #$PR_NUMBER (exit $code): $(tr '\r\n' '  ' < "$errfile")
+  ```
+
+- The step reads the names line by line. Every label whose name starts with `bump:` counts. `count` is the number of those labels.
+- If `count` is not 1, the step ends with exit code 1 and this error:
+
+  ```
+  ::error::pull request #$PR_NUMBER has $count bump:* labels, exactly one is required; no tag was created
+  ```
+
+- If `count` is 1 and that label, `$label`, is not `bump:major`, `bump:minor` or `bump:patch`, the step ends with exit code 1 and this error:
+
+  ```
+  ::error::the label $label of pull request #$PR_NUMBER is not bump:major, bump:minor or bump:patch; no tag was created
+  ```
+
+- The step ends by writing `label=$label` to `$GITHUB_OUTPUT`.
+
+#### Step "Compute the next version"
+
+- The step has the id `version` and runs only if `(steps.guard.outputs.outcome || env.OUTCOME) == 'tag' && steps.tip.outputs.proceed == 'true'`. It sets `LABEL` to `steps.label.outputs.label`.
+- It runs `pwsh -NoProfile -File scripts/ci/changelog.ps1 next-version -Label "$LABEL"`. From the last tag `X.Y.Z`, `bump:major` gives `X+1.0.0`, `bump:minor` gives `X.Y+1.0` and `bump:patch` gives `X.Y.Z+1`, printed without `v`. A field of the result above 65535 ends the command with `::error::the next version <version> has a field above 65535 (version resource fields are 16-bit)`. If the command fails, the step prints its output and ends with exit code 1.
+- The tag is `v` followed by the output. If it does not match the tag pattern, the step ends with exit code 1 and this error:
+
+  ```
+  ::error::unexpected version from changelog.ps1: $(printf '%s' "$out" | tr '\r\n' '  ')
+  ```
+
+- The step writes `tag=$tag` to `$GITHUB_OUTPUT`.
+
+#### Step "Create and push the annotated tag"
+
+- The step has the id `create` and runs only if `(steps.guard.outputs.outcome || env.OUTCOME) == 'tag' && steps.tip.outputs.proceed == 'true'`. It sets `TAG` to `steps.version.outputs.tag`.
+- If `TAG` does not match the tag pattern, the step ends with exit code 1 and this error:
+
+  ```
+  ::error::unexpected tag name: $TAG
+  ```
+
+- It runs `git` with `-c user.name='github-actions[bot]'`, a `-c user.email=` option and the arguments `tag -a "$TAG" -m "$TAG" "$GITHUB_SHA"`. Then it runs `git push origin "refs/tags/$TAG"`.
+- It writes `tag=$TAG` to `$GITHUB_OUTPUT` and appends this summary line:
+
+  ```
+  Tagged ${GITHUB_SHA:0:12} as $TAG.
+  ```
+
+#### Step "Find the existing tag of the release commit"
+
+- The step has the id `existing` and runs only if `(steps.guard.outputs.outcome || env.OUTCOME) == 'tagged'`.
+- It lists the tags with `git tag --points-at "$GITHUB_SHA"`, sorted with `sort -V`, and keeps the last name that matches the tag pattern as `tag`.
+- If no name matches, the step ends with exit code 1 and this error:
+
+  ```
+  ::error::no vX.Y.Z tag points at ${GITHUB_SHA:0:12}
+  ```
+
+- Otherwise it writes `tag=$tag` to `$GITHUB_OUTPUT`.
+
+#### Step "Dispatch the release pull request workflow on main"
+
+- The step runs only if `steps.tip.outputs.proceed != 'false'`.
+- It runs `gh workflow run release-pr.yml --ref main` and keeps the standard error in `$RUNNER_TEMP/dispatch.err`. If the command fails, the step ends with exit code 1 and this error, where `$out` is the output of the command:
+
+  ```
+  ::error::could not dispatch release-pr.yml on main (exit $code): $(printf '%s' "$out" | tr '\r\n' '  ') $(tr '\r\n' '  ' < "$errfile")
+  ```
+
+- Otherwise the step appends this summary line:
+
+  ```
+  Dispatched release-pr.yml on main.
+  ```
+
+#### Step "Dispatch the release on the tag"
+
+- The step runs only if `steps.tip.outputs.proceed != 'false'`. It sets `TAG` to `steps.create.outputs.tag || steps.existing.outputs.tag`.
+- If `TAG` does not match the tag pattern, the step ends with exit code 1 and this error:
+
+  ```
+  ::error::unexpected tag name: $TAG
+  ```
+
+- It looks up the release of the tag with `gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG"` and keeps the standard error in `$RUNNER_TEMP/release.err`.
+  - If the lookup succeeds, the step appends this summary line and ends with exit code 0:
+
+    ```
+    A published release for $TAG exists. Release not dispatched.
+    ```
+
+  - If the lookup fails and its error output holds `HTTP 404`, the step runs `gh workflow run release.yml --ref "$TAG"`. If that command fails, the step ends with exit code 1 and this error, where `$out` is the output of the command:
+
+    ```
+    ::error::could not dispatch release.yml on $TAG (exit $code): $(printf '%s' "$out" | tr '\r\n' '  ') $(tr '\r\n' '  ' < "$errfile")
+    ```
+
+    Otherwise it appends this summary line:
+
+    ```
+    Dispatched release.yml on $TAG.
+    ```
+
+  - If the lookup fails otherwise, the step ends with exit code 1 and this error:
+
+    ```
+    ::error::could not look up the release of $TAG (exit $code): $(tr '\r\n' '  ' < "$errfile")
+    ```
+
+## Release (`release.yml`)
+
+The workflow has the permission `contents: read`. It starts on a push of a tag `v*.*.*` and on `workflow_dispatch`. Its concurrency is `group: release-${{ github.ref }}` with `cancel-in-progress: false`.
+
+In the messages and commands quoted in this section, a shell variable (for example `$TAG`, `$code`, `$n` or `$dll`) stands for its value at run time. In the messages of `changelog.ps1` quoted in this section, `<...>` stands for a value at run time.
+
+Every step with `run:` runs with `shell: bash`.
+
+### Jobs
+
+- The workflow has seven jobs, in this order: `validate`, `pipeline-x86`, `pipeline-x64`, `export-table`, `assemble`, `attest` and `publish`.
+- `pipeline-x86` and `pipeline-x64` have `needs:`, `uses:` and `with:`. They call `arch-pipeline.yml`, `pipeline-x86` with `arch: x86` and `pipeline-x64` with `arch: x64`, both with `release-version: ${{ needs.validate.outputs.version }}`; `arch-pipeline.yml` uploads the artifacts `restifycapl-x86` and `restifycapl-x64`.
+- The other five jobs run on `ubuntu-latest`.
+- Third-party actions in the file, each pinned by SHA with a label: `actions/checkout` with `# v7.0.1`, `actions/upload-artifact` with `# v7.0.2`, `actions/download-artifact` with `# v7.0.0` and `actions/attest-build-provenance` with `# v4.2.2`.
+- `validate` is the first job. The other jobs have these `needs:`:
+
+| Job | `needs:` |
+|---|---|
+| `pipeline-x86` | `validate` |
+| `pipeline-x64` | `validate` |
+| `export-table` | `validate` |
+| `assemble` | `validate`, `pipeline-x86`, `pipeline-x64`, `export-table` |
+| `attest` | `assemble` |
+| `publish` | `validate`, `export-table`, `assemble`, `attest` |
+
+- `publish` has `if: github.ref_type == 'tag'`.
+- The mode is set by the step "Select mode" of `validate`: `tag` when `$GITHUB_REF_TYPE` is `tag`, `dry-run` otherwise. The table compares the two modes.
+
+| | Mode `tag` | Mode `dry-run` |
+|---|---|---|
+| Step "Validate the tag" | Runs and writes the outputs `tag` and `version`. | Skipped. |
+| Step "Extract the CHANGELOG section for the release notes" | Runs with `-Mode tag`. | Runs with `-Mode dry-run`. |
+| Step "Show the version" | Runs. | Skipped. |
+| Step "Preview the next release" | Skipped. | Runs. |
+| Jobs `validate` to `attest` | Run. | Run. |
+| Job `publish` | Runs. | Skipped. |
+
+### Job `validate`
+
+- The permissions are `contents: read` and `pull-requests: read`.
+- The job has two outputs: `tag` is the output `tag` of the step `tag`, and `version` is the output `version` of the step `tag`.
+- The job has eight steps, in this order: "Checkout (full history)", "Select mode", "Validate the tag", "Run the CHANGELOG fixtures", "Extract the CHANGELOG section for the release notes", "Show the version", "Preview the next release" and "Upload the notes body".
+
+#### Step "Checkout (full history)"
+
+- The step uses `actions/checkout`, pinned by SHA with the label `# v7.0.1`, with `fetch-depth: 0`.
+
+#### Step "Select mode"
+
+- The step has the id `mode`.
+- It writes `mode=tag` to `$GITHUB_OUTPUT` when `$GITHUB_REF_TYPE` is `tag`, and `mode=dry-run` otherwise.
+
+#### Step "Validate the tag"
+
+- The step has the id `tag` and runs only if `steps.mode.outputs.mode == 'tag'`.
+- It sets `GH_TOKEN` to `github.token` and `TAG` to `github.ref_name`.
+- The step makes the checks below in this order. The first check that fails ends the step with exit code 1.
+  1. `TAG` must match `^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`. Otherwise:
+
+     ```
+     ::error::tag '$TAG' is not of the form vX.Y.Z without leading zeros
+     ```
+
+  2. No field of the tag may be longer than 5 characters or above 65535. Otherwise:
+
+     ```
+     ::error::tag '$TAG' has a field above 65535 (version resource fields are 16-bit)
+     ```
+
+  3. `git merge-base --is-ancestor "$GITHUB_SHA" origin/main` must succeed. Otherwise:
+
+     ```
+     ::error::the tagged commit is not an ancestor of origin/main
+     ```
+
+  4. `git rev-list --parents -n 1 "$GITHUB_SHA"`, read into an array with `read -r -a`, must give at least 2 words. Otherwise:
+
+     ```
+     ::error::the tagged commit has no parent; tag the squash-merge commit of the CHANGELOG cut
+     ```
+
+  5. The step runs `gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG"` and keeps its error output as `$err`; its standard output is discarded.
+     - If the command succeeds, the step ends with this error:
+
+       ```
+       ::error::a published release for $TAG already exists; never move a published tag
+       ```
+
+     - If the command fails and its error output does not hold `HTTP 404`, the step ends with this error:
+
+       ```
+       ::error::could not check for an existing release: $err
+       ```
+
+     - If the command fails and its error output holds `HTTP 404`, the check passes.
+- The step then writes `tag=$TAG` and `version=${TAG#v}` to `$GITHUB_OUTPUT`.
+
+#### Step "Run the CHANGELOG fixtures"
+
+- The step runs `pwsh -NoProfile -File scripts/ci/changelog.ps1 fixtures -FixtureDir tests/changelog` with `shell: bash`.
+
+#### Step "Extract the CHANGELOG section for the release notes"
+
+- The step sets `MODE` to `steps.mode.outputs.mode`.
+- It runs `pwsh -NoProfile -File scripts/ci/changelog.ps1 notes -Mode "$MODE" -Sha "$GITHUB_SHA" -Output "$RUNNER_TEMP/notes-body.md"`.
+- The command writes the notes body to the `-Output` file and appends this summary line, where `<heading>` is the heading line of the section it chose and `<mode>` is the value of `-Mode`:
+
+  ```
+  Release notes taken from the CHANGELOG section `<heading>` (<mode> mode).
+  ```
+
+How `notes` locates the section:
+
+- In mode `tag`, the section is the one whose heading matches `## [<12 lowercase hex characters>] - YYYY-MM-DD`, where the 12 characters are a prefix of the output of `git rev-parse <sha>^` and `<sha>` is the value of `-Sha`. There must be exactly one such heading. Otherwise the command ends with this error:
+
+  ```
+  ::error::the tag must be on the squash-merge commit of the CHANGELOG cut; expected exactly one "## [<first 12 characters of that output>] - YYYY-MM-DD" heading, found <count>
+  ```
+
+- In mode `dry-run`, the section is the first one, from the top of `CHANGELOG.md`, whose heading starts with `## [` and whose body is not empty. If there is none, the command ends with this error:
+
+  ```
+  ::error::no CHANGELOG.md section has release notes once "### Development" is removed
+  ```
+
+- In both modes, the body is made like this:
+  - It takes the lines of the section up to the next heading that starts with `## [` or the next link definition.
+  - It removes the `### Development` block: the line `### Development` and the lines after it up to the next line that starts with `### `, or up to the end of the section. If a section that the command reads has more than one line `### Development`, the command ends with this error:
+
+    ```
+    ::error::the section has more than one "### Development" block
+    ```
+
+  - A body is empty when each of its lines is blank or starts with `### `. In mode `tag`, an empty body ends the command with this error:
+
+    ```
+    ::error::the CHANGELOG section <heading> is empty once "### Development" is removed
+    ```
+
+#### Step "Show the version"
+
+- The step runs only if `steps.mode.outputs.mode == 'tag'`. It sets `TAG_VERSION` to `steps.tag.outputs.version`.
+- It appends this line to the job summary:
+
+  ```
+  Version $TAG_VERSION, taken from the tag.
+  ```
+
+#### Step "Preview the next release"
+
+- The step runs only if `steps.mode.outputs.mode == 'dry-run'`. It sets `GH_TOKEN` to `github.token`.
+- Each outcome described below ends the step with `exit 0`.
+- The step keeps four files in `$RUNNER_TEMP`: `pr-messages.json`, `pr-arg.json`, `CHANGELOG.generated.md` and `section.md`.
+- It runs `changelog.ps1` through a helper that keeps the exit code in `$code`, the standard output in `$out`, and in `$reason` the standard output with a leading `::error::` removed from each line.
+- The commands, in this order:
+  1. `pwsh -NoProfile -File scripts/ci/changelog.ps1 prs`. The command prints one pull request number per line. The step reads `$out` line by line and skips empty lines.
+  2. The step writes `{}` to `pr-messages.json`. For each pull request number `n`, it reads the commit messages with `gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/pulls/$n/commits" | jq -c '[.[][].commit.message]'`, writes them to `pr-arg.json` and adds them to `pr-messages.json` with `jq`, under the key `n`. The file is a JSON object from pull request number to the full commit messages.
+  3. `changelog.ps1 level -PrMessages "$messages"`, where `messages` is `pr-messages.json`. Its output is `level`.
+  4. If `level` is not `none`, `changelog.ps1 next-version -Level "$level"`. Its output is `version`.
+  5. `changelog.ps1 generate -PrMessages "$messages" -Output "$generated" -SectionOutput "$section"`, where `generated` is `CHANGELOG.generated.md` and `section` is `section.md`. After it, the step prints the output of the command to the log with `echo "$out"`.
+- If `prs`, `level` or `next-version` ends with a non-zero exit code, or, for a pull request number `n`, the command that reads its commits (`gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/pulls/$n/commits" | jq -c '[.[][].commit.message]'`) or the `jq` that adds them to `pr-messages.json` ends with a non-zero exit code, the step prints the warning of the table, appends its summary line and ends with `exit 0`:
+
+| Failure | `::warning::` | Summary line |
+|---|---|---|
+| `prs` fails | `::warning::could not list the pull requests (exit $code)` | `No release preview: could not list the pull requests since the last tag: $reason` |
+| The command that reads the commits of `n` (`gh api` with `jq -c`) fails | `::warning::could not read the commits of pull request #$n (exit $code)` | `No release preview: could not read the commits of pull request #$n.` |
+| The `jq` that adds the commits of `n` to `pr-messages.json` fails | `::warning::could not add the commits of pull request #$n to the messages file (exit $code)` | `No release preview: could not add the commits of pull request #$n to the messages file.` |
+| `level` fails | `::warning::level failed with exit code $code` | `No release preview: the level could not be computed: $reason` |
+| `next-version` fails | `::warning::next-version failed with exit code $code` | `No release preview: the version could not be computed: $reason` |
+
+- If `generate` fails, the step appends the summary line `Level $level, next version $version, but the section could not be generated: $reason` and ends with `exit 0`.
+- If `level` is `none`, the step appends this summary line and ends with `exit 0`:
+
+  ```
+  Nothing to release: no commit since the last tag, after the cut-off, is a feat/, stage/ or fix/ change or a breaking change. A dry run publishes nothing.
+  ```
+
+- If `generate` succeeds, the step appends this summary line:
+
+  ```
+  Level $level, next version $version, computed from origin/main with no bump label. A dry run publishes nothing and changes no file.
+  ```
+
+  The line is followed by a `<details>` block: `<details><summary>Generated CHANGELOG section</summary>`, a fenced block opened with four backticks and `markdown` that holds the content of `section.md`, and `</details>`.
+
+#### Step "Upload the notes body"
+
+- The step uses `actions/upload-artifact`, pinned by SHA with the label `# v7.0.2`.
+- The artifact name is `release-notes-body` and the path is `${{ runner.temp }}/notes-body.md`.
+- The step sets `if-no-files-found: error` and `overwrite: true`.
+
+### Job `export-table`
+
+- The permissions are `contents: read`.
+- The job has three steps, in this order: "Checkout", "Check the export table" and "Upload the export table markdown".
+
+#### Step "Checkout"
+
+- The step uses `actions/checkout`, pinned by SHA with the label `# v7.0.1`.
+
+#### Step "Check the export table"
+
+- The step has the id `table` and uses `./.github/actions/export-table`, which runs the export-table fixtures, checks `src/module/exports.cpp` and writes the job summary. The action sets the output `markdown-path` when `export-table.md` exists after the check.
+
+#### Step "Upload the export table markdown"
+
+- The step runs only if `${{ !cancelled() && steps.table.outputs.markdown-path != '' }}`.
+- It uses `actions/upload-artifact`, pinned by SHA with the label `# v7.0.2`.
+- The artifact name is `export-table-markdown` and the path is `${{ steps.table.outputs.markdown-path }}`.
+- The step sets `if-no-files-found: error` and `overwrite: true`.
+
+### Job `assemble`
+
+- The permissions are `contents: read`.
+- The job has six steps, in this order: "Download restifycapl-x86.dll", "Download restifycapl-x64.dll", "Download the notes body", "Download the export table markdown", "Write SHA256SUMS and the release notes" and "Upload the release assets".
+- The first four steps use `actions/download-artifact`, pinned by SHA with the label `# v7.0.0`:
+
+| Step | Artifact | Path |
+|---|---|---|
+| "Download restifycapl-x86.dll" | `restifycapl-x86` | `dist` |
+| "Download restifycapl-x64.dll" | `restifycapl-x64` | `dist` |
+| "Download the notes body" | `release-notes-body` | `parts/body` |
+| "Download the export table markdown" | `export-table-markdown` | `parts/table` |
+
+#### Step "Write SHA256SUMS and the release notes"
+
+The step does these things in this order:
+
+- It lists `dist` with `ls -1 dist`.
+- It requires the names in `dist` to be exactly `restifycapl-x64.dll` and `restifycapl-x86.dll`. Otherwise it ends with exit code 1 and this error:
+
+  ```
+  ::error::dist must contain exactly the two DLLs
+  ```
+
+- It creates `dist/SHA256SUMS` with `sha256sum restifycapl-x86.dll restifycapl-x64.dll`, run in `dist`.
+- It counts the lines of `parts/table/export-table.md` that match `^\| [0-9]+ \| `, called `rows` below. A row of the table has the form ``| <index> | `<signature>` | <description> |``. If `rows` is less than 1, it ends with exit code 1 and this error:
+
+  ```
+  ::error::the export table markdown has no function rows
+  ```
+
+- It writes `dist/notes.md` with these parts, in this order:
+  1. The content of `parts/body/notes-body.md`.
+  2. The heading `### Using this release`.
+  3. Three paragraphs. The first two read:
+
+     ```
+     Take `capl/` from this tag's source archive; a DLL and `capl/` from different versions fail at CAPL compile.
+
+     Check a download: in PowerShell, `Get-FileHash restifycapl-x64.dll` must print the hash listed for that file in `SHA256SUMS` (likewise `restifycapl-x86.dll`).
+     ```
+
+     The third paragraph says that both DLLs carry a GitHub build-provenance attestation, which the release workflow verifies before publishing, and points to a document in the source archive for verifying it yourself.
+  4. The heading `### Export table`.
+  5. A `<details>` block whose `<summary>` is `$rows functions`, with the content of `parts/table/export-table.md` and then `</details>`.
+- It counts the characters of `dist/notes.md`: the length of the file decoded as UTF-8, minus the number of surrogate pairs. If the count, `chars`, is above 125000, it ends with exit code 1 and this error:
+
+  ```
+  ::error::release notes are $chars characters, the limit is 125000
+  ```
+
+- It appends to the job summary: the heading `### SHA256SUMS`, the content of `dist/SHA256SUMS` in a fenced block, the heading `### notes.md` and the content of `dist/notes.md`.
+
+#### Step "Upload the release assets"
+
+- The step uses `actions/upload-artifact`, pinned by SHA with the label `# v7.0.2`.
+- The artifact name is `release-assets` and the path is `dist`.
+- The step sets `if-no-files-found: error` and `overwrite: true`.
+
+### Job `attest`
+
+- The permissions are `id-token: write`, `attestations: write` and `contents: read`.
+- The job has three steps, in this order: "Download the release assets", "Attest build provenance" and "Verify the attestations".
+
+#### Step "Download the release assets"
+
+- The step uses `actions/download-artifact`, pinned by SHA with the label `# v7.0.0`. The artifact name is `release-assets` and the path is `dist`.
+
+#### Step "Attest build provenance"
+
+- The step uses `actions/attest-build-provenance`, pinned by SHA with the label `# v4.2.2`.
+- `subject-path` is the two lines `dist/restifycapl-x86.dll` and `dist/restifycapl-x64.dll`.
+
+#### Step "Verify the attestations"
+
+- The step sets `GH_TOKEN` to `github.token`.
+- For `restifycapl-x86.dll` and then `restifycapl-x64.dll`, called `$dll`, it runs `gh attestation verify "dist/$dll" --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"` up to 3 times.
+- For each DLL, the attempts stop at the first success. After each failed attempt, including the third, the step runs `sleep 10`.
+- If no attempt succeeds for a DLL, the step ends with exit code 1 and this error:
+
+  ```
+  ::error::attestation of $dll could not be verified
+  ```
+
+### Job `publish`
+
+- The permissions are `contents: write`.
+- The job sets these environment variables:
+  - `GH_TOKEN` is `github.token`.
+  - `TAG` is `needs.validate.outputs.tag`.
+- The job has seven steps, in this order: "Download the release assets", "Require that no published release exists for the tag", "Delete a leftover draft for the tag", "Create the draft release and upload the assets", "Verify the draft", "Make the release public" and "Say what state the release is in".
+
+#### Step "Download the release assets"
+
+- The step uses `actions/download-artifact`, pinned by SHA with the label `# v7.0.0`. The artifact name is `release-assets` and the path is `dist`.
+
+#### Step "Require that no published release exists for the tag"
+
+- The step runs `gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG"` and keeps its error output as `$err`; its standard output is discarded.
+  - If the command succeeds, the step ends with exit code 1 and this error:
+
+    ```
+    ::error::a published release for $TAG already exists; never move a published tag
+    ```
+
+  - If the command fails and its error output does not hold `HTTP 404`, the step ends with exit code 1 and this error:
+
+    ```
+    ::error::could not check for an existing release: $err
+    ```
+
+  - If the command fails and its error output holds `HTTP 404`, the step ends with exit code 0.
+
+#### Step "Delete a leftover draft for the tag"
+
+- The step lists the releases with `gh api --paginate "repos/$GITHUB_REPOSITORY/releases"` and passes the list to `jq -r --arg tag "$TAG" '.[] | select(.draft and .tag_name == $tag) | .id'`, which prints the id of each release whose `draft` is true and whose `tag_name` is `$TAG`.
+- For each id, it prints `deleting leftover draft $id` and runs `gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id"`.
+
+#### Step "Create the draft release and upload the assets"
+
+- The step runs `gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --verify-tag --title "$TAG" --notes-file dist/notes.md dist/restifycapl-x86.dll dist/restifycapl-x64.dll dist/SHA256SUMS`.
+
+#### Step "Verify the draft"
+
+The step does these things in this order:
+
+- It makes up to 10 attempts. In each, it sets `all` to the output of `gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases"`, `draft` to the output of `echo "$all" | jq -c --arg tag "$TAG" '[.[][] | select(.draft and .tag_name == $tag)]'` and `count` to the length of `draft`.
+- The attempts stop at the first one whose `count` is not 0. After attempts 1 to 9, when `count` is 0, the step prints `no draft for $TAG listed yet (attempt $attempt of 10)` and runs `sleep 3`. After the 10th attempt it goes on to the next check.
+- If `count` is not 1, it ends with exit code 1 and the error below. In the log, the `$(...)` part is replaced by a JSON array on one line with the `id`, `tag_name` and `name` of every release in `all` whose `draft` is true, whatever its tag.
+
+  ```
+  ::error::expected exactly one draft for $TAG, found $count; listed drafts: $(echo "$all" | jq -c '[.[][] | select(.draft) | {id, tag_name, name}]')
+  ```
+
+- It takes the names of the assets of the draft, sorted and joined with a space, as `names`. If `names` is not `SHA256SUMS restifycapl-x64.dll restifycapl-x86.dll`, it ends with exit code 1 and this error:
+
+  ```
+  ::error::the draft must carry exactly three assets, found: $names
+  ```
+
+- It sets `chars` to `.[0].body | length` of `draft`, computed with `jq`. If `chars` is above 125000, it ends with exit code 1 and this error:
+
+  ```
+  ::error::the draft notes are $chars characters, the limit is 125000
+  ```
+
+- It creates the directory `verify`. For each asset of the draft, it runs `gh api -H "Accept: application/octet-stream" "repos/$GITHUB_REPOSITORY/releases/assets/$id" > "verify/$name"`, where `$id` and `$name` are the id and name of the asset.
+- It runs `sha256sum -c SHA256SUMS` in `verify`.
+
+#### Step "Make the release public"
+
+- The step runs `gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false`.
+
+#### Step "Say what state the release is in"
+
+- The step has `if: failure()`.
+- It runs `gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG"`, discarding its output and error output, and sets `msg` by the exit status of the command.
+  - If the command succeeds, `msg` is:
+
+    ```
+    The release for $TAG is public. Never move the tag; fix forward through a fix/ pull request and the next version.
+    ```
+
+  - Otherwise `msg` is:
+
+    ```
+    Nothing is public for $TAG. Re-run the failed jobs for a transient failure. For a defect, the tag stays and its name is never reused: fix it through a fix/ pull request and release the next version; the draft may be deleted.
+    ```
+
+- It prints `::error::$msg` and appends `$msg` to the job summary.
+
+## What a person does
+
+This section lists the events that a person makes, in the order of a release, and what the workflows do on each.
+
+| Event | What the workflows do | What the files read and require |
+|---|---|---|
+| A push to a branch whose name starts with `feat/`, `stage/`, `chore/`, `fix/` or `docs/` | `ci.yml` runs its jobs. `auto-pr.yml` opens a draft pull request with base `main` and the branch name as title when the branch is ahead of `main` and has no open pull request. | The branch prefix gives the type of the change. `type!:` or a `BREAKING CHANGE:` footer in a commit message marks a breaking change. |
+| A later push to such a branch while a pull request for it is open | The push goes to the head branch of the pull request. `ci.yml` runs a `push` run and, when the base of the pull request is `main`, a `pull_request` run. `bump-label.yml` lists `opened`, `synchronize` and `reopened`, the three default activity types, and runs the check `bump label`, which does nothing and succeeds because the head branch is not `release/next`. In `auto-pr.yml`, Guard 2 finds the open pull request and answers `false`, so "Compose PR body" and "Create draft PR" are skipped. | Guard 2 counts an open pull request whose head is the branch. |
+| A new commit on `main` whose subject is not `release/next (#N)` | `release-pr.yml` (job `build`) computes the level. For none, it closes the open release pull requests and deletes `release/next` if it exists. Otherwise it rebuilds `release/next`; unless the rebuild is skipped, it pushes the branch, opens or updates the release pull request, runs the step "Keep exactly one bump label" and dispatches `ci.yml` and `bump-label.yml` on `release/next`. The job `classify` of `tag-release.yml` answers `not-release`, and `ci.yml` runs. | The branch prefix at the start of the subject gives the type of the change, and the pull request number is read from the trailing ` (#N)`. |
+| A `bump:*` label added to or removed from the release pull request | `release-pr.yml` (job `labels`) rewrites the version preview line of the pull request description when the pull request has exactly one `bump:*` label and it is `bump:major`, `bump:minor` or `bump:patch`; the other lines of the description stay as they are. `bump-label.yml` runs the check `bump label`. | The check `bump label` requires exactly one `bump:*` label. |
+| A new commit on `main` whose subject is `release/next (#N)` | The job `classify` of `tag-release.yml` classifies the commit. For the answer `tag`, the job `tag` checks that `main` still points at the commit, reads the label, pushes the annotated tag, dispatches `release-pr.yml` on `main`, and dispatches `release.yml` on the tag when the lookup of the release of the tag fails and its error output holds `HTTP 404`. `release.yml` builds both DLLs and publishes the release. `ci.yml` and `release-pr.yml` also run. | For the pull request `#N` of the subject, `merged` is true, `mergeCommitSha` is the hash of this commit, `baseRef` is `main`, `headRef` is `release/next` and `headRepo` equals `baseRepo`. The commit has one parent; that parent and the tree of the commit equal the only parent and the tree of the head commit of the pull request. The pull request has exactly one `bump:*` label, and it is `bump:major`, `bump:minor` or `bump:patch`. |
+
+- The next rebuild of `release/next` that is not skipped replaces a single `bump:*` label that differs from the computed one (and comments), rewrites the pull request description, resets the checklist and overwrites commits pushed to `release/next` by hand.
+- When no release pull request is open, the next run of the job `build` of `release-pr.yml` that reaches the step "Build the release/next commit" opens a new one: the skip needs exactly one open release pull request, and the step "Open or update the release pull request" creates the pull request when none is open.
+- On the push of a release commit, `release-pr.yml` also runs. While the release commit is faithful, is the tip of `main` and has no tag, its step "Wait for the tag of a merged release commit" answers `waiting` and the later steps of the job `build` are skipped.
+
+### Dispatches and tag pushes the files accept
+
+| Event | What the workflows do |
+|---|---|
+| A dispatch of `ci.yml` on any ref | All jobs run except `actionlint`, which is skipped. |
+| A dispatch of `bump-label.yml` | The check `bump label` runs on the dispatched ref. For a ref other than `release/next` it does nothing and succeeds; for `release/next` it looks up the open pull request of `release/next` and requires exactly one `bump:*` label. |
+| A dispatch of `release-pr.yml` | The job `build` runs the same steps as on a push. The step "Build the release/next commit" writes `skip=false`, because it writes `skip=true` only for the event `push`. |
+| A dispatch of `release.yml` on a ref that is not a tag | The mode is `dry-run`: the jobs `validate` to `attest` run, the job `publish` is skipped, and the step "Preview the next release" writes the preview of the next release to the job summary. |
+| A dispatch of `release.yml` on a tag, or a push of a tag `v*.*.*` | The mode is `tag`: the step "Validate the tag" checks the tag, and the job `publish` runs. |
+
+## When something fails
+
+The tables list, for each workflow, the steps that end with a non-zero exit code or stop at a guard, what the files write in that case, and what a later run does as the files define it. Messages are quoted as the files write them. In a message, a shell or PowerShell variable (for example `$n`, `$code`, `$TAG`, `$env:ARCH` or `$dll`) and a placeholder in angle brackets (for example `<N>`) stand for their value at run time. `$(tr '\r\n' '  ' < "$errfile")` stands for the content of the step's error file and `$(printf '%s' "$out" | tr '\r\n' '  ')` for `$out`; in both, each carriage return and line feed is turned into a space. In the Markdown source of the tables, each `|` in a quoted message or pattern is preceded by a backslash; in the pattern of the step "Write SHA256SUMS and the release notes", each `|` is written as `&#124;`.
+
+### Auto PR
+
+| Workflow / job / steps | Outcome | What the files write | What a later run does |
+|---|---|---|---|
+| `auto-pr.yml`, job `open draft PR`, steps "Guard 1: branch ahead of main?", "Guard 2: PR already open for this branch?" and "Create draft PR" | `gh api "repos/${GH_REPO}/compare/main...${BRANCH}"`, `jq -r '.ahead_by'`, `gh pr list --head "${BRANCH}" --state open --json number --jq '.[0].number // empty'` or `gh pr create` ends with a non-zero exit code. Each of the three steps runs with `set -euo pipefail`. | The output of the failed command. | A push to a branch whose name starts with `feat/`, `stage/`, `chore/`, `fix/` or `docs/` runs both guards again. A run in which `ahead_by` is not 0 and `gh pr list` prints no number runs "Compose PR body" and "Create draft PR", which runs `gh pr create --draft --base main --head "${BRANCH}" --title "${BRANCH}" --body-file "$RUNNER_TEMP/pr-body.md"`. |
+| `auto-pr.yml`, job `open draft PR`, steps "Guard 1: branch ahead of main?" and "Guard 2: PR already open for this branch?" | Guard 1: `ahead_by` is 0. Guard 2: `gh pr list` prints a number. | Guard 1 prints `Branch '${BRANCH}' is ahead of main by ${ahead_by} commit(s).` and `No commits ahead of main -- nothing to open a PR for. Exiting.` and writes `proceed=false` to `$GITHUB_OUTPUT`. Guard 2 prints `Open PR #${existing_pr} already exists for '${BRANCH}' -- nothing to do. Exiting.` and writes `proceed=false`. "Compose PR body" and "Create draft PR" each have `if: steps.ahead.outputs.proceed == 'true' && steps.existing.outputs.proceed == 'true'`. | A push to the branch in which `ahead_by` is not 0 writes `proceed=true` in Guard 1, and Guard 2, which has `if: steps.ahead.outputs.proceed == 'true'`, runs. A push in which Guard 2 finds no open pull request whose head is the branch prints `No open PR found for '${BRANCH}' -- will create one.` and writes `proceed=true`. |
+
+### Release PR
+
+| Workflow / job / steps | Outcome | What the files write | What a later run does |
+|---|---|---|---|
+| `release-pr.yml`, job `build`, step "Fetch the pull request data of the release commits" | `changelog.ps1 release-prs` ends with a non-zero exit code, or `scripts/ci/fetch-pr-releases.sh` ends with exit code 1. | After `release-prs` the step prints the output of the command and ends with exit code 1. When `git rev-parse origin/main` does not print a full commit hash, the output is `::error::git rev-parse origin/main did not print a full commit hash: <output>`, where `<output>` is what the command printed. For `fetch-pr-releases.sh`: `gh api "repos/$GITHUB_REPOSITORY/pulls/$n"` fails and its error output does not hold `HTTP 404`: `::error::could not read pull request #$n (exit $code): $(tr '\r\n' '  ' < "$errfile")`. `.head.sha` of the pull request is not 40 lowercase hexadecimal characters: `::error::unexpected head commit of pull request #$n: $head_sha`. `gh api "repos/$GITHUB_REPOSITORY/commits/$head_sha"` fails and its error output holds neither `HTTP 404` nor `HTTP 422`: `::error::could not read the head commit $head_sha of pull request #$n (exit $code): $(tr '\r\n' '  ' < "$errfile")`. | A run of `release-pr.yml` on the event `push` (branch `main`) or `workflow_dispatch` runs the step again. A run in which `gh api "repos/$GITHUB_REPOSITORY/pulls/$n"` fails with `HTTP 404` in its error output writes `{"found":false}` as the entry of `$n`. A run in which the commit call fails with `HTTP 404` or `HTTP 422` writes the entry of `$n` with `found` true and `headParents` and `headTree` null. |
+| `release-pr.yml`, job `build`, step "Wait for the tag of a merged release commit" | `changelog.ps1 pending-cut -PrReleases "$RUNNER_TEMP/pr-releases.json"` ends with a non-zero exit code, or prints an answer other than `proceed`, `abandoned` and `waiting`. | After a non-zero exit code the step prints the output of the command and ends with exit code 1. A candidate whose number has no key in the file gives `::error::no pull request data for #<N>, the release commit <first 12 characters of the hash>`. A file that cannot be read or has the wrong shape gives an `::error::` that names `$RUNNER_TEMP/pr-releases.json`. For any other answer the step ends with exit code 1 and the error is `::error::unexpected answer from pending-cut: $(printf '%s' "$out" \| tr '\r\n' '  ')`. | A run of `release-pr.yml` on the event `push` (branch `main`) or `workflow_dispatch` runs the command again. A run in which no candidate is a valid release commit gets the answer `proceed` and the step writes `proceed=true`. |
+| `release-pr.yml`, job `build`, step "Wait for the tag of a merged release commit" | Answer `waiting`: the first valid release commit, newest first, is faithful and is the tip of `origin/main`. | The step writes `proceed=false` to `$GITHUB_OUTPUT`, the notice `::notice::waiting for tag: the release commit is the main tip and has no tag yet; re-run the failed tag-release.yml run if it failed` and the summary line `Waiting for tag: the merged release commit is the main tip and has no tag yet. Nothing was changed. If the tagging run failed, re-run it.` The steps "Fetch the pull request data", "Compute the release level" and "Look up the open release pull requests" each have `if: steps.guard.outputs.proceed == 'true'`. | A run of `release-pr.yml` in which this release commit is not the tip of `origin/main` and is the first valid release commit, newest first, of the range from the last tag to the tip of `origin/main` gets the answer `abandoned` and writes `proceed=true`; its step "Fetch the pull request data" runs `changelog.ps1 prs -Base "$base"` with `base` set by `git rev-parse origin/main`. A run of `tag-release.yml` that tags this commit runs `gh workflow run release-pr.yml --ref main`. A run of `release-pr.yml` in which this commit carries the last tag, the highest tag of the form `vX.Y.Z`, does not list this commit as a candidate: the range is `<last tag>..<tip>`, where `<tip>` is the result of `git rev-parse origin/main`. With no other valid release commit among the candidates the answer is `proceed`. |
+| `release-pr.yml`, job `build`, step "Wait for the tag of a merged release commit" | Answer `abandoned`: the first valid release commit, newest first, is not faithful, or it is faithful and is not the tip of `origin/main`. | `pending-cut` writes to standard error `release commit <first 12 characters of the hash> (#<N>) abandoned: its parent or tree differs from the head of the pull request` for a commit that is not faithful, and `release commit <first 12 characters of the hash> (#<N>) abandoned: it has no release tag and is not the origin/main tip` for a faithful commit that is not the tip. The step writes `proceed=true`, the notice `::notice::an untagged release commit was abandoned; a new release pull request covers the full range since the last tag` and the summary line `A release commit since the last tag is abandoned (not faithful, or untagged and no longer the main tip). It is never tagged; the release pull request is rebuilt for the full range.` | A run of `release-pr.yml` on the event `push` (branch `main`) or `workflow_dispatch` runs `pending-cut` again. |
+| `release-pr.yml`, job `build`, step "Fetch the pull request data" | `changelog.ps1 prs -Base "$base"` ends with a non-zero exit code, or a `gh api --paginate --slurp` call for a number it printed ends with a non-zero exit code. | After `prs` the step prints the output of the command and ends with exit code 1. The call for the commits of pull request `$n` gives `::error::could not read the commits of pull request #$n (exit $code)`. The call for its changed files gives `::error::could not read the changed files of pull request #$n (exit $code)`. | A run in which `steps.guard.outputs.proceed == 'true'` runs the step again; it sets `base` with `git rev-parse origin/main`. |
+| `release-pr.yml`, job `build`, step "Compute the release level" | `changelog.ps1 level -Base "$BASE" -PrMessages "$RUNNER_TEMP/pr-messages.json"` ends with a non-zero exit code, or prints an answer other than `major`, `minor`, `patch` and `none`. | After a non-zero exit code the step prints the output of the command and ends with exit code 1. For any other answer the step ends with exit code 1 and the error is `::error::unexpected level from changelog.ps1: $(printf '%s' "$out" \| tr '\r\n' '  ')`. | A run in which `steps.guard.outputs.proceed == 'true'` runs the command again; `major`, `minor` and `patch` write `release=true`, and `none` writes `release=false`. |
+| `release-pr.yml`, job `build`, step "Look up the open release pull requests" | `gh api "repos/${GH_REPO}/pulls?state=open&base=main&head=${REPO_OWNER}:release/next" --jq '.[].number'` ends with a non-zero exit code, or a line of its output is not a number. | `::error::could not list the pull requests of release/next (exit $code): $(tr '\r\n' '  ' < "$errfile")` after the non-zero exit code. `::error::unexpected output from the pull request lookup: $n` for a line that is not a number. Both end the step with exit code 1. | A run in which every line is a number writes the numbers to `$RUNNER_TEMP/release-prs.txt` and the outputs `count`, the number of non-empty lines, and `number`, the last number. |
+| `release-pr.yml`, job `build`, step "Close the release PR and delete release/next when nothing is left to release" | `git ls-remote --exit-code origin refs/heads/release/next` ends with an exit code other than 0 and 2. | `::error::could not look up release/next on the remote (exit $code)` and exit code 1. | A run of `release-pr.yml` in which `steps.level.outputs.release == 'false'` runs `gh pr close "$n" --comment "Closed by the release bot: nothing on main is left to release."` for each number in `release-prs.txt` and `git ls-remote --exit-code origin refs/heads/release/next` again; exit code 0 runs `git push origin --delete release/next`. The step appends the summary line `Nothing to release. Release pull requests closed: $closed. Branch release/next deleted: $deleted.` |
+| `release-pr.yml`, job `build`, step "Stop when several release pull requests are open" | `steps.level.outputs.release == 'true'` and `steps.lookup.outputs.count >= 2`. | `::error::release/next has $COUNT open pull requests; close the extra ones by hand. Nothing was pushed or changed.` and exit code 1. | A run in which `steps.lookup.outputs.count` is 0 or 1 runs the step "Generate the CHANGELOG section", which has `if: steps.level.outputs.release == 'true'`. |
+| `release-pr.yml`, job `build`, step "Generate the CHANGELOG section" | `changelog.ps1 generate -Base "$BASE" -PrMessages "$RUNNER_TEMP/pr-messages.json" -Output "$RUNNER_TEMP/CHANGELOG.generated.md" -SectionOutput "$RUNNER_TEMP/section.md"` ends with a non-zero exit code. | The step prints the output of the command and ends with exit code 1. A line of the CHANGELOG text starts with `## [<short>]`, where `<short>` is the first 12 characters of `-Base`: `::error::the file already has a section for <short>`. No entry under Breaking changes, Added or Fixed: `::error::nothing to release since <last tag>: no feat/, stage/ or fix/ change and no breaking marker after the cut-off commit`. No tag matches `vX.Y.Z`: `::error::no tag of the form vX.Y.Z found; fetch the tags (a shallow checkout has none) or tag the first release by hand`. No `-RepoUrl` and no link definition of the form `[<12 hex characters>]: <url>/commit/<40 hex characters>` in the file: `::error::no repository URL: the file has no link definition to take it from; pass -RepoUrl`. | A run in which `steps.level.outputs.release == 'true'` runs the command again. The command drops every section of the file whose heading hash is not the hash of a heading in `git show <last tag>:CHANGELOG.md`, and the link definitions of those sections, before it checks for `## [<short>]`. |
+| `release-pr.yml`, job `build`, step "Generate the pull request body" | `changelog.ps1 pr-body -Base "$BASE" -PrMessages "$RUNNER_TEMP/pr-messages.json" -PrFiles "$RUNNER_TEMP/pr-files.json" -Label "bump:$LEVEL" -ChangelogPath "$RUNNER_TEMP/CHANGELOG.generated.md" -Output "$RUNNER_TEMP/pr-body.md"` ends with a non-zero exit code. For each commit after the cut-off whose subject has the type `fix` and a number, with `src/module/exports.cpp` among the changed files of that pull request, the command prints a warning. | The step prints the output of the command and ends with exit code 1. The warning is `::warning::the fix/ pull request #<number> changed src/module/exports.cpp; confirm that no export table row was renamed, reordered or removed`, and the body lists it under `## Warnings`. | A run in which `steps.level.outputs.release == 'true'` runs the command again, with `-Label "bump:$LEVEL"`. |
+| `release-pr.yml`, job `build`, step "Build the release/next commit" | `skip` is `true`: `origin/release/next` exists, its parent is `BASE`, its tree equals the tree of the new commit, `EVENT_NAME` is `push` and `COUNT` is 1. | The step writes `skip=true` and appends the summary line `Skipped: release/next already holds the same CHANGELOG commit on the same base and has an open pull request. Nothing was pushed, and the pull request body, checklist and label are left as they are.` The steps "Push release/next", "Open or update the release pull request", "Keep exactly one bump label" and "Dispatch CI and the bump label check on release/next" each have `if: steps.build.outputs.skip == 'false'`. | A run of `release-pr.yml` on the event `workflow_dispatch` writes `skip=false`, because the step writes `skip=true` only if `EVENT_NAME` is `push`. |
+| `release-pr.yml`, job `build`, step "Push release/next" | `git push --force-with-lease="release/next:${EXPECTED}" origin release/next` ends with a non-zero exit code. | The output of `git push`. | A run in which `steps.build.outputs.skip == 'false'` runs the push with `EXPECTED` set to the commit of `refs/remotes/origin/release/next` that the step "Build the release/next commit" read, empty if that ref does not exist. |
+| `release-pr.yml`, job `build`, step "Open or update the release pull request" | With `COUNT` 0: `gh pr create --base main --head release/next --title 'release/next' --body-file "$body"` ends with a non-zero exit code, the lookup `gh api "repos/${GH_REPO}/pulls?state=open&base=main&head=${REPO_OWNER}:release/next" --jq '.[].number'` ends with a non-zero exit code, a line of its output is not a number, or no number is found. With a `COUNT` other than 0: `gh pr view "$number" --json state --jq .state` ends with a non-zero exit code or prints a state other than `OPEN`. | `::error::could not open the release pull request (exit $code): $(printf '%s' "$out" \| tr '\r\n' '  ') $(tr '\r\n' '  ' < "$errfile")` for `gh pr create`. `::error::could not find the new release pull request (exit $code): $(tr '\r\n' '  ' < "$errfile")` for the lookup. `::error::unexpected output from the pull request lookup: $n` for a line that is not a number. `::error::could not determine the number of the new release pull request` when no number is found. `::error::could not read the state of release pull request #$number (exit $code): $(tr '\r\n' '  ' < "$errfile")` for `gh pr view`. `::error::release pull request #$number is no longer open (state: $state); the next push to main or a manual dispatch opens a new one` for a state other than `OPEN`. Each ends the step with exit code 1. | A run in which `steps.lookup.outputs.count` is 0 and `steps.build.outputs.skip == 'false'` creates the pull request with `gh pr create`. A run in which the count is not 0 and `gh pr view` prints `OPEN` runs `gh pr edit "$number" --body-file "$body"`. |
+| `release-pr.yml`, job `build`, step "Keep exactly one bump label" | The pull request has two or more labels whose name starts with `bump:`. | `::warning::pull request #$number has $count bump:* labels; none was changed, and the bump label check stays red until exactly one is left` | A run in which `steps.build.outputs.skip == 'false'` reads the labels again with `gh pr view "$number" --json labels --jq '.labels[].name'`. With no `bump:*` label it runs `gh pr edit "$number" --add-label "$computed"`. With one that differs from `bump:$LEVEL` it runs `gh pr edit "$number" --add-label "$computed" --remove-label "$existing"` and `gh pr comment "$number"` with the body `The release bot replaced the label $existing with $computed, the level computed from the commits on main.` |
+| `release-pr.yml`, job `build`, step "Dispatch CI and the bump label check on release/next" | `gh workflow run "$workflow" --ref release/next` ends with a non-zero exit code for `ci.yml` or for `bump-label.yml`. | `::error::could not dispatch $workflow on release/next (exit $code): $(printf '%s' "$out" \| tr '\r\n' '  ') $(tr '\r\n' '  ' < "$errfile")` and exit code 1. The loop runs `ci.yml` first and `bump-label.yml` second; the failing `gh workflow run` ends the step with `exit 1` inside the loop, so a failed `ci.yml` dispatch ends the loop before `bump-label.yml` is dispatched. | A run in which `steps.build.outputs.skip == 'false'` dispatches `ci.yml` and `bump-label.yml` again and appends `Dispatched ci.yml and bump-label.yml on release/next.` A run on the event `workflow_dispatch` writes `skip=false`, because the step "Build the release/next commit" writes `skip=true` only if `EVENT_NAME` is `push`. |
+| `release-pr.yml`, job `labels`, step "Read the bump label and the body of the pull request" | `PR_NUMBER` does not match `^[0-9]+$`, or `gh api "repos/${GH_REPO}/pulls/${PR_NUMBER}"` ends with a non-zero exit code. | `::error::unexpected pull request number: $PR_NUMBER` and `::error::could not read pull request #$PR_NUMBER (exit $code): $(tr '\r\n' '  ' < "$errfile")`, each with exit code 1. | A run of `release-pr.yml` on the event `pull_request` whose base branch is `main`, with the action `labeled` or `unlabeled`, in which `github.head_ref` is `release/next`, the full name of the head repository equals `github.repository` and the name of the label starts with `bump:`, runs the job `labels`. |
+| `release-pr.yml`, job `labels`, step "Read the bump label and the body of the pull request" | The pull request has a number of `bump:*` labels other than 1, or exactly one label that is not `bump:major`, `bump:minor` or `bump:patch`. | `::warning::pull request #$PR_NUMBER has $count bump:* labels; the bump label check stays red until exactly one is left; the body was not changed` for the count. `::warning::the label $label is not bump:major, bump:minor or bump:patch; the bump label check stays red until it is replaced; the body was not changed` for the label. After either warning the step appends `Pull request #$PR_NUMBER: nothing changed.` and writes `label=` with an empty value. "Rewrite the version preview line of the body" and "Update the pull request body" each have `if: steps.label.outputs.label != ''`. | A run in which the pull request has exactly one `bump:*` label and it is `bump:major`, `bump:minor` or `bump:patch` writes `label=$label`, and both later steps meet their `if:`. |
+| `release-pr.yml`, job `labels`, step "Rewrite the version preview line of the body" | `pwsh -NoProfile -File scripts/ci/changelog.ps1 body-version -Body "$body" -Label "$LABEL" -Output "$body"` ends with a non-zero exit code. | `::error::could not rewrite the version preview of pull request #$PR_NUMBER (exit $code): $(printf '%s' "$out" \| tr '\r\n' '  ')` and exit code 1, where `$out` is the standard output of the command. For a description that does not have exactly one line holding both version markers in order, `$out` holds `::error::<Body> must hold exactly one line with both version markers in order; found <count> line(s) with a marker`, where `<Body>` is the value of `-Body` and `<count>` is the number of lines that hold either marker. | A run in which `steps.label.outputs.label != ''` runs the command again with the label as `LABEL`. |
+| `release-pr.yml`, job `labels`, step "Update the pull request body" | `gh pr edit "$PR_NUMBER" --body-file "$RUNNER_TEMP/body.md"` ends with a non-zero exit code. | `::error::could not update the body of pull request #$PR_NUMBER (exit $code): $(printf '%s' "$out" \| tr '\r\n' '  ') $(tr '\r\n' '  ' < "$errfile")` and exit code 1, where `$out` is the standard output of the command. | A run in which `steps.label.outputs.label != ''` runs the command again and appends `Pull request #$PR_NUMBER: version preview rewritten for label $LABEL.` |
+
+### Bump label check
+
+| Workflow / job / steps | Outcome | What the files write | What a later run does |
+|---|---|---|---|
+| `bump-label.yml`, job `bump-label` (check `bump label`), step "Require exactly one bump label on release/next" | `PR_NUMBER` is not empty and does not match `^[0-9]+$`. The lookup `gh api "repos/${GH_REPO}/pulls?state=open&head=${REPO_OWNER}:${HEAD_REF}" --jq '.[].number'`, which runs when `PR_NUMBER` is empty, ends with a non-zero exit code, prints nothing, prints more than one line, or prints a character that is not a digit. `gh api "repos/${GH_REPO}/pulls/${number}" --jq '.labels[].name'` ends with a non-zero exit code. | `::error::unexpected pull request number: $number` for a `PR_NUMBER` that does not match. `::error::could not list the pull requests of release/next (exit $code): $(tr '\r\n' '  ' < "$errfile")` for the exit code of the lookup. `::error::release/next has no open pull request, so its bump label cannot be checked` for no output. `::error::release/next has more than one open pull request` for more than one line. `::error::unexpected output from the pull request lookup: $number` for a character that is not a digit. `::error::could not read the labels of pull request #${number} (exit $code): $(tr '\r\n' '  ' < "$errfile")` for the labels. Each ends the step with exit code 1. | A run in which `PR_NUMBER` is empty, as on a dispatch, looks the number up with `gh api "repos/${GH_REPO}/pulls?state=open&head=${REPO_OWNER}:${HEAD_REF}" --jq '.[].number'`. A run in which the lookup prints exactly one number, or in which `PR_NUMBER` is a number, reads the labels of that pull request and counts the label names that start with `bump:`. |
+| `bump-label.yml`, check `bump label`, same step | `count` of the labels whose name starts with `bump:` is not 1. | `::error::pull request #${number} from release/next must carry exactly one bump:* label, found ${count}:${selected}` and exit code 1. With no such label the message ends with `found 0:`. | A run in which `count` is 1 prints `Pull request #${number} carries exactly one bump label:${selected}` and ends with exit code 0. |
+
+### Tag Release
+
+| Workflow / job / steps | Outcome | What the files write | What a later run does |
+|---|---|---|---|
+| `tag-release.yml`, job `classify`, step "Fetch the pull request data of the pushed commit" | The subject of the pushed commit is `release/next (#<N>)` and `scripts/ci/fetch-pr-releases.sh` ends with exit code 1. | `::error::could not read pull request #$n (exit $code): $(tr '\r\n' '  ' < "$errfile")` when `gh api "repos/$GITHUB_REPOSITORY/pulls/$n"` fails and its error output does not hold `HTTP 404`. `::error::unexpected head commit of pull request #$n: $head_sha` when `.head.sha` is not 40 lowercase hexadecimal characters. `::error::could not read the head commit $head_sha of pull request #$n (exit $code): $(tr '\r\n' '  ' < "$errfile")` when `gh api "repos/$GITHUB_REPOSITORY/commits/$head_sha"` fails and its error output holds neither `HTTP 404` nor `HTTP 422`. | A push to `main` runs the job `classify`. |
+| `tag-release.yml`, job `classify`, step "Classify the pushed commit" | `changelog.ps1 release-commit -Sha "$GITHUB_SHA" -PrReleases "$RUNNER_TEMP/pr-releases.json"` ends with a non-zero exit code, or prints an answer other than `tag`, `tagged`, `not-release` and `not-faithful`. | After a non-zero exit code the step prints the output of the command and ends with exit code 1. The output can be `::error::<first 12 characters of the hash> is a release/next (#<N>) commit, but <reason>`, where `<reason>` is `the pull request was not found`, `the pull request is not merged`, `the pull request was merged as another commit` or `the base of the pull request is not main`; `::error::no pull request data for #<N>, the subject of <first 12 characters of the hash>`; `::error::no tag of the form vX.Y.Z found; fetch the tags (a shallow checkout has none) or tag the first release by hand`; or an `::error::` that names `$RUNNER_TEMP/pr-releases.json`. For any other answer the step ends with exit code 1 and the error is `::error::unexpected answer from release-commit: $(printf '%s' "$out" \| tr '\r\n' '  ')`. | A push to `main` runs `tag-release.yml`. A run in which the subject is not `release/next (#<N>)` gets the answer `not-release` before the data file is read. |
+| `tag-release.yml`, job `classify`, step "Classify the pushed commit" | Answer `not-faithful`: the commit is a valid release commit and `git log -1 --format=%P%x09%T` gives other than one parent, `headParents` or `headTree` is null, `headParents` does not have exactly one entry equal to that parent, or `headTree` differs from the tree of the commit. | `::warning::the release commit ${GITHUB_SHA:0:12} is not faithful (its content differs from the generated release pull request); it is not tagged` and the summary line `Release commit ${GITHUB_SHA:0:12} is not faithful. No tag was created.` The step writes `outcome=not-faithful`. The job `tag` has `if: needs.classify.outputs.outcome == 'tag' \|\| needs.classify.outputs.outcome == 'tagged'`. | A run of `release-pr.yml` in which this release commit is not faithful and is the first valid release commit, newest first, of the range from the last tag to the tip of `origin/main` gets the answer `abandoned` and writes `proceed=true`; its step "Fetch the pull request data" runs `changelog.ps1 prs -Base "$base"` with `base` set by `git rev-parse origin/main`. |
+| `tag-release.yml`, job `tag`, step "Check that main still points at the release commit" | `git ls-remote origin refs/heads/main` ends with a non-zero exit code. | `::error::could not read main on the remote (exit $code): $(tr '\r\n' '  ' < "$errfile")` and exit code 1. | A run in which the command succeeds takes `tip` from its output with `cut -f1` and writes `proceed=true` when `tip` is `$GITHUB_SHA`. |
+| `tag-release.yml`, job `tag`, step "Check that main still points at the release commit" | `tip` is not `$GITHUB_SHA`. | `::warning::release commit abandoned: main moved from ${GITHUB_SHA:0:12} to ${tip:0:12}; no tag was created and nothing was dispatched` and the summary line `Release commit ${GITHUB_SHA:0:12} abandoned: main moved. No tag, no dispatch.` The step writes `proceed=false`. The steps "Dispatch the release pull request workflow on main" and "Dispatch the release on the tag" each have `if: steps.tip.outputs.proceed != 'false'`. | A run of `release-pr.yml` in which this release commit is not the tip of `origin/main` and is the first valid release commit, newest first, of the range from the last tag to the tip of `origin/main` gets the answer `abandoned` and writes `proceed=true`; its step "Fetch the pull request data" runs `changelog.ps1 prs -Base "$base"` with `base` set by `git rev-parse origin/main`. |
+| `tag-release.yml`, job `tag`, step "Read the bump label of the release pull request" | `PR_NUMBER` does not match `^[0-9]+$`, `gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '.labels[].name'` ends with a non-zero exit code, the count of labels whose name starts with `bump:` is not 1, or the one label is not `bump:major`, `bump:minor` or `bump:patch`. | `::error::unexpected pull request number: $PR_NUMBER`, `::error::could not read the labels of pull request #$PR_NUMBER (exit $code): $(tr '\r\n' '  ' < "$errfile")`, `::error::pull request #$PR_NUMBER has $count bump:* labels, exactly one is required; no tag was created` and `::error::the label $label of pull request #$PR_NUMBER is not bump:major, bump:minor or bump:patch; no tag was created`, in the order of the conditions. Each ends the step with exit code 1. | A run in which the count is 1 and the label is `bump:major`, `bump:minor` or `bump:patch` writes `label=$label`. |
+| `tag-release.yml`, job `tag`, step "Compute the next version" | `changelog.ps1 next-version -Label "$LABEL"` ends with a non-zero exit code, or `v` followed by its output does not match `^v[0-9]+\.[0-9]+\.[0-9]+$`. | After a non-zero exit code the step prints the output of the command and ends with exit code 1; the output can be `::error::the next version <version> has a field above 65535 (version resource fields are 16-bit)`. For a tag that does not match, the error is `::error::unexpected version from changelog.ps1: $(printf '%s' "$out" \| tr '\r\n' '  ')` and the exit code is 1. | A run in which the output matches writes `tag=$tag`. |
+| `tag-release.yml`, job `tag`, step "Create and push the annotated tag" | `TAG` does not match `^v[0-9]+\.[0-9]+\.[0-9]+$`, or `git` with the arguments `tag -a "$TAG" -m "$TAG" "$GITHUB_SHA"` or `git push origin "refs/tags/$TAG"` ends with a non-zero exit code. | `::error::unexpected tag name: $TAG` and exit code 1 for a name that does not match. The output of `git` for the two commands. | A push to `main` whose commit the job `classify` answers `tag` runs "Reuse the tag already on the release commit". It lists the tags with `git tag --list`, sorted with `sort -V`; it writes the outcome `tagged` when the last name that matches `^v[0-9]+\.[0-9]+\.[0-9]+$` points at `$GITHUB_SHA` and the outcome `tag` otherwise. |
+| `tag-release.yml`, job `tag`, step "Find the existing tag of the release commit" | No name in `git tag --points-at "$GITHUB_SHA"`, sorted with `sort -V`, matches `^v[0-9]+\.[0-9]+\.[0-9]+$`. | `::error::no vX.Y.Z tag points at ${GITHUB_SHA:0:12}` and exit code 1. | A run in which a name matches writes `tag=<last matching name>`. |
+| `tag-release.yml`, job `tag`, step "Dispatch the release pull request workflow on main" | `gh workflow run release-pr.yml --ref main` ends with a non-zero exit code. | `::error::could not dispatch release-pr.yml on main (exit $code): $(printf '%s' "$out" \| tr '\r\n' '  ') $(tr '\r\n' '  ' < "$errfile")` and exit code 1. | A run in which `steps.tip.outputs.proceed != 'false'` runs the step again; it appends `Dispatched release-pr.yml on main.` |
+| `tag-release.yml`, job `tag`, step "Dispatch the release on the tag" | `TAG` does not match `^v[0-9]+\.[0-9]+\.[0-9]+$`, `gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG"` fails without `HTTP 404` in its error output, or `gh workflow run release.yml --ref "$TAG"` ends with a non-zero exit code. | `::error::unexpected tag name: $TAG` for a name that does not match. `::error::could not look up the release of $TAG (exit $code): $(tr '\r\n' '  ' < "$errfile")` for the lookup. `::error::could not dispatch release.yml on $TAG (exit $code): $(printf '%s' "$out" \| tr '\r\n' '  ') $(tr '\r\n' '  ' < "$errfile")` for `gh workflow run`. Each ends the step with exit code 1. When the lookup succeeds, the step appends `A published release for $TAG exists. Release not dispatched.` and ends with exit code 0. | A run in which the lookup fails with `HTTP 404` in its error output runs `gh workflow run release.yml --ref "$TAG"` and appends `Dispatched release.yml on $TAG.` |
+
+### Release
+
+| Workflow / job / steps | Outcome | What the files write | What a later run does |
+|---|---|---|---|
+| `release.yml`, job `validate`, step "Validate the tag" | The step makes five checks in order, and the first check that fails ends the step with exit code 1. `TAG` does not match `^v(0\|[1-9][0-9]*)\.(0\|[1-9][0-9]*)\.(0\|[1-9][0-9]*)$`. A field of the tag is longer than 5 characters or above 65535. `git merge-base --is-ancestor "$GITHUB_SHA" origin/main` ends with a non-zero exit code. `git rev-list --parents -n 1 "$GITHUB_SHA"` gives fewer than 2 words. `gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG"` succeeds, or fails with an error output that does not hold `HTTP 404`. | In the order of the checks: `::error::tag '$TAG' is not of the form vX.Y.Z without leading zeros`, `::error::tag '$TAG' has a field above 65535 (version resource fields are 16-bit)`, `::error::the tagged commit is not an ancestor of origin/main`, `::error::the tagged commit has no parent; tag the squash-merge commit of the CHANGELOG cut`, `::error::a published release for $TAG already exists; never move a published tag` when `gh api` succeeds, and `::error::could not check for an existing release: $err` when it fails without `HTTP 404`, where `$err` is its error output. | A dispatch of `release.yml` on a tag, or a push of a tag `v*.*.*`, has the mode `tag` and runs the step again. |
+| `release.yml`, job `validate`, step "Extract the CHANGELOG section for the release notes" | `changelog.ps1 notes -Mode "$MODE" -Sha "$GITHUB_SHA" -Output "$RUNNER_TEMP/notes-body.md"` ends with a non-zero exit code. | In mode `tag`, not exactly one heading `## [<12 lowercase hex characters>] - YYYY-MM-DD` whose 12 characters are a prefix of the output of `git rev-parse <sha>^`: `::error::the tag must be on the squash-merge commit of the CHANGELOG cut; expected exactly one "## [<first 12 characters of that output>] - YYYY-MM-DD" heading, found <count>`. In mode `dry-run`, no section whose heading starts with `## [` has a body that is not empty: `::error::no CHANGELOG.md section has release notes once "### Development" is removed`. In both modes, a section that the command reads has more than one line `### Development`: `::error::the section has more than one "### Development" block`. In mode `tag`, a body in which each line is blank or starts with `### `: `::error::the CHANGELOG section <heading> is empty once "### Development" is removed`. | A run of `release.yml` on a ref that is not a tag runs the command with `-Mode dry-run`, where the section is the first one from the top of `CHANGELOG.md` whose heading starts with `## [` and whose body is not empty. A run on a tag runs it with `-Mode tag`. |
+| `release.yml`, job `validate`, step "Preview the next release" | A command of the step ends with a non-zero exit code, or the level is `none`. The step ends with `exit 0` in each case. | `changelog.ps1 prs`: `::warning::could not list the pull requests (exit $code)` and the summary line `No release preview: could not list the pull requests since the last tag: $reason`. `gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/pulls/$n/commits" \| jq -c '[.[][].commit.message]'`: `::warning::could not read the commits of pull request #$n (exit $code)` and the summary line `No release preview: could not read the commits of pull request #$n.` The `jq` that adds the commits of `n` to `pr-messages.json`: `::warning::could not add the commits of pull request #$n to the messages file (exit $code)` and the summary line `No release preview: could not add the commits of pull request #$n to the messages file.` `changelog.ps1 level -PrMessages "$messages"`: `::warning::level failed with exit code $code` and the summary line `No release preview: the level could not be computed: $reason`. Level `none`: the summary line `Nothing to release: no commit since the last tag, after the cut-off, is a feat/, stage/ or fix/ change or a breaking change. A dry run publishes nothing.` `changelog.ps1 next-version -Level "$level"`: `::warning::next-version failed with exit code $code` and the summary line `No release preview: the version could not be computed: $reason`. `changelog.ps1 generate -PrMessages "$messages" -Output "$generated" -SectionOutput "$section"`: the step prints the output of the command with `echo "$out"` and appends the summary line `Level $level, next version $version, but the section could not be generated: $reason`. `$reason` is the standard output of the command with a leading `::error::` removed from each line. | A dispatch of `release.yml` on a ref that is not a tag runs the step again. |
+| `release.yml`, job `export-table`, step "Check the export table" (the action `./.github/actions/export-table`) | `./scripts/list-export-table.ps1 -FixtureDir $env:FIXTURE_DIR` with `FIXTURE_DIR` set to `tests/export-table` ends with a non-zero exit code, or `./scripts/list-export-table.ps1 -Path $env:EXPORTS_CPP -MarkdownPath $md` with `EXPORTS_CPP` set to `src/module/exports.cpp` ends with a non-zero exit code. | The second command writes `export-table: <n> of 12 checks failed.` The step "Write job summary" writes `export-table FAILED: $($Matches[1]) of 12 checks failed in src/module/exports.cpp. This check is not required and does not block the merge, but a failing table cannot be released: release.yml requires it. Fix it before merging any change that touches src/module/exports.cpp.` for that line, and `export-table FAILED: no result was produced for src/module/exports.cpp; see the step log.` when `output.txt` does not exist, has no line that matches `^export-table( passed)?:`, or its last such line matches neither `^export-table passed: (\d+) functions in (\d+) categories` nor `^export-table: (\d+) of 12 checks failed`. When the fixture step's outcome is not `success`, the summary starts with `The export-table fixture run did not succeed; see the "Run export-table fixtures" step.` | The steps "Check src/module/exports.cpp" and "Write job summary" each have `if: always()`. A run in which the check passes writes `export-table passed: $($Matches[1]) functions in $($Matches[2]) categories, checks 1-12 clean. Not a required check; read it on any branch that touches src/module/exports.cpp.` |
+| `release.yml`, jobs `pipeline-x86` and `pipeline-x64` (`arch-pipeline.yml`, job `build`), steps "make build-${{ inputs.arch }}", "Check version resource against release-version" and "Check DLL exports (dumpbin /exports)" | The step throws. | "make build-${{ inputs.arch }}": `release-version must be X.Y.Z without leading zeros, got '$env:RELEASE_VERSION'`, `release-version field '$field' exceeds 65535 (version resource fields are 16-bit)` and `make build-$env:ARCH failed (exit $LASTEXITCODE)`. "Check version resource against release-version": `release-version must be X.Y.Z without leading zeros, got '$env:RELEASE_VERSION'`, and `Version resource of $dll does not match release-version ${env:RELEASE_VERSION}:` followed by one line for each failed comparison: `numeric version is $actualNumeric, expected $expectedNumeric`, `FileVersion is '$($info.FileVersion)', expected '$expectedString'` or `ProductVersion is '$($info.ProductVersion)', expected '$expectedString'`. "Check DLL exports (dumpbin /exports)": `dumpbin /exports $dll failed (exit $LASTEXITCODE)`, `No 'number of functions' line found in the dumpbin output for $dll` and `$dll must export exactly one function, caplDllGetTable4; found $functionCount function(s), named: $($names -join ', ')`. | A run of `release.yml` calls `arch-pipeline.yml` with `arch` `x86` from `pipeline-x86` and `x64` from `pipeline-x64`, and with `release-version` set to `needs.validate.outputs.version`. A non-empty `release-version` is checked and passed to `make` as `VER_MAJOR`, `VER_MINOR` and `VER_BUILD`, set to the three fields of the version, and `VER_REV=0`, and the step "Check version resource against release-version" has `if: inputs.release-version != ''`. |
+| `release.yml`, jobs `pipeline-x86` and `pipeline-x64` (`arch-pipeline.yml`, job `test`), step "make test (ARCH=${{ inputs.arch }})" | `make test "ARCH=$env:ARCH"` ends with a non-zero exit code. | The step throws `make test ARCH=$env:ARCH failed (exit $LASTEXITCODE)`. | A run of `release.yml` runs `make test "ARCH=$env:ARCH"` in the job `test` of each of the two calls. |
+| `release.yml`, jobs `pipeline-x86` and `pipeline-x64` (`arch-pipeline.yml`, jobs `build` and `test`), step "Provision build environment" (the action `./.github/actions/provision`) | A step of the action throws or prints an `::error::` line. | "Validate arch input": `arch must be x86 or x64, got '$env:ARCH'`. "Bootstrap vcpkg (full clone, pinned tool tag)": `git clone of vcpkg failed (exit $LASTEXITCODE)`, `git checkout $env:VCPKG_PINNED_TAG failed (exit $LASTEXITCODE)`, `bootstrap-vcpkg.bat failed (exit $LASTEXITCODE)` and `bootstrap-vcpkg.bat ran but vcpkg.exe still not found under $env:VCPKG_ROOT`. "Verify vcpkg tool pin matches vcpkg.json's builtin-baseline": a four-line message whose lines 1, 2 and 4 read `vcpkg.json's builtin-baseline ($baseline) does not match the pinned vcpkg TOOL's checked-out commit ($toolCommit, from VCPKG_PINNED_TAG=$env:VCPKG_PINNED_TAG).`, `These are two independent pins (WHICH port versions resolve vs. WHICH vcpkg.exe resolves them) that must name the same commit -- otherwise version resolution reads baseline versions from one commit but checks them against a version database pinned at a different (often older) commit, producing 'no version database entry' errors.` and `Fix by re-deriving the commit VCPKG_PINNED_TAG dereferences to (git ls-remote --tags https://github.com/microsoft/vcpkg.git <tag>) and setting vcpkg.json's builtin-baseline to that exact commit.` Line 3 points to a section of a project document. "vcpkg install (${{ inputs.arch }}-windows-static)": `vcpkg install --triplet=$env:ARCH-windows-static failed (exit $LASTEXITCODE)` and `vcpkg install exited 0 but expected lib directory not found: $tripletLibDir -- do not trust exit code alone (see scripts/setup-dev-env.ps1's Install-ManifestTriplet).` "Place libs where the Makefile expects them": `Expected product lib not found: $src`, `Expected gtest.lib not found: $gtestLibSrc`, `Expected gtest_main.lib not found: $gtestMainLibSrc`, `Expected gtest header directory not found: $srcGtestInclude` and `Expected curl header directory not found: $srcCurlInclude`. "Verify /MT provenance (dumpbin /directives)": for a lib whose directives do not match `/DEFAULTLIB:LIBCMT` or match `/DEFAULTLIB:LIBCMTD`, `::error::$lib does not declare /DEFAULTLIB:LIBCMT (release static CRT) -- expected for /MT. A lib declaring only /DEFAULTLIB:LIBCMTD (debug static CRT) also fails this check.`; for a lib whose directives match `/DEFAULTLIB:MSVCRT`, `::error::$lib declares /DEFAULTLIB:MSVCRT -- built with /MD, not /MT. Never mix /MT and /MD in one link (see msvc-build-conventions).`; and after all four libs `/MT provenance check failed for one or more provisioned libs.` | A run of `release.yml` runs the action in each of the jobs `build` and `test` of each of the two calls. |
+| `release.yml`, job `assemble`, step "Write SHA256SUMS and the release notes" | The names of the files in `dist`, sorted, are not exactly `restifycapl-x64.dll` and `restifycapl-x86.dll`, fewer than 1 line of `parts/table/export-table.md` matches <code>^\\&#124; [0-9]+ \\&#124; </code>, or the number of characters of `dist/notes.md`, `chars`, is above 125000. | In the order of the conditions, each with exit code 1: `::error::dist must contain exactly the two DLLs`, `::error::the export table markdown has no function rows` and `::error::release notes are $chars characters, the limit is 125000`. | A run of `release.yml` runs the step again on the artifacts `restifycapl-x86`, `restifycapl-x64`, `release-notes-body` and `export-table-markdown`. |
+| `release.yml`, job `attest`, step "Verify the attestations" | For `restifycapl-x86.dll` and for `restifycapl-x64.dll`, in this order, `gh attestation verify "dist/$dll" --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"` ends with a non-zero exit code in each of 3 attempts. | After every failed attempt, including the third, the step runs `sleep 10`. For a DLL with no successful attempt it writes `::error::attestation of $dll could not be verified` and ends with exit code 1. | A run of `release.yml` runs the step with up to 3 attempts for each DLL; the attempts for a DLL end at the first success. |
+| `release.yml`, job `publish`, step "Require that no published release exists for the tag" | `gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG"` succeeds, or fails with an error output that does not hold `HTTP 404`. The step runs with `set -euo pipefail`. | `::error::a published release for $TAG already exists; never move a published tag` when the command succeeds. `::error::could not check for an existing release: $err` when it fails without `HTTP 404`, where `$err` is its error output. Each ends the step with exit code 1. | A run in which the command fails with `HTTP 404` in its error output ends the step with exit code 0. |
+| `release.yml`, job `publish`, steps "Delete a leftover draft for the tag" and "Create the draft release and upload the assets" | `gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id"` ends with a non-zero exit code; the step runs with `set -euo pipefail`. `gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --verify-tag --title "$TAG" --notes-file dist/notes.md dist/restifycapl-x86.dll dist/restifycapl-x64.dll dist/SHA256SUMS` ends with a non-zero exit code. | For each id of a release whose `draft` is true and whose `tag_name` is `$TAG`, the first step prints `deleting leftover draft $id` before the delete call. The output of `gh api` for a failed delete call. The output of `gh release create`. | A dispatch of `release.yml` on the tag runs in mode `tag`, and its step "Delete a leftover draft for the tag" deletes each draft whose `tag_name` is the tag. |
+| `release.yml`, job `publish`, step "Verify the draft" | Up to 10 attempts read `gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases"`. After the loop the count of drafts whose `tag_name` is `$TAG` is not 1, the sorted asset names are not `SHA256SUMS restifycapl-x64.dll restifycapl-x86.dll`, the notes are above 125000 characters, or `sha256sum -c SHA256SUMS` in `verify` ends with a non-zero exit code. | After attempts 1 to 9 with a count of 0, the step prints `no draft for $TAG listed yet (attempt $attempt of 10)` and runs `sleep 3`. For the count: `::error::expected exactly one draft for $TAG, found $count; listed drafts: $(echo "$all" \| jq -c '[.[][] \| select(.draft) \| {id, tag_name, name}]')`; in the log its `$(...)` part is a JSON array on one line with the `id`, `tag_name` and `name` of every release whose `draft` is true, whatever its tag. `::error::the draft must carry exactly three assets, found: $names` for the asset names. `::error::the draft notes are $chars characters, the limit is 125000` for the notes. The output of `sha256sum -c SHA256SUMS` for the checksums. Each error ends the step with exit code 1. | A dispatch of `release.yml` on the tag runs in mode `tag`, and its step "Delete a leftover draft for the tag" deletes each draft whose `tag_name` is the tag. |
+| `release.yml`, job `publish`, step "Make the release public" | `gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false` ends with a non-zero exit code. | The output of `gh release edit`. | A dispatch of `release.yml` on the tag in which `gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG"` succeeds ends the step "Validate the tag" with `::error::a published release for $TAG already exists; never move a published tag`. A dispatch in which it fails with `HTTP 404` in its error output passes the step "Validate the tag", and the step "Delete a leftover draft for the tag" deletes each draft whose `tag_name` is the tag. |
+| `release.yml`, job `publish`, step "Say what state the release is in" | The step has `if: failure()`. | The step sets `msg` by the exit status of `gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG"`, which it runs with its output and error output discarded: for exit status 0 it is `The release for $TAG is public. Never move the tag; fix forward through a fix/ pull request and the next version.` and otherwise `Nothing is public for $TAG. Re-run the failed jobs for a transient failure. For a defect, the tag stays and its name is never reused: fix it through a fix/ pull request and release the next version; the draft may be deleted.` The step prints `::error::$msg` and appends `$msg` to the job summary. | A dispatch of `release.yml` on the tag runs in mode `tag`, and its step "Delete a leftover draft for the tag" deletes each draft whose `tag_name` is the tag. |
+
+## Settings outside the files
+
+The facts in this section come from the repository settings, from decisions of the repository owner, from the GitHub documentation and from the Git documentation, not from the files of the repository. Each row states its source.
+
+### Repository settings
+
+| Setting | Value | What the workflows depend on it for | Source |
+|---|---|---|---|
+| Ruleset `main` | The repository has exactly one ruleset; its name is `main`, its target is branches, it applies to the default branch (`main`), its enforcement is active. | The rules of the ruleset `main` apply to the branch `main`. | read from the repository ruleset |
+| Ruleset rule 'Restrict deletions' and rule 'Block force pushes' | Both are present. | `release.yml` requires the tagged commit to be an ancestor of `origin/main`; the ruleset rejects a deletion of `main` and a push to `main` that is not a fast forward. | read from the repository ruleset |
+| Ruleset rule 'Require a pull request before merging' | Present; required approving reviews: 0; dismiss stale reviews on push: off; require review from code owners: off; require approval of the most recent push: off; require conversation resolution: off; allowed merge methods: merge, squash and rebase. | A pull request is needed for a change to reach `main`. `scripts/ci/changelog.ps1` reads the type of a change and the pull request number only from a subject that ends in ` (#N)`, the form of a squash-merge subject. | read from the repository ruleset |
+| Ruleset rule 'Require status checks to pass' | Required checks are `build + test (x64)`, `build + test (x86)` and `bump label`, each from the GitHub Actions app; 'Require branches to be up to date before merging' is on; 'Do not require status checks on creation' is off. | The checks `build + test (x64)` and `build + test (x86)` come from the jobs `gate-x64` and `gate-x86` of `ci.yml`; the check `bump label` comes from the job of `bump-label.yml`; the jobs `export-table`, `changelog-fixtures` and `actionlint` of `ci.yml` are not among the required checks. | read from the repository ruleset |
+| Rules for other branches | The ruleset `main` includes only the default branch (`~DEFAULT_BRANCH`). The rules that the API returns for the branch `release/next` and for the branch `feat/example` are an empty list. | `release-pr.yml` pushes `release/next` with `--force-with-lease` and deletes it with `git push origin --delete release/next`; `ci.yml` and `auto-pr.yml` start on a push to a working branch (`feat/`, `stage/`, `chore/`, `fix/`, `docs/`). These branches are outside the ruleset `main`. | read from the repository ruleset and from the rules of the branches `release/next` and `feat/example` |
+| Rules for tags | The repository has one ruleset; its target is branches. | `tag-release.yml` pushes the tag `vX.Y.Z` with `git push origin "refs/tags/$TAG"`; the tag is outside the ruleset `main`. | read from the repository rulesets; confirmed by the repository owner |
+| Where the rules come from | The rules of the repository's branches and tags come from the ruleset `main` alone, with no classic branch protection and no organization ruleset. | Every rule in this table comes from the ruleset `main`. | confirmed by the repository owner |
+| Labels | The labels `bump:major`, `bump:minor` and `bump:patch` exist. | `release-pr.yml` adds and removes them with `gh pr edit`; `tag-release.yml` reads the level from the one `bump:*` label. | read from the repository |
+| Default commit message for squash merging | The pull request title. | The subject of a squash-merge commit is the pull request title followed by ` (#N)`; the squash commit of the release pull request has the subject `release/next (#N)`, by which `release-pr.yml` and `tag-release.yml` recognise a release commit. | confirmed by the repository owner |
+| 'Allow GitHub Actions to create and approve pull requests' | On. | `auto-pr.yml` and `release-pr.yml` open pull requests with `gh pr create` and `GITHUB_TOKEN`. | confirmed by the repository owner |
+| Automatic deletion of head branches after a merge | On. | After a merge the head branch is deleted, `release/next` included; `release-pr.yml` pushes it again with an empty expected value for `--force-with-lease`. | confirmed by the repository owner |
+
+### Decisions of the repository owner
+
+| Decision | What it means for the workflows | Source |
+|---|---|---|
+| A release is decided by reviewing the release pull request and merging it. | Everything after the merge (tag, build, publication) is done by `tag-release.yml` and `release.yml`. | confirmed by the repository owner |
+| A red check `bump label` is meant to block the merge of the release pull request. | The check `bump label` requires exactly one `bump:*` label on the release pull request; the tagging in `tag-release.yml` requires exactly one `bump:*` label, and that label must be `bump:major`, `bump:minor` or `bump:patch`. | confirmed by the repository owner |
+| Nobody edits the title of a pull request. | The title stays the branch name set by `auto-pr.yml`, or `release/next`, so the subject of the squash commit keeps the prefix from which the type is read. | confirmed by the repository owner |
+| A manual tag push is not a supported way to release. | A manual release run is a dispatch of `release.yml` on an existing tag; on a tag ref `release.yml` runs in mode `tag`. | confirmed by the repository owner |
+| The intended repair for a failed run of `tag-release.yml` is to re-run that run from the Actions page. | In the waiting state, the step 'Wait for the tag of a merged release commit' of `release-pr.yml` names this re-run in its notice and in its step summary. | confirmed by the repository owner |
+
+### Behaviour stated by the GitHub and Git documentation
+
+| Subject | What the documentation states | What the workflows depend on it for | Source |
+|---|---|---|---|
+| Re-run of a run | "You can re-run a workflow run, all failed jobs in a workflow run, or specific jobs in a workflow run up to 30 days after its initial run." and "The workflow will also use the same `GITHUB_SHA` (commit SHA) and `GITHUB_REF` (git ref) of the original event that triggered the workflow run." and "A workflow run can be re-run a maximum of 50 times. This limit includes both full re-runs and re-runs of a subset of jobs." and "Re-runs use the privileges of the actor who initially triggered the workflow, not the privileges of the actor who initiated the re-run." | The step 'Wait for the tag of a merged release commit' of `release-pr.yml` names a re-run of the failed `tag-release.yml` run in its notice and step summary, and the step 'Say what state the release is in' of `release.yml` names a re-run of the failed jobs as the repair for a transient failure; the re-run uses the commit of the original run. | GitHub documentation |
+| Re-run of failed jobs | "Re-run all of the failed jobs and their dependent jobs in a workflow run using the `id` of the workflow run." | `release.yml` has dependent jobs (`assemble`, `attest`, `publish`). | GitHub documentation |
+| Status check functions | "A default status check of `success()` is applied unless you include one of these functions." and "Returns `true` when all previous steps have succeeded." (success) and "Returns `true` when any previous step of a job fails. If you have a chain of dependent jobs, `failure()` returns `true` if any ancestor job fails." (failure) and "Returns `true` if the workflow was canceled." (cancelled) and "Causes the step to always execute, and returns `true`, even when canceled." (always) | The step 'Say what state the release is in' of `release.yml` has `if: failure()`; the jobs `gate-x86` and `gate-x64` of `ci.yml` and the two steps of the action `export-table` have `if: always()`; a step of the job `export-table` of `release.yml` has `if: ${{ !cancelled() && steps.table.outputs.markdown-path != '' }}`. | GitHub documentation |
+| Dependent jobs | "If a job fails or is skipped, all jobs that need it are skipped unless the jobs use a conditional expression that causes the job to continue." | The job `assemble` needs `validate`, `pipeline-x86`, `pipeline-x64` and `export-table`; the job `attest` needs `assemble`; the job `publish` needs `validate`, `export-table`, `assemble` and `attest`. The jobs `pipeline-x86`, `pipeline-x64` and `export-table` need `validate`. | GitHub documentation |
+| Concurrency | "This means that there can be at most one running job or workflow in a concurrency group at any time." and "By default, any existing `pending` job or workflow in the same concurrency group will be canceled and the new queued job or workflow will take its place." and "To also cancel any currently running job or workflow in the same concurrency group, specify `cancel-in-progress: true`." | The groups `release-pr-build` and `release-pr-labels` of `release-pr.yml`, the group `tag-release` of `tag-release.yml` and the group `release-${{ github.ref }}` of `release.yml` have `cancel-in-progress: false`. | GitHub documentation |
+| Check runs of a `workflow_dispatch` run | "For checks created by workflow jobs to be evaluated for a pull request, the workflow run must be triggered by one of these events: `push`, `pull_request`, `pull_request_review`, `pull_request_target`, `deployment`, `deployment_status`" and "For example, if a workflow is triggered by `workflow_dispatch` on a pull request's head branch, checks reported by its jobs do not appear in the pull request's checks section. Even if the checks pass for the head commit, they do not satisfy a required status check in a branch ruleset." | The step 'Dispatch CI and the bump label check on release/next' of `release-pr.yml` starts `ci.yml` and `bump-label.yml` on `release/next` with `gh workflow run`, that is by `workflow_dispatch`; the ruleset requires the checks `build + test (x64)`, `build + test (x86)` and `bump label`. | GitHub documentation |
+| Required checks and the latest commit | "Required checks must pass on the latest commit SHA. Checks from earlier commits don't satisfy the requirement." and "Successful check statuses are `success`, `skipped`, and `neutral`." | The required checks are evaluated on the head commit of the release pull request. | GitHub documentation |
+| 'Require branches to be up to date before merging' | "The topic branch **must** be up to date with the base branch before merging." | The ruleset `main` has 'Require branches to be up to date before merging' on. | GitHub documentation |
+| Pull request rule and merge methods | "The pull request doesn't necessarily have to be approved, but it must be opened." and "Optionally, you can require a merge type of merge, squash, or rebase. This means the targeted branches may only be merged based on the allowed type." | The ruleset allows merge, squash and rebase. | GitHub documentation |
+| Bypass | "When you create a ruleset, you can allow certain users to bypass the rules in the ruleset." | The rules of the ruleset `main` apply to every actor not on its bypass list; the bypass list is not readable without authentication. | GitHub documentation |
+| Squash merge | "Pull requests with squashed commits are merged using the fast-forward option." and "Squashing turns all commits in the pull request into one commit on the base branch." | A release commit is faithful only when its parent and tree equal those of the head commit of the release pull request. | GitHub documentation |
+| Squash merge message | "The default message uses the commit title and message if the pull request contains only 1 commit, or the pull request title and list of commits if the pull request contains 2 or more commits. You can also choose to use just the pull request title, the pull request title and commit details, or the pull request title and description." | The subject of a squash commit depends on this setting; the default of the repository is the pull request title (confirmed by the repository owner). | GitHub documentation |
+| Events of the `GITHUB_TOKEN` | "When you use the repository's `GITHUB_TOKEN` to perform tasks, events triggered by the `GITHUB_TOKEN` will not create a new workflow run, with the following exceptions:" and "`workflow_dispatch` and `repository_dispatch` events always create workflow runs." and "`pull_request` events with the `opened`, `synchronize`, or `reopened` activity types: when a workflow using `GITHUB_TOKEN` creates or updates a pull request, the resulting `pull_request` event creates workflow runs in an **approval-required** state. The pull request displays a banner in the merge box, and a user with write access to the repository can start the runs by selecting **Approve workflows to run**. Other `pull_request` activity types (such as `labeled`, `edited`, or `closed`) do not create workflow runs. This prevents recursive workflow runs while still allowing CI workflows to run on pull requests created by automation." and "If you need workflow runs from workflow-created pull requests to execute without requiring approval, use a GitHub App installation access token or a personal access token instead of `GITHUB_TOKEN` when creating or updating the pull request." and "For all other events, this behavior prevents you from accidentally creating recursive workflow runs. For example, if a workflow run pushes code using the repository's `GITHUB_TOKEN`, a new workflow will not run even when the repository contains a workflow configured to run when `push` events occur." and "Once a workflow has run at least once, you can dispatch it against any branch or tag via the GitHub API or GitHub CLI." and "The git reference for the workflow. The reference can be a branch or tag name." | The bot dispatches workflows with `gh workflow run` on `main`, on `release/next` and on the tag, and a dispatch by the `GITHUB_TOKEN` starts a run. `auto-pr.yml` and `release-pr.yml` open pull requests with `gh pr create`, and `release-pr.yml` changes the `bump:*` labels of the release pull request with `gh pr edit`, each with `GH_TOKEN` set to the `GITHUB_TOKEN`. `release-pr.yml` pushes `release/next`, the head of the release pull request, and `tag-release.yml` pushes the tag, each with `git push`. | GitHub documentation |
+| Default activity types of `pull_request` | "By default, a workflow only runs when a `pull_request` event's activity type is `opened`, `synchronize`, or `reopened`." and "Runs your workflow when activity on a pull request in the workflow's repository occurs. For example, if no activity types are specified, the workflow runs when a pull request is opened or reopened or when the head branch of the pull request is updated." | The `pull_request` trigger of `ci.yml` is `branches: [main]`; `bump-label.yml` lists `opened`, `synchronize`, `reopened`, `labeled` and `unlabeled`, and `release-pr.yml` lists `labeled` and `unlabeled`. `auto-pr.yml` opens the draft pull request with `--head "${BRANCH}"`, so a later push to the working branch is a push to the head branch of that pull request. | GitHub documentation |
+| Releases by tag | "Get a published release with the specified tag." and "Information about published releases are available to everyone. Only users with push access will receive listings for draft releases." | The jobs `validate` and `publish` of `release.yml` and the job `tag` of `tag-release.yml` look up `releases/tags/<tag>`; the steps 'Delete a leftover draft for the tag' and 'Verify the draft' of `publish` list the releases. | GitHub documentation |
+| Retention | "By default, GitHub stores build logs and artifacts for 90 days, and this retention period can be customized." | The artifacts of a run of `release.yml` are used by its later jobs. | GitHub documentation |
+| Git push with a lease | "`--force-with-lease=<refname>:<expect>` will protect `<refname>` (alone), if it is going to be updated, by requiring its current value to be the same as the specified value `<expect>` (which is allowed to be different from the remote-tracking branch we have for the refname, or we do not even have to have such a remote-tracking branch when this form is used)." and "If `<expect>` is the empty string, then the named ref must not already exist." | The step 'Push release/next' of `release-pr.yml` pushes `release/next` with `--force-with-lease="release/next:${EXPECTED}"`, where `EXPECTED` is empty when the remote branch does not exist. | Git documentation (git push) |
+| Order of `git log` | "The output is given in reverse chronological order by default." | `changelog.ps1` reads the candidates of `release-prs` and `pending-cut` from `git log --first-parent --format=%H%x09%s <last tag>..<Base>`, and `pending-cut` walks them in that order. | Git documentation (git log) |
+| Credentials of `actions/checkout` and the name of the token | "Personal access token (PAT) used to fetch the repository. The PAT is configured with the local git config, which enables your scripts to run authenticated git commands. The post-job step removes the PAT." with the default `${{ github.token }}` of the input `token`; "Whether to configure the token or SSH key with the local git config" with the default `true` of the input `persist-credentials`; and "A token to authenticate on behalf of the GitHub App installed on your repository. This is functionally equivalent to the `GITHUB_TOKEN` secret." | The step "Checkout main (full history and tags)" of the job `build` in `release-pr.yml` and the step "Checkout the pushed commit (full history and tags)" of the job `tag` in `tag-release.yml` have only `ref`, `fetch-depth` and `fetch-tags` in their `with:`, so `token` and `persist-credentials` keep their defaults; `release-pr.yml` pushes `release/next` and `tag-release.yml` pushes the tag with `git push` after them. | `actions/checkout` `action.yml` and GitHub documentation (contexts) |
+
+### Not established
+
+| Subject | What is not established | What depends on it |
+|---|---|---|
+| Bypass list of the ruleset `main` | Which actors are on it; it is not readable without authentication. | Which actors the rules of the ruleset `main` apply to. |
+| Check runs of a `workflow_dispatch` run on `release/next` | Whether the checks of the runs that `release-pr.yml` dispatches on `release/next` satisfy the required checks of the release pull request in this repository. The documentation states: "Even if the checks pass for the head commit, they do not satisfy a required status check in a branch ruleset." | The required checks `build + test (x64)`, `build + test (x86)` and `bump label` of the release pull request. |
+| `pull_request` runs of pull requests opened or updated with the `GITHUB_TOKEN` | Whether, in this repository, the `pull_request` events that `auto-pr.yml` creates by opening a draft pull request, and that `release-pr.yml` creates by opening the release pull request or by pushing `release/next`, create runs of `ci.yml` and `bump-label.yml`; whether such runs are approved and run; and whether their check runs count for the required checks. | The required checks `build + test (x86)`, `build + test (x64)` and `bump label` of the release pull request and of the pull requests opened by `auto-pr.yml`. |
+| Merge methods enabled in the repository settings (the repository-level switches) | They are not readable without authentication. | The subject of the commit on `main`. |
+| Artifact and log retention period set for the repository | It is not readable without authentication (the documented default is 90 days). | Re-run of failed jobs of `release.yml` after the artifacts expired. |
+| Behaviour of a re-run | Which version of the workflow file a re-run uses; whether a re-run keeps the event of the original run; whether 'Re-run failed jobs' reuses the outputs and artifacts of the jobs that succeeded; whether a re-run of a `workflow_dispatch` run uses the same inputs. | The repair by re-run. |
+| Status values for cancelled and skipped work | The value of `failure()` for a cancelled step or run. | The step 'Say what state the release is in'. |
+| Lookup of a draft release by tag | Whether the lookup `releases/tags/<tag>` returns `HTTP 404` for a release that is still a draft; whether a just-created draft is listed at once. | The step 'Verify the draft' of the job `publish`, the step 'Dispatch the release on the tag' of `tag-release.yml`, and the step 'Delete a leftover draft for the tag'. |
+| Parent of a squash commit | Whether the squash commit always has the tip of `main` at the merge time as its only parent. | The faithfulness of a release commit. |
+| Closing the release pull request by hand | Whether it is a supported action is not decided. | `release-pr.yml` opens a new release pull request at the next run. |
