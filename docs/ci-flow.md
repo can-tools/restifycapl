@@ -1021,6 +1021,8 @@ The outcome, in the order of the checks:
 
 - The workflow has two jobs, `build` and `labels`.
 - The job `build` runs only if `github.event_name != 'pull_request'`. It runs on `ubuntu-latest`.
+- The permissions of the job `build` are `contents: write`, `pull-requests: write` and `actions: write`.
+- The concurrency group of the job `build` is `release-pr-build`, with `cancel-in-progress: false`.
 - The job `build` sets these environment variables:
   - `GH_TOKEN` is `github.token`.
   - `GH_REPO` is `github.repository`.
@@ -1083,7 +1085,7 @@ All steps except the first run with `shell: bash`.
   ```
 
 - The answers: `proceed` when no candidate is a valid release commit; `waiting` when the first valid release commit, newest first, is faithful and is the tip of `origin/main`; `abandoned` when the first valid release commit is not faithful, or is faithful and is not the tip of `origin/main`. A commit is faithful when its only parent and its tree equal the only parent and the tree of the head commit of its pull request.
-- When the guard writes `proceed=false`, the three steps that test `steps.guard.outputs.proceed == 'true'` are skipped, and every later step tests an output (`release` or `skip`) that only those steps or "Build the release/next commit" set, so no later step runs.
+- The steps "Fetch the pull request data", "Compute the release level" and "Look up the open release pull requests" run only if `steps.guard.outputs.proceed == 'true'`. Every later step tests the output `release` of "Compute the release level" or the output `skip` of "Build the release/next commit". When the guard writes `proceed=false`, no later step runs.
 
 #### Step "Fetch the pull request data"
 
@@ -1320,11 +1322,17 @@ The file has these parts, in this order:
    - <text>
    ```
 
-   with one `- <text>` line for each warning, then a blank line. The warnings come in this order: first the warnings of the generator (a subject without ` (#N)`; a `feat/`, `stage/` or `fix/` commit without a feat, stage, fix or breaking commit message, which is listed by its branch name; a subject of the type `unknown`), then one warning for each commit after the cut-off whose subject has the type `fix` and a number (` (#N)`), when the changed files of that pull request in `-PrFiles` include `src/module/exports.cpp`. The commits are taken oldest first. The log line of that warning is:
+   with one `- <text>` line for each warning, then a blank line. The warnings come in this order:
 
-   ```
-   ::warning::the fix/ pull request #<number> changed src/module/exports.cpp; confirm that no export table row was renamed, reordered or removed
-   ```
+   - First the warnings of the generator, for the commits after the cut-off that are not of the type `release`, oldest first. `<subject>` is the subject text of the commit, without the trailing ` (#N)`. For one commit, they come in this order:
+     - For a subject without ` (#N)`: `the subject "<subject>" has no "(#N)"; its commit messages and breaking markers were not read`
+     - For a commit of the type `feat`, `stage` or `fix` that has no breaking message and no message of the type `feat`, `stage` or `fix`: `"<subject>" has no feat, stage, fix or breaking commit message; it is listed by its branch name`
+     - For a subject of the type `unknown`: `the subject "<subject>" does not start with a feat/, stage/, fix/, chore/ or docs/ branch prefix; it is listed under Development`
+   - Then one warning for each commit after the cut-off, oldest first, whose subject has the type `fix` and a number (` (#N)`), when the changed files of that pull request in `-PrFiles` include `src/module/exports.cpp`. The log line of that warning is:
+
+     ```
+     ::warning::the fix/ pull request #<number> changed src/module/exports.cpp; confirm that no export table row was renamed, reordered or removed
+     ```
 
 5. The review part:
 
@@ -1398,18 +1406,18 @@ All steps except the first run with `shell: bash`.
   ::warning::the label $label is not bump:major, bump:minor or bump:patch; the bump label check stays red until it is replaced; the body was not changed
   ```
 
-- After either warning the step appends this summary line and sets `label` to empty. The step then ends with exit code 0. The two later steps run only if `steps.label.outputs.label != ''`, so both are skipped.
+- After either warning the step appends this summary line and sets `label` to empty. The two later steps run only if `steps.label.outputs.label != ''`, so both are skipped.
 
   ```
   Pull request #$PR_NUMBER: nothing changed.
   ```
 
-- The step ends by writing `label=$label` to `$GITHUB_OUTPUT`: the one `bump:*` label when both checks pass, empty after a warning.
+- The step ends by writing `label=$label` to `$GITHUB_OUTPUT`: the one `bump:*` label when both checks pass, empty after a warning. In both cases the step ends with exit code 0.
 
 #### Step "Rewrite the version preview line of the body"
 
 - The step runs only if `steps.label.outputs.label != ''`. It sets `LABEL` to that output.
-- It runs `pwsh -NoProfile -File scripts/ci/changelog.ps1 body-version -Body "$body" -Label "$LABEL" -Output "$body"`, where `body` is `$RUNNER_TEMP/body.md`. `body-version` replaces the text between the two version markers of the description with the preview built from the label and the last tag; all other lines stay as they are. The description must have exactly one line that holds both markers, in this order; otherwise the command fails.
+- It runs `pwsh -NoProfile -File scripts/ci/changelog.ps1 body-version -Body "$body" -Label "$LABEL" -Output "$body"`, where `body` is `$RUNNER_TEMP/body.md`. `body-version` replaces the text between the two version markers of the description with the preview built from the label and the last tag; all other lines stay as they are. The description must have exactly one line that holds both markers, in this order; otherwise the command ends with exit code 1 and its standard output is `::error::<Body> must hold exactly one line with both version markers in order; found <count> line(s) with a marker`, where `<Body>` is the value of `-Body` and `<count>` is the number of lines that hold either marker.
 - The script is the one of the checkout of `main` made in the first step, and the last tag comes from the tags of that checkout.
 - If the command fails, the step ends with exit code 1 and this error, where `$out` is the standard output of the command:
 
@@ -1462,7 +1470,10 @@ All steps except the first of each job run with `shell: bash`.
 
 - The step has the id `subject`.
 - It reads the subject of the pushed commit with `git log -1 --format=%s "$GITHUB_SHA"`.
-- If the subject is `release/next`, a space, `(#`, one or more digits and `)`, the digits are the pull request number, called `number` below. The step then runs `printf '%s\n' "$number" | bash scripts/ci/fetch-pr-releases.sh "$RUNNER_TEMP/pr-releases.json"`. When `gh api "repos/$GITHUB_REPOSITORY/pulls/$n"` fails and its error output holds `HTTP 404`, the script writes the entry `{"found":false}`. The script ends with exit code 1 and `::error::could not read pull request #$n (exit $code): $(tr '\r\n' '  ' < "$errfile")` when that call fails otherwise, with `::error::unexpected head commit of pull request #$n: $head_sha` when `.head.sha` is not 40 lowercase hexadecimal characters, and with `::error::could not read the head commit $head_sha of pull request #$n (exit $code): $(tr '\r\n' '  ' < "$errfile")` when `gh api "repos/$GITHUB_REPOSITORY/commits/$head_sha"` fails and its error output holds neither `HTTP 404` nor `HTTP 422`.
+- If the subject is `release/next`, a space, `(#`, one or more digits and `)`, the digits are the pull request number, called `number` below. The step then runs `printf '%s\n' "$number" | bash scripts/ci/fetch-pr-releases.sh "$RUNNER_TEMP/pr-releases.json"`. In the commands and messages of `fetch-pr-releases.sh` quoted in this bullet, `$n` is this number and `$head_sha` is `.head.sha` of the pull request.
+  - The script runs `gh api "repos/$GITHUB_REPOSITORY/pulls/$n"`. When the call fails and its error output holds `HTTP 404`, the script writes the entry `{"found":false}`. When it fails otherwise, the script ends with exit code 1 and `::error::could not read pull request #$n (exit $code): $(tr '\r\n' '  ' < "$errfile")`.
+  - When the call succeeds and `$head_sha` is not 40 lowercase hexadecimal characters, the script ends with exit code 1 and `::error::unexpected head commit of pull request #$n: $head_sha`.
+  - Otherwise the script runs `gh api "repos/$GITHUB_REPOSITORY/commits/$head_sha"`. When it succeeds, the entry has `found` true, the keys `merged`, `mergeCommitSha`, `baseRef`, `baseRepo`, `headRef`, `headRepo` and `headSha` from the pull request, and `headParents` and `headTree` from that commit. When it fails and its error output holds `HTTP 404` or `HTTP 422`, the entry has `found` true, the keys `merged`, `mergeCommitSha`, `baseRef`, `baseRepo`, `headRef`, `headRepo` and `headSha` from the pull request, and `headParents` and `headTree` null. When it fails otherwise, the script ends with exit code 1 and `::error::could not read the head commit $head_sha of pull request #$n (exit $code): $(tr '\r\n' '  ' < "$errfile")`.
 - Otherwise the step writes `{}` to `$RUNNER_TEMP/pr-releases.json`.
 - In both cases the step writes `number=$number` to `$GITHUB_OUTPUT`. `number` is empty when the subject did not match.
 
@@ -1495,7 +1506,8 @@ All steps except the first of each job run with `shell: bash`.
   ::error::unexpected answer from release-commit: $(printf '%s' "$out" | tr '\r\n' '  ')
   ```
 
-- The answers: `not-release` when the subject is not a release subject, or when `found` and `merged` are true, `mergeCommitSha` equals the value of `-Sha` and `baseRef` is `main`, and `headRef` is not `release/next` or `headRepo` is null or differs from `baseRepo`; `not-faithful` when the commit is a valid release commit and is not faithful; `tagged` when it is faithful and the last tag is in the list of `git tag --points-at` for the commit; `tag` when it is faithful and the last tag is not in that list. A commit is faithful when its only parent and its tree equal the only parent and the tree of the head commit of its pull request.
+- The answers: `not-release` when the subject is not a release subject, or when `found` and `merged` are true, `mergeCommitSha` equals the value of `-Sha` and `baseRef` is `main`, and `headRef` is not `release/next` or `headRepo` is null or differs from `baseRepo`; `not-faithful` when the subject is a release subject, `found` and `merged` are true, `mergeCommitSha` equals the value of `-Sha`, `baseRef` is `main`, `headRef` is `release/next`, `headRepo` is not null and equals `baseRepo`, and the commit is not faithful; `tagged` when it is faithful and the last tag is in the list of `git tag --points-at` for the commit; `tag` when it is faithful and the last tag is not in that list. A commit is faithful when its only parent and its tree equal the only parent and the tree of the head commit of its pull request.
+- When the subject is a release subject, the command ends with exit code 1 when the data file has no key for the number of the subject; when `found` is not true, `merged` is not the boolean true, `mergeCommitSha` differs from the value of `-Sha` or `baseRef` is not `main`; when the data file cannot be read or has the wrong shape; and when the commit is faithful and no tag is left as the last tag.
 
 ### Job `tag`
 
@@ -1836,7 +1848,7 @@ How `notes` locates the section:
   3. `changelog.ps1 level -PrMessages "$messages"`, where `messages` is `pr-messages.json`. Its output is `level`.
   4. If `level` is not `none`, `changelog.ps1 next-version -Level "$level"`. Its output is `version`.
   5. `changelog.ps1 generate -PrMessages "$messages" -Output "$generated" -SectionOutput "$section"`, where `generated` is `CHANGELOG.generated.md` and `section` is `section.md`. After it, the step prints the output of the command to the log with `echo "$out"`.
-- If `prs`, `level` or `next-version` ends with a non-zero exit code, or one of the two commands of item 2 does, the step prints the warning of the table, appends its summary line and ends with `exit 0`:
+- If `prs`, `level` or `next-version` ends with a non-zero exit code, or, for a pull request number `n`, the command that reads its commits (`gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/pulls/$n/commits" | jq -c '[.[][].commit.message]'`) or the `jq` that adds them to `pr-messages.json` ends with a non-zero exit code, the step prints the warning of the table, appends its summary line and ends with `exit 0`:
 
 | Failure | `::warning::` | Summary line |
 |---|---|---|
