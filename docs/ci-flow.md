@@ -184,7 +184,7 @@ Five branch prefixes are working branches: `feat/`, `stage/`, `chore/`, `fix/` a
 ### Step "Guard 1: branch ahead of main?"
 
 - The step has the id `ahead`.
-- It calls `gh api "repos/${GH_REPO}/compare/main...${BRANCH}"` and writes the whole response to `$RUNNER_TEMP/compare.json`. "Compose PR body" reads this file instead of calling the API again.
+- It calls `gh api "repos/${GH_REPO}/compare/main...${BRANCH}"` and writes the whole response to `$RUNNER_TEMP/compare.json`. "Compose PR body" reads this file.
 - It reads `.ahead_by` from the file and prints "Branch '<branch>' is ahead of main by N commit(s)."
 - If `ahead_by` is 0, it prints "No commits ahead of main -- nothing to open a PR for. Exiting." and writes `proceed=false` to `$GITHUB_OUTPUT`. Otherwise it writes `proceed=true`. In both cases the step ends with exit code 0.
 - The script runs with `set -euo pipefail`. If `gh api` or `jq` ends with a non-zero exit code, the step ends with a non-zero exit code.
@@ -322,6 +322,7 @@ not a required check, so a red result does not block the merge.
     exit 1
   fi
   ```
+
 - Any other result prints the error message and ends the step with `exit 1`.
 
 ### Job `export-table`
