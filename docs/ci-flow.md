@@ -568,7 +568,7 @@ In the messages quoted in this section, a PowerShell variable or expression (for
 - The step has the id `table`, has `if: always()` and sets `EXPORTS_CPP` to `src/module/exports.cpp`.
 - It creates the directory `export-table` under `$env:RUNNER_TEMP` with `New-Item -ItemType Directory -Force`. `$md` is `export-table.md` in that directory.
 - It runs `./scripts/list-export-table.ps1 -Path $env:EXPORTS_CPP -MarkdownPath $md | Tee-Object -FilePath (Join-Path $dir 'output.txt')`.
-- The script checks the table and, with `-MarkdownPath`, writes it as markdown to that file.
+- The script checks the table and, with `-MarkdownPath`, writes it as markdown to that file when it could parse the table.
 - For `-Path`, the script prints `export-table passed: <n> functions in <m> categories, checks 1-12 clean.` or `export-table: <n> of 12 checks failed.`
 - The step keeps `$LASTEXITCODE` in `$code`.
 - If `$md` exists, the step appends `markdown-path=$md` to `$env:GITHUB_OUTPUT`.
@@ -598,7 +598,7 @@ In the messages quoted in this section, a PowerShell variable or expression (for
   ```
 
 - If `FIXTURES_OUTCOME` is not `success`, the line is preceded by `The export-table fixture run did not succeed; see the "Run export-table fixtures" step.` and a blank line.
-- If `export-table.md` exists, its content follows.
+- A blank line follows the result line. If `export-table.md` exists, its content follows the blank line.
 - The text is appended to `$env:GITHUB_STEP_SUMMARY` as UTF-8 without BOM.
 
 ## Bump label (`bump-label.yml`)
@@ -739,12 +739,12 @@ The cut-off:
   2. A message is breaking, or a commit has the type `feat` or `stage`: `minor`.
   3. A commit has the type `fix`: `patch`.
   4. Otherwise: `none`.
-- The rule for a last tag with the major field 0 is part of this test: the first test does not hold, so a breaking message gives `minor`.
+- With a last tag whose major field is 0, the first test does not hold, so a breaking message gives `minor`.
 
 ### Next version
 
 - `changelog.ps1 next-version` takes exactly one of `-Level` and `-Label`. Otherwise the run ends with exit code 2 and the usage text `give exactly one of -Level and -Label`.
-- `-Level` is `major`, `minor`, `patch` or `none`. `-Label` is `bump:major`, `bump:minor` or `bump:patch`. Any other value ends with exit code 2 and a usage text.
+- `-Level` is `major`, `minor`, `patch` or `none`. `-Label` is `bump:major`, `bump:minor` or `bump:patch`. Another `-Level` ends with exit code 2 and the usage text `-Level must be major, minor, patch or none`. Another `-Label` ends with exit code 2 and the usage text `-Label must be bump:major, bump:minor or bump:patch`.
 - With `-Label`, the level is the part of the label after `bump:`.
 - The next version is computed from the last tag `X.Y.Z`:
   - `major`: `X+1.0.0`.
@@ -784,7 +784,7 @@ Entries and warnings:
 
 - The commits are read oldest first. A commit of type `release` gives nothing.
 - A commit up to the cut-off gives one Development entry with its subject text.
-- A commit without a number in the subject gives the warning `the subject "<text>" has no "(#N)"; its commit messages and breaking markers were not read`.
+- A commit after the cut-off without a number in the subject gives the warning `the subject "<text>" has no "(#N)"; its commit messages and breaking markers were not read`.
 - Each breaking message gives an entry under Breaking changes.
 - A commit of type `feat`, `stage` or `fix`:
   - Each message that is not breaking and has the type `feat`, `stage` or `fix` gives an entry with the text of the message. The type `fix` goes under Fixed, the other two under Added.
@@ -852,7 +852,7 @@ The callers:
 - Two steps of the job `build` of `release-pr.yml`: "Fetch the pull request data of the release commits" and "Wait for the tag of a merged release commit".
 - The job `classify` of `tag-release.yml`.
 
-Both callers set `GH_TOKEN` to `github.token`.
+The job `build` of `release-pr.yml` and the job `classify` of `tag-release.yml` each set `GH_TOKEN` to `github.token`.
 
 ### Release subject and candidates
 
@@ -936,7 +936,6 @@ A candidate is a valid release commit when its pull request data passes the chec
 
 - The checks run in the order of the table. The first check that fails decides.
 - All comparisons are case-sensitive.
-- Row 6 holds when the two full names in the data are equal.
 - For the rows 1 to 4, `release-commit` prints this error and ends with exit code 1. `<reason>` is the text of the failed row: `the pull request was not found`, `the pull request is not merged`, `the pull request was merged as another commit` or `the base of the pull request is not main`.
 
   ```
