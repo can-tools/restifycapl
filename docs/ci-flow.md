@@ -12,7 +12,7 @@ The flow is made of seven workflows in `.github/workflows/` and two composite ac
 | `bump-label.yml` | Bump label | Its check `bump label` requires exactly one `bump:*` label on the `release/next` pull request. |
 | `release-pr.yml` | Release PR | The release bot. Builds the `release/next` branch and its pull request, and keeps the `bump:*` label and the version preview in the pull request body up to date. |
 | `tag-release.yml` | Tag Release | The tagging bot. Tags a merged release commit on `main`, dispatches `release-pr.yml` on `main` and dispatches `release.yml` on the tag. |
-| `release.yml` | Release | On a tag ref: checks the tag, builds both DLLs, packs them and publishes the GitHub release. On another ref: builds and packs both DLLs and writes a preview of the next release to the job summary. |
+| `release.yml` | Release | On a tag ref: checks the tag, builds both DLLs, packs them and publishes the GitHub release. On another ref: builds and packs both DLLs and writes a preview of the next release, or the reason for none, to the job summary. |
 | `.github/actions/export-table/action.yml` | export-table | Composite action. Runs the export-table fixtures, checks `src/module/exports.cpp` and writes the job summary. `ci.yml` and `release.yml` use it. |
 | `.github/actions/provision/action.yml` | Provision build environment | Composite action. Activates MSVC, provisions the pinned vcpkg tool and the static dependencies, and places them where the Makefile expects them. `arch-pipeline.yml` uses it. |
 
@@ -138,7 +138,7 @@ Five branch prefixes are working branches: `feat/`, `stage/`, `chore/`, `fix/` a
 | unknown | no release |
 
 - Without a breaking marker, the level is the highest of the changes since the last tag: minor if there is any `feat/` or `stage/` change, else patch if there is any `fix/` change, else none.
-- The level comes from the branch prefix of the subject and from the breaking markers. A `feat/`, `stage/` or `fix/` pull request that has only `chore:` commits still releases. It is listed by its branch name, with the warning `"<subject>" has no feat, stage, fix or breaking commit message; it is listed by its branch name`, where `<subject>` is the subject text without the trailing ` (#N)`.
+- The level comes from the branch prefix of the subject and from the breaking markers. A `feat/`, `stage/` or `fix/` pull request that has only `chore:` commits still releases. When its commit is after the cut-off, it is listed by its branch name, with the warning `"<subject>" has no feat, stage, fix or breaking commit message; it is listed by its branch name`, where `<subject>` is the subject text without the trailing ` (#N)`.
 - The bot computes the level with `changelog.ps1 level` when the step "Wait for the tag of a merged release commit" writes `proceed=true`.
 - If the level is major, minor or patch and two or more release pull requests are open, the step "Stop when several release pull requests are open" ends with exit code 1 and the error `::error::release/next has $COUNT open pull requests; close the extra ones by hand. Nothing was pushed or changed.`, where `$COUNT` is the number of open release pull requests.
 - If the level is major, minor or patch and at most one release pull request is open, the job builds the `release/next` commit. The step "Build the release/next commit" sets `skip` to `true` only when `origin/release/next` exists, its parent is the commit printed by `git rev-parse origin/main`, its tree equals the tree of the new commit, the event is `push` and exactly one release pull request is open. Otherwise it sets `skip` to `false`, and the job pushes `release/next`, opens or updates the release pull request, runs the step "Keep exactly one bump label" and dispatches `ci.yml` and `bump-label.yml` on `release/next`.
@@ -148,7 +148,7 @@ Five branch prefixes are working branches: `feat/`, `stage/`, `chore/`, `fix/` a
   - With one that differs from the computed label, it replaces it with the computed label and comments `The release bot replaced the label $existing with $computed, the level computed from the commits on main.`, where `$existing` is the old label and `$computed` the computed one.
   - With two or more, it changes nothing and writes the warning `::warning::pull request #$number has $count bump:* labels; none was changed, and the bump label check stays red until exactly one is left`, where `$number` is the number of the release pull request and `$count` the number of its `bump:*` labels.
 - The `bump label` check and the tagging require exactly one `bump:*` label; the tagging also requires it to be `bump:major`, `bump:minor` or `bump:patch`.
-- For a change of type `unknown`, the generator gives the warning `the subject "<subject>" does not start with a feat/, stage/, fix/, chore/ or docs/ branch prefix; it is listed under Development`, where `<subject>` is the subject text without the trailing ` (#N)`, and, unless the change has a breaking marker, lists it under Development.
+- For a change of type `unknown` whose commit is after the cut-off, the generator gives the warning `the subject "<subject>" does not start with a feat/, stage/, fix/, chore/ or docs/ branch prefix; it is listed under Development`, where `<subject>` is the subject text without the trailing ` (#N)`, and, unless the change has a breaking marker, lists it under Development.
 
 ### Reserved branch `release/next`
 
@@ -159,7 +159,7 @@ Five branch prefixes are working branches: `feat/`, `stage/`, `chore/`, `fix/` a
 ### Breaking changes
 
 - A breaking change is marked in a commit message of the pull request by `type!:` or a `BREAKING CHANGE:` footer. This works on any branch type.
-- The marker is read from the commit messages of the pull request named by ` (#N)` in the squash subject. A subject without ` (#N)` is not read, and the generator gives the warning `the subject "<subject>" has no "(#N)"; its commit messages and breaking markers were not read`, where `<subject>` is the subject text.
+- The marker is read from the commit messages of the pull request named by ` (#N)` in the squash subject. A subject without ` (#N)` is not read, and, when its commit is after the cut-off, the generator gives the warning `the subject "<subject>" has no "(#N)"; its commit messages and breaking markers were not read`, where `<subject>` is the subject text.
 - A breaking change gives minor while the major version of the last tag is 0, and major from 1.0.0.
 - While the major version of the last tag is 0, `changelog.ps1 level` prints `minor`, `patch` or `none`. From a last tag `0.Y.Z`, the label `bump:major` gives the version `1.0.0`.
 - A breaking change is listed under "Breaking changes" in the release notes. A `chore/`, `docs/` or `unknown` pull request is listed under Development when it has no breaking marker, and under "Breaking changes" when it has one.
@@ -1001,7 +1001,7 @@ The outcome, in the order of the checks:
 | `found` is not true, `merged` is not the boolean true, `mergeCommitSha` differs from the value of `-Sha`, or `baseRef` is not `main`. | `::error::<first 12 characters of the hash> is a release/next (#<N>) commit, but <reason>`, where `<reason>` is `the pull request was not found`, `the pull request is not merged`, `the pull request was merged as another commit` or `the base of the pull request is not main` | 1 |
 | `headRef` is not `release/next`, or `headRepo` is null or differs from `baseRepo`. | `not-release` | 0 |
 | The commit is valid and not faithful. | `not-faithful` | 0 |
-| The commit is faithful and no tag is left as the last tag. | `::error::no tag of the form vX.Y.Z found; fetch the tags (a shallow checkout has none) or tag the first release by hand` | 1 |
+| The commit is faithful and `git tag --list` lists no tag that matches `^v([0-9]+)\.([0-9]+)\.([0-9]+)$` and has every field free of a leading zero and at most 65535. | `::error::no tag of the form vX.Y.Z found; fetch the tags (a shallow checkout has none) or tag the first release by hand` | 1 |
 | The commit is faithful and the list of `git tag --points-at <sha>` includes the last tag. | `tagged` | 0 |
 | The commit is faithful and the list does not include the last tag. | `tag` | 0 |
 
@@ -1501,7 +1501,7 @@ All steps except the first of each job run with `shell: bash`.
   ```
 
 - The answers: `not-release` when the subject is not a release subject, or when `found` and `merged` are true, `mergeCommitSha` equals the value of `-Sha` and `baseRef` is `main`, and `headRef` is not `release/next` or `headRepo` is null or differs from `baseRepo`; `not-faithful` when the subject is a release subject, `found` and `merged` are true, `mergeCommitSha` equals the value of `-Sha`, `baseRef` is `main`, `headRef` is `release/next`, `headRepo` is not null and equals `baseRepo`, and the commit is not faithful; `tagged` when it is faithful and the last tag is in the list of `git tag --points-at` for the commit; `tag` when it is faithful and the last tag is not in that list. A commit is faithful when its only parent and its tree equal the only parent and the tree of the head commit of its pull request.
-- When the subject is a release subject, the command ends with exit code 1 when the data file has no key for the number of the subject; when `found` is not true, `merged` is not the boolean true, `mergeCommitSha` differs from the value of `-Sha` or `baseRef` is not `main`; when the data file cannot be read or has the wrong shape; and when the commit is faithful and no tag is left as the last tag.
+- When the subject is a release subject, the command ends with exit code 1 when the data file has no key for the number of the subject; when `found` is not true, `merged` is not the boolean true, `mergeCommitSha` differs from the value of `-Sha` or `baseRef` is not `main`; when the data file cannot be read or has the wrong shape; and when the commit is faithful and `git tag --list` lists no tag that matches `^v([0-9]+)\.([0-9]+)\.([0-9]+)$` and has every field free of a leading zero and at most 65535.
 
 ### Job `tag`
 
