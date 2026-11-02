@@ -1461,7 +1461,7 @@ The RC2237 scare showed the inverse failure: a hand-reconstructed invocation pro
 12. **Open user decision, not tied to a stage:** when the CAPL framework stops being preliminary and becomes append-only like the export table. Until then, renames are allowed and recorded in CHANGELOG.
 13. **Deferred CANoe checks:** the rest of HUM-29, HUM-30, HUM-14, HUM-27 and HUM-37 run once a CANoe licence is available. They are followed by the Stage 12 and Stage 13 follow-ups (§8, each stage's "Obligations").
 14. **Done (Stage 14):** line endings resolved — `.gitattributes` and `.editorconfig` set CRLF in the working tree, LF for shell scripts, `json.hpp` untouched.
-15. **Stage 14 follow-ups, before the second release:** versioned CHANGELOG headings, the release-notes and dry-run logic as a tested script with a guard against tagging an old cut, Dependabot, the Node 20 / `msvc-dev-cmd` item and the optional `provision` hardening — parked in `docs/work/stage-14-release-pipeline/plans/plan.md` §12.
+15. **Stage 14 follow-ups, before the second release:** versioned CHANGELOG headings, the release-notes and dry-run logic as a tested script with a guard against tagging an old cut, Dependabot and the optional `provision` hardening — parked in `docs/work/stage-14-release-pipeline/plans/plan.md` §12. The Node 20 / `msvc-dev-cmd` item there is done (2026-11-02): `ilammy/msvc-dev-cmd` was replaced by `TheMrMilchmann/setup-msvc-dev`, pinned to a commit SHA (`# v4.1.0`, `node24`), and CI passed on both architectures without the Node.js 20 notice. The per-architecture environment and `VCPKG_ROOT` were not compared from the logs (§12 item 5 there).
 
 ---
 
