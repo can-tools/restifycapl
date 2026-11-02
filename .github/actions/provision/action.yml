@@ -20,13 +20,11 @@ runs:
   # Prompt" locally before `make build-x86`/`build-x64` -- never
   # scripts/setup-dev-env.ps1 (docs/ci-pipeline.md).
   - name: Activate MSVC developer environment (${{ inputs.arch }})
-    uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756  # v1.13.0
+    uses: TheMrMilchmann/setup-msvc-dev@368ef7d1ee4d1171b31d4a7f67f4d954f903f5a9  # v4.1.0
     with:
       arch: ${{ inputs.arch }}
 
-  # The step above just clobbered VCPKG_ROOT with VS's own bundled
-  # vcpkg. Re-pin to a CI-only, per-runner path; every later step reads
-  # VCPKG_ROOT from here. See docs/ci-pipeline.md.
+  # Re-pin VCPKG_ROOT to a CI-only path; activation may set it to VS's vcpkg (docs/ci-pipeline.md).
   - name: Pin VCPKG_ROOT to a CI-only path (avoid VS-bundled vcpkg collision)
     shell: pwsh
     env:

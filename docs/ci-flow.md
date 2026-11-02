@@ -454,7 +454,7 @@ In the messages quoted in this section, a PowerShell variable or expression (for
 
 ### Step "Activate MSVC developer environment (${{ inputs.arch }})"
 
-- The step uses `ilammy/msvc-dev-cmd`, pinned by SHA with the label `# v1.13.0`.
+- The step uses `TheMrMilchmann/setup-msvc-dev`, pinned by SHA with the label `# v4.1.0`.
 - It passes `arch: ${{ inputs.arch }}`.
 
 ### Step "Pin VCPKG_ROOT to a CI-only path (avoid VS-bundled vcpkg collision)"
